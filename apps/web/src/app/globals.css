@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f3f7ff;
+  --foreground: #111a3a;
+  --card: #ffffff;
+  --ink-muted: #5d678a;
+  --line: #d6def6;
+  --accent: #0628c8;
+  --accent-2: #2ea3ff;
+  --danger: #c3223a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-ibm-plex-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-space-grotesk), sans-serif;
+  background-image:
+    radial-gradient(circle at 14% 16%, rgba(6, 40, 200, 0.14), transparent 32%),
+    radial-gradient(circle at 82% 12%, rgba(46, 163, 255, 0.18), transparent 36%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(243, 247, 255, 0.9));
+}
+
+.app-brand-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  backdrop-filter: blur(10px);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.9), rgba(243, 247, 255, 0.92));
+  border-bottom: 1px solid var(--line);
+}
+
+.app-brand-wrap {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 80rem;
+  padding: 0.7rem 1rem;
+}
+
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-decoration: none;
+}
+
+.app-brand-logo {
+  width: 2rem;
+  height: 2rem;
+}
+
+.app-brand-name {
+  margin: 0;
+  color: var(--foreground);
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.app-brand-subtitle {
+  margin: 0.1rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.kpi-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 10px 24px rgba(24, 33, 38, 0.08);
+}
+
+.glass-panel {
+  background: linear-gradient(165deg, rgba(255, 253, 246, 0.94), rgba(255, 253, 246, 0.76));
+  border: 1px solid rgba(24, 33, 38, 0.12);
+  border-radius: 24px;
+  backdrop-filter: blur(6px);
+}
+
+.bar-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #dfe6fb;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #4f80ff);
+  transition: width 500ms ease;
+}
+
+.fade-up {
+  animation: fade-up 520ms ease-out both;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

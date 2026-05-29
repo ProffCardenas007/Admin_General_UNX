@@ -1,0 +1,2 @@
+employee_email,project_code,task_code,task_name,status,progress_percent,worked_hours,update_date,blocker_reason,comment
+empleado1@empresa.com,PRJ-2026-001,TASK-001,Definir alcance,doing,45,3.5,2026-05-28,,Se avanzo en el analisis inicial
