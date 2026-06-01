@@ -542,9 +542,9 @@ export default function DashboardPage() {
                           >
                             Tareas
                           </Link>
-                          {role === "manager" ? (
+                          {role === "manager" || role === "lead" ? (
                             <Link
-                              href="/capture?mode=task"
+                              href={`/capture?mode=task&projectId=${encodeURIComponent(project.id)}`}
                               className="rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-2 py-1 text-xs font-semibold text-[var(--accent)]"
                             >
                               Crear tarea

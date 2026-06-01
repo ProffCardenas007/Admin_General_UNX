@@ -4,25 +4,9 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:3001'];
-  const allowedCorsOrigins = (process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  const corsOrigins =
-    allowedCorsOrigins.length > 0 ? allowedCorsOrigins : defaultCorsOrigins;
-
   app.enableCors({
-    // Allow browser origins configured for each environment (local/prod).
-    origin: (origin, callback) => {
-      if (!origin || corsOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error('Not allowed by CORS'));
-    },
-    credentials: true,
+    // JWT is sent in Authorization header (no cookies), so wildcard origin is safe here.
+    origin: '*',
   });
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(

@@ -138,7 +138,15 @@ export default function CapturePage() {
       setTasks(taskResponse.data as TaskOption[]);
 
       if (projectResponse.data?.length > 0) {
-        setTaskForm((current) => ({ ...current, projectId: projectResponse.data[0].id }));
+        setTaskForm((current) => {
+          const hasSelectedProject = projectResponse.data.some(
+            (project: ProjectOption) => project.id === current.projectId,
+          );
+
+          return hasSelectedProject
+            ? current
+            : { ...current, projectId: projectResponse.data[0].id };
+        });
       }
 
       if (userResponse.data?.length > 0) {
@@ -173,8 +181,12 @@ export default function CapturePage() {
       setUserForm((current) => ({ ...current, specialty: savedSpecialty }));
     }
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
+    const requestedProjectId = new URLSearchParams(window.location.search).get("projectId");
     if (requestedMode === "project" || requestedMode === "task") {
       setCaptureMode(requestedMode);
+    }
+    if (requestedProjectId) {
+      setTaskForm((current) => ({ ...current, projectId: requestedProjectId }));
     }
 
     void loadLookups();

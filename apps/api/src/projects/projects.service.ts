@@ -82,7 +82,7 @@ export class ProjectsService {
 		dto: CreateProjectDto,
 		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
 	) {
-		const resolvedScope = dto.scope ?? null;
+		let resolvedScope = dto.scope ?? null;
 		const leadSpecialty = await this.resolveLeadSpecialty(actor);
 
 		if (actor.role === 'lead') {
@@ -90,9 +90,8 @@ export class ProjectsService {
 				throw new BadRequestException('Lead specialty is required');
 			}
 
-			if (resolvedScope !== leadSpecialty) {
-				throw new ForbiddenException('Leads can only create projects within their specialty');
-			}
+			// Keep lead project scope aligned with their assigned specialty.
+			resolvedScope = leadSpecialty;
 		} else if (!resolvedScope) {
 			throw new BadRequestException('Project scope is required');
 		}
