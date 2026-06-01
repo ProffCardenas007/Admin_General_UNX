@@ -8,6 +8,7 @@ async function bootstrap() {
     origin: [
       'http://localhost:3000',
       'http://localhost:3001',
+      'https://admin-general-unx.vercel.app',
     ],
     credentials: true,
   });
@@ -22,3 +23,4 @@ async function bootstrap() {
   await app.listen(process.env.PORT ?? 4000);
 }
 bootstrap();
+
