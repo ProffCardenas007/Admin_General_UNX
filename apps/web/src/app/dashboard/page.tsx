@@ -214,14 +214,20 @@ export default function DashboardPage() {
   useEffect(() => {
     const savedToken = getStoredToken();
     const savedEmail = getStoredEmail();
+    const savedRole = getStoredRole();
 
     if (!savedToken) {
       router.replace("/");
       return;
     }
 
+    if (savedRole === "worker") {
+      router.replace("/tasks");
+      return;
+    }
+
     setEmail(savedEmail);
-    setRole(getStoredRole());
+    setRole(savedRole);
     setCurrentUserId(getStoredUserId());
 
     const loadDashboard = async () => {

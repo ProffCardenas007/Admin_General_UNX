@@ -29,6 +29,7 @@ export default function Home() {
       const accessToken = loginResponse.data.accessToken as string;
       const role = (loginResponse.data.user?.role as string | undefined) ?? "";
       const specialty = (loginResponse.data.user?.specialty as string | undefined) ?? "";
+      const nextRoute = role === "worker" ? "/tasks" : "/dashboard";
       window.localStorage.setItem("sistema_mvp_token", accessToken);
       window.localStorage.setItem("sistema_mvp_email", email);
       if (role) {
@@ -39,7 +40,7 @@ export default function Home() {
       } else {
         window.localStorage.removeItem("sistema_mvp_specialty");
       }
-      router.replace("/dashboard");
+      router.replace(nextRoute);
     } catch {
       setError("No se pudo iniciar sesión. Verifica usuario, contraseña y backend.");
     } finally {

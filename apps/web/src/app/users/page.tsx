@@ -48,8 +48,14 @@ export default function UsersPage() {
       return;
     }
 
+    const savedRole = getStoredRole();
+    if (savedRole === "worker") {
+      router.replace("/tasks");
+      return;
+    }
+
     setEmail(getStoredEmail());
-    setRole(getStoredRole());
+    setRole(savedRole);
 
     const loadUsers = async () => {
       try {

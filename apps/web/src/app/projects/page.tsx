@@ -47,8 +47,14 @@ export default function ProjectsPage() {
       return;
     }
 
+    const savedRole = getStoredRole();
+    if (savedRole === "worker") {
+      router.replace("/tasks");
+      return;
+    }
+
     setEmail(getStoredEmail());
-    setRole(getStoredRole());
+    setRole(savedRole);
 
     const loadProjects = async () => {
       try {

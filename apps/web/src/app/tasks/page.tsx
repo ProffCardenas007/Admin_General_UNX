@@ -485,24 +485,35 @@ export default function TasksPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link
-              href="/dashboard"
-              className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
-            >
-              Volver al panel
-            </Link>
-            <Link
-              href="/users"
-              className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
-            >
-              Ver usuarios
-            </Link>
-            <Link
-              href="/capture"
-              className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
-            >
-              Cargar datos
-            </Link>
+            {role === "worker" ? (
+              <Link
+                href="/notifications"
+                className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+              >
+                Ver notificaciones
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/dashboard"
+                  className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+                >
+                  Volver al panel
+                </Link>
+                <Link
+                  href="/users"
+                  className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+                >
+                  Ver usuarios
+                </Link>
+                <Link
+                  href="/capture"
+                  className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                >
+                  Cargar datos
+                </Link>
+              </>
+            )}
           </div>
         </div>
 

@@ -172,9 +172,15 @@ export default function CapturePage() {
       return;
     }
 
+    const savedRole = getStoredRole();
+    if (savedRole === "worker") {
+      router.replace("/tasks");
+      return;
+    }
+
     const savedSpecialty = getStoredSpecialty();
     setEmail(getStoredEmail());
-    setRole(getStoredRole());
+    setRole(savedRole);
     setSpecialty(savedSpecialty);
     if (savedSpecialty) {
       setProjectForm((current) => ({ ...current, scope: savedSpecialty }));

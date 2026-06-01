@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { API_URL, authHeaders, getStoredEmail, getStoredToken } from "../../lib/api";
+import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
 
 type NotificationRow = {
   id: string;
@@ -18,6 +18,7 @@ type NotificationRow = {
 export default function NotificationsPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -32,6 +33,7 @@ export default function NotificationsPage() {
     }
 
     setEmail(getStoredEmail());
+    setRole(getStoredRole());
   }, [router]);
 
   const loadNotifications = async (status: "all" | "unread" | "read") => {
@@ -100,9 +102,15 @@ export default function NotificationsPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href="/dashboard" className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]">
-              Volver al panel
-            </Link>
+            {role === "worker" ? (
+              <Link href="/tasks" className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]">
+                Ver tareas
+              </Link>
+            ) : (
+              <Link href="/dashboard" className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]">
+                Volver al panel
+              </Link>
+            )}
             <button onClick={() => void markAllRead()} className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110">
               Marcar todo leido
             </button>
