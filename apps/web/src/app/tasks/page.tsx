@@ -396,6 +396,7 @@ export default function TasksPage() {
   };
 
   const canPlanConsequence = role === "manager" || role === "lead";
+  const isWorker = role === "worker";
   const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
   const consequenceDraft = openedConsequenceTaskId
     ? taskDrafts[openedConsequenceTaskId]
@@ -479,10 +480,13 @@ export default function TasksPage() {
               Sistema de proyectos
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
-              Tareas individuales
+              {isWorker ? "Mis tareas" : "Tareas individuales"}
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesión activa como ${email}.` : "Sesión activa."} Aquí ves y filtras cada tarea creada.
+              {email ? `Sesión activa como ${email}.` : "Sesión activa."}{" "}
+              {isWorker
+                ? "Aquí ves y gestionas tus tareas asignadas."
+                : "Aquí ves y filtras cada tarea creada."}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -518,7 +522,7 @@ export default function TasksPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <div className={`mt-6 grid gap-3 md:grid-cols-2 ${isWorker ? "xl:grid-cols-5" : "xl:grid-cols-6"}`}>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -571,16 +575,17 @@ export default function TasksPage() {
               </option>
             ))}
           </select>
-          <select
-            value={scopeFilter}
-            onChange={(event) => setScopeFilter(event.target.value as "all" | "my" | "assigned")}
-            disabled={role === "worker"}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-          >
-            {role === "manager" ? <option value="all">Todas las asignaciones</option> : null}
-            {role === "lead" ? <option value="assigned">Tareas encargadas (mi especialidad)</option> : null}
-            <option value="my">Tareas propias (asignadas a mi)</option>
-          </select>
+          {!isWorker ? (
+            <select
+              value={scopeFilter}
+              onChange={(event) => setScopeFilter(event.target.value as "all" | "my" | "assigned")}
+              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+            >
+              {role === "manager" ? <option value="all">Todas las asignaciones</option> : null}
+              {role === "lead" ? <option value="assigned">Tareas encargadas (mi especialidad)</option> : null}
+              <option value="my">Tareas propias (asignadas a mi)</option>
+            </select>
+          ) : null}
           <select
             value={dueFilter}
             onChange={(event) => setDueFilter(event.target.value as "all" | "soon" | "overdue")}
@@ -591,7 +596,7 @@ export default function TasksPage() {
             <option value="overdue">Vencidas</option>
           </select>
         </div>
-        <p className="mt-2 text-xs text-[var(--ink-muted)]">{scopeHelpText}</p>
+        {!isWorker ? <p className="mt-2 text-xs text-[var(--ink-muted)]">{scopeHelpText}</p> : null}
 
         {error ? (
           <p className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">
