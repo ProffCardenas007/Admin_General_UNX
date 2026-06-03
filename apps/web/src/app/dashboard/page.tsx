@@ -5,6 +5,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
+import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type Summary = {
   activeProjects: number;
@@ -28,18 +29,31 @@ type TrendRow = {
 
 type TaskRow = {
   id: string;
+  projectId: string;
+  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
+  title: string;
+  description?: string;
   assigneeId?: string;
   status: "todo" | "doing" | "blocked" | "done";
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
+  estimatedHours?: string;
 };
 
 type ProjectRow = {
   id: string;
   code: string;
   name: string;
+  scope?: LeadSpecialty | null;
   status: "planned" | "active" | "on_hold" | "done" | "cancelled";
+  startDate?: string;
   endDate?: string;
+};
+
+type UserOption = {
+  id: string;
+  fullName: string;
+  role: "manager" | "lead" | "worker";
 };
 
 type ProjectProgress = {
@@ -66,6 +80,49 @@ const riskLabelMap: Record<RiskLevel, string> = {
   red: "en riesgo",
 };
 
+const activityTypeOptions = [
+  { value: "revision", label: "revision" },
+  { value: "edicion", label: "edicion" },
+  { value: "creacion", label: "creacion" },
+  { value: "presentaciones", label: "presentaciones" },
+  { value: "grabacion", label: "grabacion" },
+  { value: "plataforma", label: "plataforma" },
+] as const;
+
+const taskStatusOptions = [
+  { value: "todo", label: "por hacer" },
+  { value: "doing", label: "en curso" },
+  { value: "blocked", label: "bloqueada" },
+  { value: "done", label: "finalizada" },
+] as const;
+
+const taskStatusLabels: Record<TaskRow["status"], string> = {
+  todo: "por hacer",
+  doing: "en curso",
+  blocked: "bloqueada",
+  done: "finalizada",
+};
+
+const priorityOptions = [
+  { value: "low", label: "baja" },
+  { value: "medium", label: "media" },
+  { value: "high", label: "alta" },
+  { value: "urgent", label: "urgente" },
+] as const;
+
+const taskPriorityLabels: Record<TaskRow["priority"], string> = {
+  low: "baja",
+  medium: "media",
+  high: "alta",
+  urgent: "urgente",
+};
+
+const roleLabels: Record<UserOption["role"], string> = {
+  manager: "gerencia",
+  lead: "lider",
+  worker: "colaborador",
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -73,15 +130,34 @@ export default function DashboardPage() {
   const [currentUserId, setCurrentUserId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [workload, setWorkload] = useState<WorkloadRow[]>([]);
   const [trends, setTrends] = useState<TrendRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
   const [projectProgressById, setProjectProgressById] = useState<Record<string, ProjectProgress>>({});
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatusFilter, setProjectStatusFilter] = useState<"" | ProjectRow["status"]>("");
   const [projectRiskFilter, setProjectRiskFilter] = useState<"all" | RiskLevel>("all");
+  const [taskProjectFilter, setTaskProjectFilter] = useState("");
+  const [taskUserFilter, setTaskUserFilter] = useState("");
+  const [taskSearchFilter, setTaskSearchFilter] = useState("");
+  const [selectedDashboardUserId, setSelectedDashboardUserId] = useState("");
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
+  const [taskForm, setTaskForm] = useState({
+    projectId: "",
+    activityType: "creacion" as TaskRow["activityType"],
+    title: "",
+    description: "",
+    assigneeId: "",
+    status: "todo" as TaskRow["status"],
+    priority: "medium" as TaskRow["priority"],
+    dueDate: "",
+    estimatedHours: "",
+  });
 
   const workloadMax = useMemo(() => {
     if (workload.length === 0) {
@@ -211,6 +287,97 @@ export default function DashboardPage() {
     };
   }, [tasks, currentUserId]);
 
+  const projectsById = useMemo(() => {
+    return Object.fromEntries(projects.map((project) => [project.id, project]));
+  }, [projects]);
+
+  const usersById = useMemo(() => {
+    return Object.fromEntries(users.map((user) => [user.id, user]));
+  }, [users]);
+
+  const openTasks = useMemo(() => tasks.filter((task) => task.status !== "done"), [tasks]);
+
+  const taskProjectOptions = useMemo(() => {
+    const ids = new Set(openTasks.map((task) => task.projectId));
+    return projects.filter((project) => ids.has(project.id));
+  }, [projects, openTasks]);
+
+  const taskUserOptions = useMemo(() => {
+    const ids = new Set(openTasks.map((task) => task.assigneeId).filter(Boolean) as string[]);
+    return users.filter((user) => ids.has(user.id));
+  }, [users, openTasks]);
+
+  const filteredTaskRows = useMemo(() => {
+    return openTasks.filter((task) => {
+      const project = projectsById[task.projectId];
+      const byProject = taskProjectFilter.length === 0 || task.projectId === taskProjectFilter;
+      const byUser = taskUserFilter.length === 0 || (task.assigneeId ?? "") === taskUserFilter;
+      const byTaskSearch =
+        taskSearchFilter.trim().length === 0 ||
+        task.title.toLowerCase().includes(taskSearchFilter.toLowerCase()) ||
+        task.activityType.toLowerCase().includes(taskSearchFilter.toLowerCase()) ||
+        (project?.name ?? "").toLowerCase().includes(taskSearchFilter.toLowerCase()) ||
+        (project?.code ?? "").toLowerCase().includes(taskSearchFilter.toLowerCase());
+
+      return byProject && byUser && byTaskSearch;
+    });
+  }, [openTasks, projectsById, taskProjectFilter, taskSearchFilter, taskUserFilter]);
+
+  const selectedDashboardUser = useMemo(
+    () => users.find((user) => user.id === selectedDashboardUserId),
+    [users, selectedDashboardUserId],
+  );
+
+  const selectedDashboardUserTasks = useMemo(() => {
+    if (!selectedDashboardUserId) {
+      return [];
+    }
+
+    return tasks.filter((task) => task.assigneeId === selectedDashboardUserId);
+  }, [selectedDashboardUserId, tasks]);
+
+  const selectedDashboardUserSummary = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const total = selectedDashboardUserTasks.length;
+    const done = selectedDashboardUserTasks.filter((task) => task.status === "done").length;
+    const blocked = selectedDashboardUserTasks.filter((task) => task.status === "blocked").length;
+    const active = selectedDashboardUserTasks.filter((task) => task.status !== "done").length;
+    const urgent = selectedDashboardUserTasks.filter(
+      (task) => task.priority === "urgent" && task.status !== "done",
+    ).length;
+    const overdue = selectedDashboardUserTasks.filter((task) => {
+      if (task.status === "done" || !task.dueDate) {
+        return false;
+      }
+
+      return new Date(task.dueDate) < today;
+    }).length;
+
+    return {
+      total,
+      done,
+      blocked,
+      active,
+      urgent,
+      overdue,
+    };
+  }, [selectedDashboardUserTasks]);
+
+  const selectedTaskProject = useMemo(
+    () => projects.find((project) => project.id === taskForm.projectId),
+    [projects, taskForm.projectId],
+  );
+
+  const projectTaskSpecialtyLabel = (project?: ProjectRow) => {
+    if (!project?.scope) {
+      return "";
+    }
+
+    return specialtyLabels[project.scope];
+  };
+
   useEffect(() => {
     const savedToken = getStoredToken();
     const savedEmail = getStoredEmail();
@@ -221,11 +388,6 @@ export default function DashboardPage() {
       return;
     }
 
-    if (savedRole === "worker") {
-      router.replace("/tasks");
-      return;
-    }
-
     setEmail(savedEmail);
     setRole(savedRole);
     setCurrentUserId(getStoredUserId());
@@ -233,21 +395,70 @@ export default function DashboardPage() {
     const loadDashboard = async () => {
       try {
         const headers = authHeaders();
-        const [summaryResponse, workloadResponse, trendsResponse, projectsResponse, tasksResponse] = await Promise.all([
+        const [summaryResponse, workloadResponse, trendsResponse, projectsResponse] = await Promise.all([
           axios.get(`${API_URL}/dashboard/summary`, { headers }),
           axios.get(`${API_URL}/dashboard/workload`, { headers }),
           axios.get(`${API_URL}/dashboard/trends`, { headers }),
           axios.get(`${API_URL}/projects`, { headers }),
-          axios.get(`${API_URL}/tasks`, { headers }),
         ]);
+
+        let loadedTasks: TaskRow[] = [];
+        if (savedRole === "lead") {
+          const [myTasksResponse, assignedTasksResponse] = await Promise.all([
+            axios.get(`${API_URL}/tasks`, { headers, params: { scope: "my" } }),
+            axios.get(`${API_URL}/tasks`, { headers, params: { scope: "assigned" } }),
+          ]);
+
+          const deduped = new Map<string, TaskRow>();
+          [...(myTasksResponse.data as TaskRow[]), ...(assignedTasksResponse.data as TaskRow[])].forEach((task) => {
+            deduped.set(task.id, task);
+          });
+          loadedTasks = [...deduped.values()];
+        } else {
+          const tasksResponse = await axios.get(`${API_URL}/tasks`, { headers });
+          loadedTasks = tasksResponse.data as TaskRow[];
+        }
+
+        let loadedUsers: UserOption[] = [];
+        try {
+          const usersResponse = await axios.get(`${API_URL}/users`, { headers });
+          loadedUsers = usersResponse.data as UserOption[];
+        } catch {
+          loadedUsers = [];
+        }
 
         setSummary(summaryResponse.data as Summary);
         setWorkload(workloadResponse.data as WorkloadRow[]);
         setTrends(trendsResponse.data as TrendRow[]);
-        setTasks(tasksResponse.data as TaskRow[]);
+        setTasks(loadedTasks);
+        setUsers(loadedUsers);
+        setSelectedDashboardUserId((current) => {
+          if (current && loadedUsers.some((user) => user.id === current)) {
+            return current;
+          }
+
+          const firstCandidate = loadedUsers.find((user) => user.role !== "manager");
+          return firstCandidate?.id ?? loadedUsers[0]?.id ?? "";
+        });
 
         const loadedProjects = projectsResponse.data as ProjectRow[];
         setProjects(loadedProjects);
+        setTaskForm((current) => {
+          const selectedProjectId =
+            current.projectId && loadedProjects.some((project) => project.id === current.projectId)
+              ? current.projectId
+              : (loadedProjects[0]?.id ?? "");
+          const selectedAssigneeId =
+            current.assigneeId && loadedUsers.some((user) => user.id === current.assigneeId)
+              ? current.assigneeId
+              : (loadedUsers[0]?.id ?? "");
+
+          return {
+            ...current,
+            projectId: selectedProjectId,
+            assigneeId: selectedAssigneeId,
+          };
+        });
 
         const progressRequests = await Promise.allSettled(
           loadedProjects.map((project) =>
@@ -281,6 +492,79 @@ export default function DashboardPage() {
     router.replace("/");
   };
 
+  const openTaskModal = (projectId?: string) => {
+    setError("");
+    setInfo("");
+    setTaskForm((current) => ({
+      ...current,
+      projectId: projectId || current.projectId || projects[0]?.id || "",
+      assigneeId: current.assigneeId || users[0]?.id || "",
+      title: "",
+      description: "",
+      dueDate: "",
+      estimatedHours: "",
+    }));
+    setIsTaskModalOpen(true);
+  };
+
+  const submitTaskFromModal = async () => {
+    setError("");
+    setInfo("");
+    setSavingTask(true);
+
+    try {
+      const payload = {
+        projectId: taskForm.projectId,
+        activityType: taskForm.activityType,
+        title: taskForm.title,
+        description: taskForm.description,
+        assigneeId: taskForm.assigneeId || undefined,
+        status: taskForm.status,
+        priority: taskForm.priority,
+        dueDate: taskForm.dueDate || undefined,
+        estimatedHours: taskForm.estimatedHours
+          ? Number(taskForm.estimatedHours)
+          : undefined,
+      };
+
+      const createdResponse = await axios.post(`${API_URL}/tasks`, payload, {
+        headers: authHeaders(),
+      });
+
+      const createdTask = createdResponse.data as TaskRow;
+      setTasks((current) => [createdTask, ...current]);
+      setIsTaskModalOpen(false);
+      setTaskForm((current) => ({
+        ...current,
+        title: "",
+        description: "",
+        dueDate: "",
+        estimatedHours: "",
+      }));
+      setInfo("Tarea creada.");
+    } catch (caughtError) {
+      if (axios.isAxiosError(caughtError)) {
+        const rawMessage = caughtError.response?.data?.message;
+        const backendMessage =
+          typeof rawMessage === "string"
+            ? rawMessage
+            : Array.isArray(rawMessage)
+              ? rawMessage.join(". ")
+              : "";
+
+        if (backendMessage) {
+          setError(`No se pudo crear la tarea: ${backendMessage}`);
+        } else {
+          setError("No se pudo crear la tarea. Verifica proyecto, actividad, titulo y descripcion.");
+        }
+      } else {
+        setError("No se pudo crear la tarea. Verifica proyecto, actividad, titulo y descripcion.");
+      }
+    } finally {
+      setSavingTask(false);
+    }
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
@@ -310,7 +594,7 @@ export default function DashboardPage() {
           </div>
           <button
             onClick={onLogout}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+            className="ui-btn ui-btn-secondary"
           >
             Cerrar sesión
           </button>
@@ -326,7 +610,7 @@ export default function DashboardPage() {
                 { label: "Resumen", href: "#resumen" },
                 { label: "Proyectos", href: "#proyectos" },
                 { label: "Tareas", href: "#tareas" },
-                { label: "Usuarios", href: "#usuarios" },
+                ...(role === "manager" ? [{ label: "Usuarios", href: "#usuarios" }] : []),
               ].map((item) => (
                 <a
                   key={item.href}
@@ -346,31 +630,33 @@ export default function DashboardPage() {
             <div className="mt-2 flex flex-wrap gap-2">
               <Link
                 href="/projects"
-                className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                className="ui-btn ui-btn-secondary"
               >
                 Ver proyectos
               </Link>
               <Link
                 href="/tasks"
-                className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                className="ui-btn ui-btn-secondary"
               >
                 Ver tareas
               </Link>
-              <Link
-                href="/users"
-                className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
-              >
-                Ver usuarios
-              </Link>
+              {role === "manager" ? (
+                <Link
+                  href="/users"
+                  className="ui-btn ui-btn-secondary"
+                >
+                  Ver usuarios
+                </Link>
+              ) : null}
               <Link
                 href="/notifications"
-                className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                className="ui-btn ui-btn-secondary"
               >
                 Ver notificaciones
               </Link>
               <Link
                 href="/capture"
-                className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                className="ui-btn ui-btn-primary"
               >
                 Cargar datos
               </Link>
@@ -383,8 +669,15 @@ export default function DashboardPage() {
             {error}
           </p>
         ) : null}
+        {info ? (
+          <p className="mt-4 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/8 px-4 py-3 text-sm text-[var(--foreground)]">
+            {info}
+          </p>
+        ) : null}
         {loading ? (
-          <p className="mt-4 font-mono text-xs text-[var(--ink-muted)]">Cargando panel...</p>
+          <div className="mt-4">
+            <div className="ui-skeleton h-6 w-44" />
+          </div>
         ) : null}
       </section>
 
@@ -429,7 +722,7 @@ export default function DashboardPage() {
         ))}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-4">
         <article id="proyectos" className="kpi-card fade-up p-5 scroll-mt-6" style={{ animationDelay: "220ms" }}>
           <h2 className="text-lg font-semibold">Proyectos</h2>
           <p className="mt-1 text-sm text-[var(--ink-muted)]">
@@ -460,7 +753,7 @@ export default function DashboardPage() {
               value={projectSearch}
               onChange={(event) => setProjectSearch(event.target.value)}
               className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-              placeholder="Buscar por codigo o nombre"
+              placeholder="Buscar por academia o nombre"
             />
 
             <select
@@ -492,8 +785,9 @@ export default function DashboardPage() {
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
-                  <th className="px-3 py-3 font-semibold">Codigo</th>
-                  <th className="px-3 py-3 font-semibold">Proyecto</th>
+                  <th className="px-3 py-3 font-semibold">Academia</th>
+                  <th className="px-3 py-3 font-semibold">Nombre</th>
+                  <th className="px-3 py-3 font-semibold">Especialidad</th>
                   <th className="px-3 py-3 font-semibold">Estado</th>
                   <th className="px-3 py-3 font-semibold">Avance</th>
                   <th className="px-3 py-3 font-semibold">Vencidas</th>
@@ -504,7 +798,7 @@ export default function DashboardPage() {
               <tbody>
                 {filteredProjectRows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-4 text-center text-[var(--ink-muted)]">
+                    <td colSpan={8} className="px-3 py-4 text-center text-[var(--ink-muted)]">
                       No hay proyectos para los filtros seleccionados.
                     </td>
                   </tr>
@@ -518,6 +812,7 @@ export default function DashboardPage() {
                           Fin: {project.endDate ?? "sin fecha"}
                         </p>
                       </td>
+                      <td className="px-3 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
                       <td className="px-3 py-3">{projectStatusLabels[project.status] ?? project.status}</td>
                       <td className="px-3 py-3">{project.completionRate.toFixed(1)}%</td>
                       <td className="px-3 py-3">{project.overdueTasks}</td>
@@ -549,12 +844,12 @@ export default function DashboardPage() {
                             Tareas
                           </Link>
                           {role === "manager" || role === "lead" ? (
-                            <Link
-                              href={`/capture?mode=task&projectId=${encodeURIComponent(project.id)}`}
+                            <button
+                              onClick={() => openTaskModal(project.id)}
                               className="rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-2 py-1 text-xs font-semibold text-[var(--accent)]"
                             >
                               Crear tarea
-                            </Link>
+                            </button>
                           ) : null}
                         </div>
                       </td>
@@ -591,6 +886,90 @@ export default function DashboardPage() {
                 <p className={`mt-2 text-xl font-semibold ${card.tone}`}>{card.value}</p>
               </div>
             ))}
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <select
+              value={taskProjectFilter}
+              onChange={(event) => setTaskProjectFilter(event.target.value)}
+              className="ui-control"
+            >
+              <option value="">Todos los proyectos</option>
+              {taskProjectOptions.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+
+            <input
+              value={taskSearchFilter}
+              onChange={(event) => setTaskSearchFilter(event.target.value)}
+              className="ui-control"
+              placeholder="Buscar tarea"
+            />
+
+            <select
+              value={taskUserFilter}
+              onChange={(event) => setTaskUserFilter(event.target.value)}
+              className="ui-control"
+            >
+              <option value="">Todos los usuarios</option>
+              {taskUserOptions.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.fullName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
+                  <th className="px-3 py-3 font-semibold">Proyecto</th>
+                  <th className="px-3 py-3 font-semibold">Tarea</th>
+                  <th className="px-3 py-3 font-semibold">Usuario</th>
+                  <th className="px-3 py-3 font-semibold">Estado</th>
+                  <th className="px-3 py-3 font-semibold">Prioridad</th>
+                  <th className="px-3 py-3 font-semibold">Vence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTaskRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-4 text-center">
+                      <span className="ui-empty inline-block px-4 py-2 text-sm">
+                        No hay tareas para los filtros seleccionados.
+                      </span>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTaskRows.map((task) => (
+                    <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
+                      <td className="px-3 py-3">
+                        <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
+                        <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
+                          {projectsById[task.projectId]?.code ?? "-"}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3">
+                        <p className="font-semibold">{task.title}</p>
+                        <p className="mt-1 text-xs text-[var(--ink-muted)]">{task.activityType}</p>
+                      </td>
+                      <td className="px-3 py-3">
+                        {task.assigneeId
+                          ? (usersById[task.assigneeId]?.fullName ?? task.assigneeId.slice(0, 8))
+                          : "Sin asignar"}
+                      </td>
+                      <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
+                      <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
+                      <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
@@ -635,7 +1014,7 @@ export default function DashboardPage() {
           <div className="mt-5 space-y-4">
             <div>
               <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Carga por trabajador
+                Carga por colaborador
               </p>
               {workload.length === 0 ? (
                 <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
@@ -704,34 +1083,266 @@ export default function DashboardPage() {
         </article>
       </section>
 
+      {role === "manager" ? (
       <section id="usuarios" className="kpi-card fade-up p-5 scroll-mt-6" style={{ animationDelay: "380ms" }}>
         <h2 className="text-lg font-semibold">Usuarios</h2>
-        <p className="mt-1 text-sm text-[var(--ink-muted)]">
-          Acceso preparado para el próximo paso: gestión de usuarios y roles.
-        </p>
+        {role === "manager" ? (
+          <>
+            <p className="mt-1 text-sm text-[var(--ink-muted)]">
+              Selecciona un lider o colaborador para ver su estadistica de tareas desde el dashboard.
+            </p>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          {[
-            {
-              title: "Gerencia",
-              body: "Ve todo el panel y puede administrar el sistema.",
-            },
-            {
-              title: "Líder",
-              body: "Supervisa proyectos, tareas y avance del equipo.",
-            },
-            {
-              title: "Trabajador",
-              body: "Actualiza sus tareas y registra horas/reportes.",
-            },
-          ].map((item) => (
-            <div key={item.title} className="rounded-2xl border border-[var(--line)] bg-white p-4">
-              <p className="font-semibold">{item.title}</p>
-              <p className="mt-1 text-sm text-[var(--ink-muted)]">{item.body}</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-[minmax(260px,340px),1fr]">
+              <select
+                value={selectedDashboardUserId}
+                onChange={(event) => setSelectedDashboardUserId(event.target.value)}
+                className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+              >
+                <option value="">Selecciona un usuario</option>
+                {users
+                  .filter((user) => user.role !== "manager")
+                  .map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName} ({roleLabels[user.role]})
+                    </option>
+                  ))}
+              </select>
+              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                <article className="rounded-2xl border border-[var(--line)] bg-white p-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Asignadas</p>
+                  <p className="mt-2 text-xl font-semibold">{selectedDashboardUserSummary.total}</p>
+                </article>
+                <article className="rounded-2xl border border-[var(--line)] bg-white p-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Abiertas</p>
+                  <p className="mt-2 text-xl font-semibold text-[var(--accent)]">{selectedDashboardUserSummary.active}</p>
+                </article>
+                <article className="rounded-2xl border border-[var(--line)] bg-white p-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Finalizadas</p>
+                  <p className="mt-2 text-xl font-semibold text-emerald-700">{selectedDashboardUserSummary.done}</p>
+                </article>
+                <article className="rounded-2xl border border-[var(--line)] bg-white p-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Bloqueadas</p>
+                  <p className="mt-2 text-xl font-semibold text-[var(--danger)]">{selectedDashboardUserSummary.blocked}</p>
+                </article>
+                <article className="rounded-2xl border border-[var(--line)] bg-white p-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Vencidas</p>
+                  <p className="mt-2 text-xl font-semibold text-[var(--danger)]">{selectedDashboardUserSummary.overdue}</p>
+                </article>
+                <article className="rounded-2xl border border-[var(--line)] bg-white p-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Urgentes</p>
+                  <p className="mt-2 text-xl font-semibold text-amber-700">{selectedDashboardUserSummary.urgent}</p>
+                </article>
+              </div>
             </div>
-          ))}
-        </div>
+
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
+                    <th className="px-3 py-3 font-semibold">Proyecto</th>
+                    <th className="px-3 py-3 font-semibold">Tarea</th>
+                    <th className="px-3 py-3 font-semibold">Estado</th>
+                    <th className="px-3 py-3 font-semibold">Prioridad</th>
+                    <th className="px-3 py-3 font-semibold">Vence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!selectedDashboardUser || selectedDashboardUserTasks.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-4 text-center text-[var(--ink-muted)]">
+                        Este usuario no tiene tareas asignadas.
+                      </td>
+                    </tr>
+                  ) : (
+                    selectedDashboardUserTasks.map((task) => (
+                      <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
+                        <td className="px-3 py-3">
+                          <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
+                          <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
+                            {projectsById[task.projectId]?.code ?? "-"}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3">{task.title}</td>
+                        <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
+                        <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
+                        <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="mt-1 text-sm text-[var(--ink-muted)]">
+            Este apartado de estadisticas por usuario es exclusivo de gerencia.
+          </p>
+        )}
       </section>
+      ) : null}
+
+      {isTaskModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4"
+          onClick={() => setIsTaskModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl border border-[var(--line)] bg-white p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  Captura
+                </p>
+                <h3 className="mt-1 text-lg font-semibold">Crear tarea</h3>
+              </div>
+              <button
+                onClick={() => setIsTaskModalOpen(false)}
+                className="ui-btn ui-btn-secondary ui-btn-sm"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <select
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={taskForm.projectId}
+                onChange={(event) => setTaskForm({ ...taskForm, projectId: event.target.value })}
+              >
+                <option value="">Nombre del proyecto</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
+                  placeholder="Academia"
+                  value={selectedTaskProject?.code ?? ""}
+                  readOnly
+                />
+                <input
+                  className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
+                  placeholder="Especialidad"
+                  value={projectTaskSpecialtyLabel(selectedTaskProject)}
+                  readOnly
+                />
+              </div>
+
+              <select
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={taskForm.activityType}
+                onChange={(event) =>
+                  setTaskForm({ ...taskForm, activityType: event.target.value as TaskRow["activityType"] })
+                }
+              >
+                {activityTypeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                placeholder="Titulo"
+                value={taskForm.title}
+                onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })}
+              />
+
+              <textarea
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                placeholder="Descripcion"
+                value={taskForm.description}
+                onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })}
+                rows={4}
+              />
+
+              <select
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={taskForm.assigneeId}
+                onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}
+              >
+                <option value="">Asignado a</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.fullName} - {roleLabels[user.role] ?? user.role}
+                  </option>
+                ))}
+              </select>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <select
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                  value={taskForm.status}
+                  onChange={(event) =>
+                    setTaskForm({ ...taskForm, status: event.target.value as TaskRow["status"] })
+                  }
+                >
+                  {taskStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                  value={taskForm.priority}
+                  onChange={(event) =>
+                    setTaskForm({ ...taskForm, priority: event.target.value as TaskRow["priority"] })
+                  }
+                >
+                  {priorityOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  type="date"
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                  value={taskForm.dueDate}
+                  onChange={(event) => setTaskForm({ ...taskForm, dueDate: event.target.value })}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                  placeholder="Horas estimadas"
+                  value={taskForm.estimatedHours}
+                  onChange={(event) => setTaskForm({ ...taskForm, estimatedHours: event.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setIsTaskModalOpen(false)}
+                className="ui-btn ui-btn-secondary"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void submitTaskFromModal()}
+                disabled={savingTask}
+                className="ui-btn ui-btn-primary disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {savingTask ? "Creando..." : "Crear tarea"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

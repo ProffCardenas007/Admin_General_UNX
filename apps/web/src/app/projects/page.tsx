@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -19,6 +19,24 @@ type ProjectRow = {
   createdAt: string;
 };
 
+type TaskRow = {
+  id: string;
+  code: string;
+  projectId: string;
+  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
+  title: string;
+  assigneeId?: string;
+  status: "todo" | "doing" | "blocked" | "done";
+  priority: "low" | "medium" | "high" | "urgent";
+  dueDate?: string;
+};
+
+type UserRow = {
+  id: string;
+  fullName: string;
+  role: "manager" | "lead" | "worker";
+};
+
 const statusLabels: Record<ProjectRow["status"], string> = {
   planned: "planificado",
   active: "activo",
@@ -27,15 +45,92 @@ const statusLabels: Record<ProjectRow["status"], string> = {
   cancelled: "cancelado",
 };
 
+const taskStatusLabels: Record<TaskRow["status"], string> = {
+  todo: "por hacer",
+  doing: "en curso",
+  blocked: "bloqueada",
+  done: "finalizada",
+};
+
+const taskPriorityLabels: Record<TaskRow["priority"], string> = {
+  low: "baja",
+  medium: "media",
+  high: "alta",
+  urgent: "urgente",
+};
+
+const activityTypeLabels: Record<TaskRow["activityType"], string> = {
+  revision: "revision",
+  edicion: "edicion",
+  creacion: "creacion",
+  presentaciones: "presentaciones",
+  grabacion: "grabacion",
+  plataforma: "plataforma",
+};
+
+const roleLabels: Record<UserRow["role"], string> = {
+  manager: "gerencia",
+  lead: "lider",
+  worker: "colaborador",
+};
+
+const getProjectHealth = (project: ProjectRow) => {
+  if (!project.endDate) {
+    return {
+      label: "Sin fecha fin",
+      dotClass: "bg-slate-400",
+      textClass: "text-slate-600",
+    };
+  }
+
+  const today = new Date();
+  const dueDate = new Date(`${project.endDate}T23:59:59`);
+  const dayMs = 1000 * 60 * 60 * 24;
+  const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / dayMs);
+
+  if (daysLeft < 0) {
+    return {
+      label: `Atrasado (${Math.abs(daysLeft)}d)`,
+      dotClass: "bg-red-500",
+      textClass: "text-red-600",
+    };
+  }
+
+  if (daysLeft <= 3) {
+    return {
+      label: `Critico (${daysLeft}d)`,
+      dotClass: "bg-red-500",
+      textClass: "text-red-600",
+    };
+  }
+
+  if (daysLeft <= 7) {
+    return {
+      label: `Atencion (${daysLeft}d)`,
+      dotClass: "bg-amber-500",
+      textClass: "text-amber-600",
+    };
+  }
+
+  return {
+    label: `En tiempo (${daysLeft}d)`,
+    dotClass: "bg-emerald-500",
+    textClass: "text-emerald-600",
+  };
+};
+
 export default function ProjectsPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [deletingProjectId, setDeletingProjectId] = useState("");
+  const [openedProjectId, setOpenedProjectId] = useState("");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -58,11 +153,32 @@ export default function ProjectsPage() {
 
     const loadProjects = async () => {
       try {
-        const response = await axios.get(`${API_URL}/projects`, {
-          headers: authHeaders(),
-        });
+        const headers = authHeaders();
+        const [projectsResponse, usersResponse] = await Promise.all([
+          axios.get(`${API_URL}/projects`, { headers }),
+          axios.get(`${API_URL}/users`, { headers }),
+        ]);
 
-        setProjects(response.data as ProjectRow[]);
+        let loadedTasks: TaskRow[] = [];
+        if (savedRole === "lead") {
+          const [myTasksResponse, assignedTasksResponse] = await Promise.all([
+            axios.get(`${API_URL}/tasks`, { headers, params: { scope: "my" } }),
+            axios.get(`${API_URL}/tasks`, { headers, params: { scope: "assigned" } }),
+          ]);
+
+          const deduped = new Map<string, TaskRow>();
+          [...(myTasksResponse.data as TaskRow[]), ...(assignedTasksResponse.data as TaskRow[])].forEach((task) => {
+            deduped.set(task.id, task);
+          });
+          loadedTasks = [...deduped.values()];
+        } else {
+          const tasksResponse = await axios.get(`${API_URL}/tasks`, { headers });
+          loadedTasks = tasksResponse.data as TaskRow[];
+        }
+
+        setProjects(projectsResponse.data as ProjectRow[]);
+        setTasks(loadedTasks);
+        setUsers(usersResponse.data as UserRow[]);
       } catch {
         setError("No se pudo cargar el listado de proyectos.");
       } finally {
@@ -119,6 +235,27 @@ export default function ProjectsPage() {
     });
   }, [projects, search, statusFilter]);
 
+  const tasksByProject = useMemo(() => {
+    return tasks.reduce<Record<string, TaskRow[]>>((accumulator, task) => {
+      if (!accumulator[task.projectId]) {
+        accumulator[task.projectId] = [];
+      }
+      accumulator[task.projectId].push(task);
+      return accumulator;
+    }, {});
+  }, [tasks]);
+
+  const assigneeLabel = (assigneeId?: string) => {
+    if (!assigneeId) {
+      return "Sin asignar";
+    }
+
+    const user = users.find((item) => item.id === assigneeId);
+    return user
+      ? `${user.fullName} (${roleLabels[user.role] ?? user.role})`
+      : assigneeId.slice(0, 8);
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
@@ -135,13 +272,13 @@ export default function ProjectsPage() {
           <div className="flex flex-wrap gap-3">
             <Link
               href="/dashboard"
-              className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+              className="ui-btn ui-btn-secondary"
             >
               Volver al panel
             </Link>
             <Link
               href="/capture?mode=project"
-              className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+              className="ui-btn ui-btn-primary"
             >
               Crear proyecto
             </Link>
@@ -152,13 +289,13 @@ export default function ProjectsPage() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-            placeholder="Buscar por codigo o nombre"
+            className="ui-control"
+            placeholder="Buscar por academia o nombre"
           />
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+            className="ui-control"
           >
             <option value="">Todos los estados</option>
             <option value="planned">planificado</option>
@@ -183,49 +320,102 @@ export default function ProjectsPage() {
 
       <section className="kpi-card fade-up overflow-hidden p-0">
         {loading ? (
-          <p className="p-5 text-sm text-[var(--ink-muted)]">Cargando proyectos...</p>
+          <div className="p-5">
+            <div className="ui-skeleton h-6 w-48" />
+          </div>
         ) : filteredProjects.length === 0 ? (
-          <p className="p-5 text-sm text-[var(--ink-muted)]">No hay proyectos para esos filtros.</p>
+          <p className="ui-empty m-4 px-4 py-3 text-sm">No hay proyectos para esos filtros.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
+            <table className="ui-table min-w-full">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
-                  <th className="px-4 py-3 font-semibold">Codigo</th>
-                  <th className="px-4 py-3 font-semibold">Nombre</th>
+                  <th className="px-4 py-3 font-semibold">Tareas</th>
                   <th className="px-4 py-3 font-semibold">Academia</th>
+                  <th className="px-4 py-3 font-semibold">Nombre</th>
                   <th className="px-4 py-3 font-semibold">Especialidad</th>
                   <th className="px-4 py-3 font-semibold">Estado</th>
                   <th className="px-4 py-3 font-semibold">Inicio</th>
                   <th className="px-4 py-3 font-semibold">Fin</th>
-                  <th className="px-4 py-3 font-semibold">Creado</th>
+                  <th className="px-4 py-3 font-semibold">Semaforo</th>
                   {role === "manager" ? <th className="px-4 py-3 font-semibold">Accion</th> : null}
                 </tr>
               </thead>
               <tbody>
-                {filteredProjects.map((project) => (
-                  <tr key={project.id} className="border-b border-[var(--line)]/60 align-top">
-                    <td className="px-4 py-3 font-mono text-xs">{project.code}</td>
-                    <td className="px-4 py-3 font-semibold">{project.name}</td>
-                    <td className="px-4 py-3">{project.ownerTeamId ?? "-"}</td>
-                    <td className="px-4 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
-                    <td className="px-4 py-3">{statusLabels[project.status] ?? project.status}</td>
-                    <td className="px-4 py-3">{project.startDate ?? "-"}</td>
-                    <td className="px-4 py-3">{project.endDate ?? "-"}</td>
-                    <td className="px-4 py-3">{new Date(project.createdAt).toLocaleDateString()}</td>
-                    {role === "manager" ? (
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => void onDeleteProject(project.id)}
-                          disabled={deletingProjectId === project.id}
-                          className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-xs font-semibold text-[var(--danger)] transition hover:bg-[var(--danger)]/20 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          {deletingProjectId === project.id ? "Borrando..." : "Borrar"}
-                        </button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
+                {filteredProjects.map((project) => {
+                  const health = getProjectHealth(project);
+                  const projectTasks = (tasksByProject[project.id] ?? []).filter((task) => task.status !== "done");
+                  const isOpen = openedProjectId === project.id;
+                  const colSpan = role === "manager" ? 9 : 8;
+
+                  return (
+                    <Fragment key={project.id}>
+                      <tr className="border-b border-[var(--line)]/60 align-top">
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => setOpenedProjectId(isOpen ? "" : project.id)}
+                            className="ui-btn ui-btn-secondary ui-btn-sm"
+                          >
+                            {isOpen ? "Ocultar" : "Ver"} ({projectTasks.length})
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs">{project.code}</td>
+                        <td className="px-4 py-3 font-semibold">{project.name}</td>
+                        <td className="px-4 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
+                        <td className="px-4 py-3">{statusLabels[project.status] ?? project.status}</td>
+                        <td className="px-4 py-3">{project.startDate ?? "-"}</td>
+                        <td className="px-4 py-3">{project.endDate ?? "-"}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-2 text-xs font-semibold ${health.textClass}`}>
+                            <span className={`h-2.5 w-2.5 rounded-full ${health.dotClass}`} />
+                            {health.label}
+                          </span>
+                        </td>
+                        {role === "manager" ? (
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => void onDeleteProject(project.id)}
+                              disabled={deletingProjectId === project.id}
+                              className="ui-btn ui-btn-danger ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {deletingProjectId === project.id ? "Borrando..." : "Borrar"}
+                            </button>
+                          </td>
+                        ) : null}
+                      </tr>
+                      {isOpen ? (
+                        <tr className="border-b border-[var(--line)]/60">
+                          <td colSpan={colSpan} className="bg-[var(--background)]/35 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                              Tareas del proyecto
+                            </p>
+                            {projectTasks.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                {projectTasks.map((task) => (
+                                  <div key={task.id} className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs">
+                                    <p className="font-semibold text-[var(--foreground)]">
+                                      {task.title}
+                                    </p>
+                                    <p className="mt-1 text-[var(--ink-muted)]">
+                                      Responsable: {assigneeLabel(task.assigneeId)} | Actividad: {activityTypeLabels[task.activityType] ?? task.activityType}
+                                    </p>
+                                    <p className="mt-1 text-[var(--ink-muted)]">
+                                      {taskStatusLabels[task.status] ?? task.status} | prioridad {taskPriorityLabels[task.priority] ?? task.priority} | fecha fin {task.dueDate ?? "-"}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-sm text-[var(--ink-muted)]">
+                                Este proyecto no tiene tareas pendientes por monitorear.
+                              </p>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

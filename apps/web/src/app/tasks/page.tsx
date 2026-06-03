@@ -5,6 +5,7 @@ import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
+import type { LeadSpecialty } from "../../lib/specialties";
 
 type TaskRow = {
   id: string;
@@ -30,6 +31,8 @@ type ProjectRow = {
   id: string;
   code: string;
   name: string;
+  scope?: LeadSpecialty | null;
+  status?: "planned" | "active" | "on_hold" | "done" | "cancelled";
 };
 
 type UserRow = {
@@ -75,7 +78,7 @@ const activityTypeLabels: Record<string, string> = {
 const roleLabels: Record<string, string> = {
   manager: "gerencia",
   lead: "líder",
-  worker: "trabajador",
+  worker: "colaborador",
 };
 
 export default function TasksPage() {
@@ -93,18 +96,18 @@ export default function TasksPage() {
   const [deletingTaskId, setDeletingTaskId] = useState("");
   const [loadingHistoryTaskId, setLoadingHistoryTaskId] = useState("");
   const [openedHistoryTaskId, setOpenedHistoryTaskId] = useState("");
+  const [openedDescriptionTaskId, setOpenedDescriptionTaskId] = useState("");
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
   const showCodeAndAssigneeColumns = role !== "worker";
+  const isWorker = role === "worker";
   const [historyByTask, setHistoryByTask] = useState<Record<string, TaskUpdateRow[]>>({});
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
 
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
-  const [scopeFilter, setScopeFilter] = useState<"all" | "my" | "assigned">("all");
-  const [dueFilter, setDueFilter] = useState<"all" | "soon" | "overdue">("all");
+  const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [focusMode, setFocusMode] = useState(false);
 
   const [taskDrafts, setTaskDrafts] = useState<
     Record<
@@ -117,54 +120,61 @@ export default function TasksPage() {
         handoffTitle: string;
         handoffMessage: string;
         nextActivityType: TaskRow["activityType"];
+        nextDueDate: string;
+        nextEstimatedHours: string;
       }
     >
   >({});
 
-  const loadData = async (currentRole: string, currentScope: "all" | "my" | "assigned") => {
+  const loadData = async (currentRole: string) => {
     try {
       setLoading(true);
       const headers = authHeaders();
 
-      const taskParams: Record<string, string> = {};
-      if (currentRole === "manager") {
-        if (currentScope === "my" && currentUserId) {
-          taskParams.assigneeId = currentUserId;
-        }
-      } else if (currentRole === "lead") {
-        taskParams.scope = currentScope === "assigned" ? "assigned" : "my";
-      } else {
-        taskParams.scope = "my";
-      }
-
-      const [tasksResult, projectsResult, usersResult] = await Promise.allSettled([
-        axios.get(`${API_URL}/tasks`, { headers, params: taskParams }),
+      const [projectsResult, usersResult] = await Promise.allSettled([
         axios.get(`${API_URL}/projects`, { headers }),
         axios.get(`${API_URL}/users`, { headers }),
       ]);
 
-      if (tasksResult.status === "fulfilled") {
-        const loadedTasks = tasksResult.value.data as TaskRow[];
-        setTasks(loadedTasks);
-        setTaskDrafts(
-          Object.fromEntries(
-            loadedTasks.map((task) => [
-              task.id,
-              {
-                status: task.status,
-                priority: task.priority,
-                assigneeId: task.assigneeId ?? "",
-                handoffToUserId: "",
-                handoffTitle: "",
-                handoffMessage: "",
-                nextActivityType: task.activityType,
-              },
-            ]),
-          ),
-        );
+      let loadedTasks: TaskRow[] = [];
+      if (currentRole === "lead") {
+        const [myTasksResponse, assignedTasksResponse] = await Promise.all([
+          axios.get(`${API_URL}/tasks`, { headers, params: { scope: "my" } }),
+          axios.get(`${API_URL}/tasks`, { headers, params: { scope: "assigned" } }),
+        ]);
+
+        const deduped = new Map<string, TaskRow>();
+        [...(myTasksResponse.data as TaskRow[]), ...(assignedTasksResponse.data as TaskRow[])].forEach((task) => {
+          deduped.set(task.id, task);
+        });
+        loadedTasks = [...deduped.values()];
+      } else if (currentRole === "worker") {
+        const myTasksResponse = await axios.get(`${API_URL}/tasks`, { headers, params: { scope: "my" } });
+        loadedTasks = myTasksResponse.data as TaskRow[];
       } else {
-        throw new Error("No se pudo cargar la lista de tareas.");
+        const tasksResponse = await axios.get(`${API_URL}/tasks`, { headers });
+        loadedTasks = tasksResponse.data as TaskRow[];
       }
+
+      setTasks(loadedTasks);
+      setTaskDrafts(
+        Object.fromEntries(
+          loadedTasks.map((task) => [
+            task.id,
+            {
+              status: task.status,
+              priority: task.priority,
+              assigneeId: task.assigneeId ?? "",
+              handoffToUserId: "",
+              handoffTitle: "",
+              handoffMessage: "",
+              nextActivityType: task.activityType,
+              nextDueDate: task.dueDate ?? "",
+              nextEstimatedHours: task.estimatedHours ?? "",
+            },
+          ]),
+        ),
+      );
 
       if (projectsResult.status === "fulfilled") {
         setProjects(projectsResult.value.data as ProjectRow[]);
@@ -194,31 +204,6 @@ export default function TasksPage() {
     setRole(currentRole);
     setCurrentUserId(currentUser);
 
-    const params = new URLSearchParams(window.location.search);
-
-    const requestedStatus = params.get("status");
-    if (["todo", "doing", "blocked", "done"].includes(requestedStatus ?? "")) {
-      setStatusFilter(requestedStatus ?? "");
-    }
-
-    const requestedPriority = params.get("priority");
-    if (["low", "medium", "high", "urgent"].includes(requestedPriority ?? "")) {
-      setPriorityFilter(requestedPriority ?? "");
-    }
-
-    const requestedScope = params.get("scope");
-    if (currentRole === "manager") {
-      setScopeFilter(requestedScope === "my" ? "my" : "all");
-    } else if (currentRole === "lead") {
-      setScopeFilter(requestedScope === "assigned" ? "assigned" : "my");
-    } else {
-      setScopeFilter("my");
-    }
-
-    const requestedDue = params.get("due");
-    if (requestedDue === "soon" || requestedDue === "overdue") {
-      setDueFilter(requestedDue);
-    }
   }, [router]);
 
   useEffect(() => {
@@ -226,50 +211,203 @@ export default function TasksPage() {
       return;
     }
 
-    void loadData(role, scopeFilter);
-  }, [role, scopeFilter, currentUserId]);
+    void loadData(role);
+  }, [role, currentUserId]);
 
   const filteredTasks = useMemo(() => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const soonLimit = new Date(today);
-    soonLimit.setDate(soonLimit.getDate() + 3);
-
-    return tasks.filter((task) => {
+    const result = tasks.filter((task) => {
       const bySearch =
         search.trim().length === 0 ||
         task.code.toLowerCase().includes(search.toLowerCase()) ||
         task.title.toLowerCase().includes(search.toLowerCase());
 
       const byProject = projectFilter.length === 0 || task.projectId === projectFilter;
-      const byStatus = statusFilter.length === 0 || task.status === statusFilter;
-      const byPriority = priorityFilter.length === 0 || task.priority === priorityFilter;
-      const byScope =
-        role === "manager"
-          ? (scopeFilter !== "my" || (currentUserId.length > 0 && task.assigneeId === currentUserId))
-          : role === "lead"
-            ? (scopeFilter === "my"
-                ? currentUserId.length > 0 && task.assigneeId === currentUserId
-                : currentUserId.length > 0 && task.assigneeId !== currentUserId)
-            : (currentUserId.length > 0 && task.assigneeId === currentUserId);
 
-      const dueDate = task.dueDate ? new Date(task.dueDate) : null;
-      const byDue =
-        dueFilter === "all" ||
-        (dueFilter === "overdue" && task.status !== "done" && !!dueDate && dueDate < today) ||
-        (dueFilter === "soon" &&
-          task.status !== "done" &&
-          !!dueDate &&
-          dueDate >= today &&
-          dueDate <= soonLimit);
+      const byAssignee =
+        assigneeFilter.length === 0 || (task.assigneeId ?? "") === assigneeFilter;
 
-      return bySearch && byProject && byStatus && byPriority && byScope && byDue;
+      return bySearch && byProject && byAssignee;
     });
-  }, [tasks, search, projectFilter, statusFilter, priorityFilter, scopeFilter, dueFilter, currentUserId, role]);
 
-  const projectLabel = (projectId: string) => {
-    const project = projects.find((item) => item.id === projectId);
-    return project ? `${project.code} - ${project.name}` : projectId.slice(0, 8);
+    return result.sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
+  }, [tasks, search, projectFilter, assigneeFilter]);
+
+  const activeProjects = useMemo(
+    () => projects.filter((project) => project.status === "active"),
+    [projects],
+  );
+
+  const todayIso = useMemo(() => {
+    const now = new Date();
+    const month = `${now.getMonth() + 1}`.padStart(2, "0");
+    const day = `${now.getDate()}`.padStart(2, "0");
+    return `${now.getFullYear()}-${month}-${day}`;
+  }, []);
+
+  const tomorrowIso = useMemo(() => {
+    const todayDate = new Date(`${todayIso}T00:00:00`);
+    todayDate.setDate(todayDate.getDate() + 1);
+    const month = `${todayDate.getMonth() + 1}`.padStart(2, "0");
+    const day = `${todayDate.getDate()}`.padStart(2, "0");
+    return `${todayDate.getFullYear()}-${month}-${day}`;
+  }, [todayIso]);
+
+  const workerDisplayName = useMemo(() => {
+    if (!email) {
+      return "";
+    }
+    return email.split("@")[0];
+  }, [email]);
+
+  const workerHeaderDate = useMemo(
+    () =>
+      new Intl.DateTimeFormat("es-MX", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+      }).format(new Date()),
+    [],
+  );
+
+  const getUrgencyScore = (task: TaskRow) => {
+    if (task.status === "done") {
+      return -1000;
+    }
+    if (task.status === "blocked") {
+      return 500;
+    }
+    if (!task.dueDate) {
+      return task.priority === "urgent" ? 320 : 150;
+    }
+
+    const dueDate = new Date(`${task.dueDate}T23:59:59`);
+    const todayDate = new Date(`${todayIso}T00:00:00`);
+    const daysLeft = Math.ceil((dueDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysLeft < 0) {
+      return 450 + Math.abs(daysLeft);
+    }
+    if (daysLeft === 0) {
+      return 420;
+    }
+    if (daysLeft <= 2) {
+      return 360 - daysLeft * 10;
+    }
+    return 220 - daysLeft;
+  };
+
+  const workerKpis = useMemo(() => {
+    const total = filteredTasks.length;
+    const done = filteredTasks.filter((task) => task.status === "done").length;
+    const doing = filteredTasks.filter((task) => task.status === "doing").length;
+    const blocked = filteredTasks.filter((task) => task.status === "blocked").length;
+    const dueToday = filteredTasks.filter((task) => task.status !== "done" && task.dueDate === todayIso).length;
+    const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    return {
+      total,
+      done,
+      doing,
+      blocked,
+      dueToday,
+      progress,
+      active: total - done,
+    };
+  }, [filteredTasks, todayIso]);
+
+  const workerPriorityTasks = useMemo(() => {
+    return filteredTasks
+      .filter((task) => task.status !== "done")
+      .slice()
+      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a))
+      .slice(0, 4);
+  }, [filteredTasks, todayIso]);
+
+  const workerTimeline = useMemo(() => {
+    const active = filteredTasks
+      .filter((task) => task.status !== "done" && !!task.dueDate)
+      .slice();
+
+    const overdue = active
+      .filter((task) => (task.dueDate ?? "") < todayIso)
+      .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
+
+    const today = active
+      .filter((task) => task.dueDate === todayIso)
+      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a));
+
+    const tomorrow = active
+      .filter((task) => task.dueDate === tomorrowIso)
+      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a));
+
+    return {
+      overdue,
+      today,
+      tomorrow,
+    };
+  }, [filteredTasks, todayIso, tomorrowIso]);
+
+  const displayTasks = useMemo(() => {
+    const base = focusMode
+      ? filteredTasks.filter((task) => task.status !== "done")
+      : filteredTasks;
+
+    return base
+      .slice()
+      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a));
+  }, [filteredTasks, focusMode, todayIso]);
+
+  const taskDueSemaforo = (task: TaskRow) => {
+    if (task.status === "done") {
+      return {
+        label: "Finalizada",
+        dotClass: "bg-emerald-500",
+        textClass: "text-emerald-600",
+      };
+    }
+
+    if (!task.dueDate) {
+      return {
+        label: "Sin fecha",
+        dotClass: "bg-slate-400",
+        textClass: "text-slate-600",
+      };
+    }
+
+    const today = new Date();
+    const dueDate = new Date(`${task.dueDate}T23:59:59`);
+    const dayMs = 1000 * 60 * 60 * 24;
+    const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / dayMs);
+
+    if (daysLeft < 0) {
+      return {
+        label: `Atrasada (${Math.abs(daysLeft)}d)`,
+        dotClass: "bg-red-500",
+        textClass: "text-red-600",
+      };
+    }
+
+    if (daysLeft <= 2) {
+      return {
+        label: `Crítica (${daysLeft}d)`,
+        dotClass: "bg-red-500",
+        textClass: "text-red-600",
+      };
+    }
+
+    if (daysLeft <= 5) {
+      return {
+        label: `Atención (${daysLeft}d)`,
+        dotClass: "bg-amber-500",
+        textClass: "text-amber-600",
+      };
+    }
+
+    return {
+      label: `En tiempo (${daysLeft}d)`,
+      dotClass: "bg-emerald-500",
+      textClass: "text-emerald-600",
+    };
   };
 
   const assigneeLabel = (assigneeId?: string) => {
@@ -316,6 +454,14 @@ export default function TasksPage() {
           draft.status === "done" && draft.handoffToUserId
             ? draft.nextActivityType
             : undefined,
+        nextDueDate:
+          draft.status === "done" && draft.handoffToUserId && draft.nextDueDate.trim().length > 0
+            ? draft.nextDueDate
+            : undefined,
+        nextEstimatedHours:
+          draft.status === "done" && draft.handoffToUserId && draft.nextEstimatedHours.trim().length > 0
+            ? Number(draft.nextEstimatedHours)
+            : undefined,
       };
 
       const updated = await axios.patch(`${API_URL}/tasks/${taskId}`, payload, {
@@ -338,10 +484,14 @@ export default function TasksPage() {
             handoffTitle: "",
             handoffMessage: "",
             nextActivityType: task.activityType,
+            nextDueDate: task.dueDate ?? "",
+            nextEstimatedHours: task.estimatedHours ?? "",
           }),
           handoffToUserId: "",
           handoffTitle: "",
           handoffMessage: "",
+          nextDueDate: "",
+          nextEstimatedHours: task.estimatedHours ?? "",
         },
       }));
       setInfo(`Tarea ${task.code} actualizada.`);
@@ -395,8 +545,7 @@ export default function TasksPage() {
     }
   };
 
-  const canPlanConsequence = role === "manager" || role === "lead";
-  const isWorker = role === "worker";
+  const canPlanConsequence = role === "manager" || role === "lead" || role === "worker";
   const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
   const consequenceDraft = openedConsequenceTaskId
     ? taskDrafts[openedConsequenceTaskId]
@@ -405,15 +554,6 @@ export default function TasksPage() {
     consequenceTask && consequenceDraft
       ? (consequenceDraft.status ?? consequenceTask.status) === "done"
       : false;
-
-  const scopeHelpText =
-    role === "manager"
-      ? "Gerencia puede alternar entre todas las asignaciones o solo sus tareas."
-      : role === "lead"
-        ? (scopeFilter === "assigned"
-            ? "Viendo tareas encargadas a otros dentro de tu especialidad."
-            : "Viendo tus tareas propias asignadas a tu usuario.")
-        : "Solo puedes ver tus tareas propias.";
 
   const historyKey = (taskId: string, from: string, to: string) =>
     `${taskId}|${from || "_"}|${to || "_"}`;
@@ -471,6 +611,24 @@ export default function TasksPage() {
     await loadHistory(openedHistoryTaskId);
   };
 
+  const onOpenTaskFromTimeline = (taskId: string, target: "description" | "history") => {
+    if (target === "description") {
+      setOpenedDescriptionTaskId(taskId);
+      return;
+    }
+
+    setOpenedHistoryTaskId(taskId);
+    void loadHistory(taskId);
+  };
+
+  const onLogout = () => {
+    window.localStorage.removeItem("sistema_mvp_token");
+    window.localStorage.removeItem("sistema_mvp_email");
+    window.localStorage.removeItem("sistema_mvp_role");
+    window.localStorage.removeItem("sistema_mvp_specialty");
+    router.replace("/");
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
@@ -491,29 +649,37 @@ export default function TasksPage() {
           </div>
           <div className="flex flex-wrap gap-3">
             {role === "worker" ? (
-              <Link
-                href="/notifications"
-                className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
-              >
-                Ver notificaciones
-              </Link>
+              <>
+                <Link
+                  href="/notifications"
+                  className="ui-btn ui-btn-primary"
+                >
+                  Ver notificaciones
+                </Link>
+                <button
+                  onClick={onLogout}
+                  className="ui-btn ui-btn-secondary"
+                >
+                  Cerrar sesión
+                </button>
+              </>
             ) : (
               <>
                 <Link
                   href="/dashboard"
-                  className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+                  className="ui-btn ui-btn-secondary"
                 >
                   Volver al panel
                 </Link>
                 <Link
                   href="/users"
-                  className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+                  className="ui-btn ui-btn-secondary"
                 >
                   Ver usuarios
                 </Link>
                 <Link
                   href="/capture"
-                  className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                  className="ui-btn ui-btn-primary"
                 >
                   Cargar datos
                 </Link>
@@ -522,81 +688,203 @@ export default function TasksPage() {
           </div>
         </div>
 
-        <div className={`mt-6 grid gap-3 md:grid-cols-2 ${isWorker ? "xl:grid-cols-5" : "xl:grid-cols-6"}`}>
+        <div className="mt-5 rounded-2xl border border-[var(--line)] bg-gradient-to-r from-white via-[var(--background)] to-white p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  {isWorker ? "Mi jornada" : "Vista operativa"}
+                </p>
+                <p className="mt-1 text-lg font-semibold capitalize">
+                  {workerDisplayName ? `Hola, ${workerDisplayName}` : "Hola"}
+                </p>
+                <p className="text-sm text-[var(--ink-muted)]">{workerHeaderDate}</p>
+              </div>
+              <button
+                onClick={() => setFocusMode((current) => !current)}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  focusMode
+                    ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                    : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                }`}
+              >
+                {focusMode ? "Modo enfoque activo" : "Activar modo enfoque"}
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Pendientes</p>
+                <p className="mt-1 text-2xl font-semibold">{workerKpis.active}</p>
+              </div>
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">En curso</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--accent)]">{workerKpis.doing}</p>
+              </div>
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Bloqueadas</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--danger)]">{workerKpis.blocked}</p>
+              </div>
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Vencen hoy</p>
+                <p className="mt-1 text-2xl font-semibold text-amber-700">{workerKpis.dueToday}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--line)] bg-white p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">Avance personal</p>
+                <p className="text-xs text-[var(--ink-muted)]">
+                  {workerKpis.done}/{workerKpis.total} finalizadas
+                </p>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--background)]">
+                <div
+                  className="h-full rounded-full bg-[var(--accent)] transition-all"
+                  style={{ width: `${workerKpis.progress}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {workerPriorityTasks.length === 0 ? (
+                <p className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-[var(--ink-muted)] md:col-span-2">
+                  Excelente, no tienes tareas activas con los filtros actuales.
+                </p>
+              ) : (
+                workerPriorityTasks.map((task) => {
+                  const due = taskDueSemaforo(task);
+                  return (
+                    <div key={task.id} className="rounded-xl border border-[var(--line)] bg-white p-3">
+                      <p className="text-sm font-semibold">{task.title}</p>
+                      <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                        {activityTypeLabels[task.activityType] ?? task.activityType} · {priorityLabels[task.priority]}
+                      </p>
+                      <p className={`mt-2 text-xs font-semibold ${due.textClass}`}>{due.label}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--line)] bg-white p-3">
+              <p className="text-sm font-semibold">Línea de tiempo rápida</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
+                    Atrasadas ({workerTimeline.overdue.length})
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {workerTimeline.overdue.slice(0, 3).map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
+                          className="text-left text-xs font-semibold text-red-700 underline-offset-2 hover:underline"
+                        >
+                          {task.title}
+                        </button>
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
+                          className="text-[11px] text-red-700/80 underline-offset-2 hover:underline"
+                        >
+                          Historial
+                        </button>
+                      </div>
+                    ))}
+                    {workerTimeline.overdue.length === 0 ? (
+                      <p className="text-xs text-red-700/70">Sin tareas atrasadas.</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">
+                    Hoy ({workerTimeline.today.length})
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {workerTimeline.today.slice(0, 3).map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
+                          className="text-left text-xs font-semibold text-amber-800 underline-offset-2 hover:underline"
+                        >
+                          {task.title}
+                        </button>
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
+                          className="text-[11px] text-amber-800/80 underline-offset-2 hover:underline"
+                        >
+                          Historial
+                        </button>
+                      </div>
+                    ))}
+                    {workerTimeline.today.length === 0 ? (
+                      <p className="text-xs text-amber-800/70">Sin vencimientos para hoy.</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                    Mañana ({workerTimeline.tomorrow.length})
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {workerTimeline.tomorrow.slice(0, 3).map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
+                          className="text-left text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline"
+                        >
+                          {task.title}
+                        </button>
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
+                          className="text-[11px] text-emerald-700/80 underline-offset-2 hover:underline"
+                        >
+                          Historial
+                        </button>
+                      </div>
+                    ))}
+                    {workerTimeline.tomorrow.length === 0 ? (
+                      <p className="text-xs text-emerald-700/70">Sin tareas programadas.</p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        <div className="mt-6 grid gap-3 md:grid-cols-3">
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-            placeholder={role === "worker" ? "Buscar por título" : "Buscar por código o título"}
+            className="ui-control"
+            placeholder="Buscar tarea"
           />
           <select
             value={projectFilter}
             onChange={(event) => setProjectFilter(event.target.value)}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+            className="ui-control"
           >
-            <option value="">Todos los proyectos</option>
-            {projects.map((project) => (
+            <option value="">Todos los proyectos activos</option>
+            {activeProjects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.code} - {project.name}
               </option>
             ))}
           </select>
           <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+            value={assigneeFilter}
+            onChange={(event) => setAssigneeFilter(event.target.value)}
+            className="ui-control"
           >
-            <option value="">Todos los estados</option>
-            {[
-              { value: "todo", label: "por hacer" },
-              { value: "doing", label: "en curso" },
-              { value: "blocked", label: "bloqueada" },
-              { value: "done", label: "finalizada" },
-            ].map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+            <option value="">Todos los usuarios</option>
+            {users.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.fullName} ({roleLabels[user.role] ?? user.role})
               </option>
             ))}
-          </select>
-          <select
-            value={priorityFilter}
-            onChange={(event) => setPriorityFilter(event.target.value)}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-          >
-            <option value="">Todas las prioridades</option>
-            {[
-              { value: "low", label: "baja" },
-              { value: "medium", label: "media" },
-              { value: "high", label: "alta" },
-              { value: "urgent", label: "urgente" },
-            ].map((priority) => (
-              <option key={priority.value} value={priority.value}>
-                {priority.label}
-              </option>
-            ))}
-          </select>
-          {!isWorker ? (
-            <select
-              value={scopeFilter}
-              onChange={(event) => setScopeFilter(event.target.value as "all" | "my" | "assigned")}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-            >
-              {role === "manager" ? <option value="all">Todas las asignaciones</option> : null}
-              {role === "lead" ? <option value="assigned">Tareas encargadas (mi especialidad)</option> : null}
-              <option value="my">Tareas propias (asignadas a mi)</option>
-            </select>
-          ) : null}
-          <select
-            value={dueFilter}
-            onChange={(event) => setDueFilter(event.target.value as "all" | "soon" | "overdue")}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-          >
-            <option value="all">Todas las fechas</option>
-            <option value="soon">Vencen pronto (3 dias)</option>
-            <option value="overdue">Vencidas</option>
           </select>
         </div>
-        {!isWorker ? <p className="mt-2 text-xs text-[var(--ink-muted)]">{scopeHelpText}</p> : null}
 
         {error ? (
           <p className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">
@@ -633,7 +921,7 @@ export default function TasksPage() {
           <button
             onClick={() => void onApplyHistoryRange()}
             disabled={!openedHistoryTaskId || !!loadingHistoryTaskId}
-            className="rounded-lg border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)] disabled:cursor-not-allowed disabled:opacity-70"
+            className="ui-btn ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-70"
           >
             Aplicar filtro al historial
           </button>
@@ -642,154 +930,182 @@ export default function TasksPage() {
 
       <section className="kpi-card fade-up overflow-hidden p-0">
         {loading ? (
-          <p className="p-5 text-sm text-[var(--ink-muted)]">Cargando tareas...</p>
-        ) : filteredTasks.length === 0 ? (
-          <p className="p-5 text-sm text-[var(--ink-muted)]">No hay tareas con esos filtros.</p>
+          <div className="p-5">
+            <div className="ui-skeleton h-6 w-40" />
+          </div>
+        ) : displayTasks.length === 0 ? (
+          <p className="ui-empty m-4 px-4 py-3 text-sm">No hay tareas con esos filtros.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
+            <table className="ui-table min-w-full">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
-                  {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Código</th> : null}
                   <th className="px-4 py-3 font-semibold">Título</th>
                   <th className="px-4 py-3 font-semibold">Actividad</th>
-                  <th className="px-4 py-3 font-semibold">Proyecto</th>
                   {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Asignado</th> : null}
                   <th className="px-4 py-3 font-semibold">Estado</th>
                   <th className="px-4 py-3 font-semibold">Prioridad</th>
-                  <th className="px-4 py-3 font-semibold">Vence</th>
+                  <th className="px-4 py-3 font-semibold">Semáforo</th>
                   <th className="px-4 py-3 font-semibold">Horas est.</th>
                   <th className="px-4 py-3 font-semibold">Acción</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredTasks.map((task) => (
-                  <Fragment key={task.id}>
-                    <tr className="border-b border-[var(--line)]/60 align-top">
-                      {showCodeAndAssigneeColumns ? (
-                        <td className="px-4 py-3 font-mono text-xs">{task.code}</td>
-                      ) : null}
-                      <td className="px-4 py-3">
-                        <p className="font-semibold">{task.title}</p>
-                        {task.description ? (
-                          <p className="mt-1 text-xs text-[var(--ink-muted)]">{task.description}</p>
+                {displayTasks.map((task) => {
+                  const due = taskDueSemaforo(task);
+                  return (
+                    <Fragment key={task.id}>
+                      <tr className="border-b border-[var(--line)]/60 align-top">
+                        <td className="px-4 py-3">
+                          <p className="font-semibold">{task.title}</p>
+                          {task.description ? (
+                            <>
+                              <button
+                                onClick={() =>
+                                  setOpenedDescriptionTaskId((current) =>
+                                    current === task.id ? "" : task.id,
+                                  )
+                                }
+                                className="ui-btn ui-btn-secondary ui-btn-sm mt-1"
+                              >
+                                {openedDescriptionTaskId === task.id
+                                  ? "Ocultar descripción"
+                                  : "Ver descripción"}
+                              </button>
+                              {openedDescriptionTaskId === task.id ? (
+                                <p className="mt-2 text-xs text-[var(--ink-muted)]">{task.description}</p>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
+                        {showCodeAndAssigneeColumns ? (
+                          <td className="px-4 py-3">
+                            <select
+                              value={taskDrafts[task.id]?.assigneeId ?? ""}
+                              onChange={(event) =>
+                                setTaskDrafts((current) => ({
+                                  ...current,
+                                  [task.id]: {
+                                    ...current[task.id],
+                                    assigneeId: event.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full min-w-[200px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                            >
+                              <option value="">Sin asignar</option>
+                              {users.map((user) => (
+                                <option key={user.id} value={user.id}>
+                                  {user.fullName} ({roleLabels[user.role] ?? user.role})
+                                </option>
+                              ))}
+                            </select>
+                            <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                              Actual: {assigneeLabel(task.assigneeId)}
+                            </p>
+                          </td>
                         ) : null}
-                      </td>
-                      <td className="px-4 py-3">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
-                      <td className="px-4 py-3">{projectLabel(task.projectId)}</td>
-                      {showCodeAndAssigneeColumns ? (
                         <td className="px-4 py-3">
                           <select
-                            value={taskDrafts[task.id]?.assigneeId ?? ""}
+                            value={taskDrafts[task.id]?.status ?? task.status}
                             onChange={(event) =>
                               setTaskDrafts((current) => ({
                                 ...current,
                                 [task.id]: {
                                   ...current[task.id],
-                                  assigneeId: event.target.value,
+                                  status: event.target.value as TaskRow["status"],
                                 },
                               }))
                             }
-                            className="w-full min-w-[200px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                            className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
                           >
-                            <option value="">Sin asignar</option>
-                            {users.map((user) => (
-                              <option key={user.id} value={user.id}>
-                                {user.fullName} ({roleLabels[user.role] ?? user.role})
-                              </option>
-                            ))}
+                            <option value="todo">{statusLabels.todo}</option>
+                            <option value="doing">{statusLabels.doing}</option>
+                            <option value="blocked">{statusLabels.blocked}</option>
+                            <option value="done">{statusLabels.done}</option>
                           </select>
-                          <p className="mt-1 text-xs text-[var(--ink-muted)]">
-                            Actual: {assigneeLabel(task.assigneeId)}
-                          </p>
                         </td>
-                      ) : null}
-                      <td className="px-4 py-3">
-                        <select
-                          value={taskDrafts[task.id]?.status ?? task.status}
-                          onChange={(event) =>
-                            setTaskDrafts((current) => ({
-                              ...current,
-                              [task.id]: {
-                                ...current[task.id],
-                                status: event.target.value as TaskRow["status"],
-                              },
-                            }))
-                          }
-                          className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
-                        >
-                          <option value="todo">{statusLabels.todo}</option>
-                          <option value="doing">{statusLabels.doing}</option>
-                          <option value="blocked">{statusLabels.blocked}</option>
-                          <option value="done">{statusLabels.done}</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={taskDrafts[task.id]?.priority ?? task.priority}
-                          onChange={(event) =>
-                            setTaskDrafts((current) => ({
-                              ...current,
-                              [task.id]: {
-                                ...current[task.id],
-                                priority: event.target.value as TaskRow["priority"],
-                              },
-                            }))
-                          }
-                          className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
-                        >
-                          <option value="low">{priorityLabels.low}</option>
-                          <option value="medium">{priorityLabels.medium}</option>
-                          <option value="high">{priorityLabels.high}</option>
-                          <option value="urgent">{priorityLabels.urgent}</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-3">{task.dueDate ?? "-"}</td>
-                      <td className="px-4 py-3">{task.estimatedHours}</td>
-                      <td className="px-4 py-3 min-w-[270px]">
-                        <div className="flex flex-col gap-2">
-                          <button
-                            onClick={() => void onSaveTaskQuickEdit(task.id)}
-                            disabled={savingTaskId === task.id}
-                            className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                        <td className="px-4 py-3">
+                          <select
+                            value={taskDrafts[task.id]?.priority ?? task.priority}
+                            onChange={(event) =>
+                              setTaskDrafts((current) => ({
+                                ...current,
+                                [task.id]: {
+                                  ...current[task.id],
+                                  priority: event.target.value as TaskRow["priority"],
+                                },
+                              }))
+                            }
+                            className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
                           >
-                            {savingTaskId === task.id ? "Guardando..." : "Guardar"}
-                          </button>
-                          <button
-                            onClick={() => void onToggleHistory(task.id)}
-                            disabled={loadingHistoryTaskId === task.id}
-                            className="rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold transition hover:bg-[var(--background)] disabled:cursor-not-allowed disabled:opacity-70"
-                          >
-                            {loadingHistoryTaskId === task.id
-                              ? "Cargando..."
-                              : openedHistoryTaskId === task.id
-                                ? "Ocultar historial"
-                                : "Ver historial"}
-                          </button>
-                          {canPlanConsequence ? (
+                            <option value="low">{priorityLabels.low}</option>
+                            <option value="medium">{priorityLabels.medium}</option>
+                            <option value="high">{priorityLabels.high}</option>
+                            <option value="urgent">{priorityLabels.urgent}</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-2 text-xs font-semibold ${due.textClass}`}>
+                            <span className={`h-2.5 w-2.5 rounded-full ${due.dotClass}`} />
+                            {due.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">{task.estimatedHours}</td>
+                        <td className="px-4 py-3 min-w-[270px]">
+                          <div className="flex flex-col gap-2">
                             <button
-                              onClick={() => setOpenedConsequenceTaskId(task.id)}
-                              className="rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold transition hover:bg-[var(--background)]"
+                              onClick={() => void onSaveTaskQuickEdit(task.id)}
+                              disabled={savingTaskId === task.id}
+                              className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
                             >
-                              Tarea consecuente
+                              {savingTaskId === task.id ? "Guardando..." : "Guardar"}
                             </button>
-                          ) : null}
-                          {role === "manager" ? (
                             <button
-                              onClick={() => void onDeleteTask(task.id)}
-                              disabled={deletingTaskId === task.id}
-                              className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-xs font-semibold text-[var(--danger)] transition hover:bg-[var(--danger)]/20 disabled:cursor-not-allowed disabled:opacity-70"
+                              onClick={() => void onToggleHistory(task.id)}
+                              disabled={loadingHistoryTaskId === task.id}
+                              className="ui-btn ui-btn-secondary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
                             >
-                              {deletingTaskId === task.id ? "Borrando..." : "Borrar"}
+                              {loadingHistoryTaskId === task.id
+                                ? "Cargando..."
+                                : openedHistoryTaskId === task.id
+                                  ? "Ocultar historial"
+                                  : "Ver historial"}
                             </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
+                            {canPlanConsequence ? (
+                              <button
+                                onClick={() => {
+                                  setTaskDrafts((current) => ({
+                                    ...current,
+                                    [task.id]: {
+                                      ...current[task.id],
+                                      status: "done",
+                                    },
+                                  }));
+                                  setOpenedConsequenceTaskId(task.id);
+                                }}
+                                className="ui-btn ui-btn-secondary ui-btn-sm"
+                              >
+                                Tarea consecuente
+                              </button>
+                            ) : null}
+                            {role === "manager" ? (
+                              <button
+                                onClick={() => void onDeleteTask(task.id)}
+                                disabled={deletingTaskId === task.id}
+                                className="ui-btn ui-btn-danger ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                              >
+                                {deletingTaskId === task.id ? "Borrando..." : "Borrar"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
 
-                    {openedHistoryTaskId === task.id ? (
-                      <tr className="border-b border-[var(--line)]/60">
-                        <td colSpan={showCodeAndAssigneeColumns ? 10 : 8} className="bg-[var(--background)]/35 px-4 py-3">
+                      {openedHistoryTaskId === task.id ? (
+                        <tr className="border-b border-[var(--line)]/60">
+                          <td colSpan={showCodeAndAssigneeColumns ? 8 : 7} className="bg-[var(--background)]/35 px-4 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
                             Historial de updates
                           </p>
@@ -822,11 +1138,12 @@ export default function TasksPage() {
                               Esta tarea no tiene updates todavía.
                             </p>
                           )}
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                ))}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -852,7 +1169,7 @@ export default function TasksPage() {
               </div>
               <button
                 onClick={() => setOpenedConsequenceTaskId("")}
-                className="rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold transition hover:bg-[var(--background)]"
+                className="ui-btn ui-btn-secondary ui-btn-sm"
               >
                 Cerrar
               </button>
@@ -907,6 +1224,42 @@ export default function TasksPage() {
                 <option value="grabacion">grabacion</option>
                 <option value="plataforma">plataforma</option>
               </select>
+              <input
+                type="date"
+                value={consequenceDraft.nextDueDate ?? consequenceTask.dueDate ?? ""}
+                onChange={(event) =>
+                  setTaskDrafts((current) => ({
+                    ...current,
+                    [consequenceTask.id]: {
+                      ...current[consequenceTask.id],
+                      nextDueDate: event.target.value,
+                    },
+                  }))
+                }
+                className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                disabled={!consequenceEnabled}
+              />
+              <label className="text-xs text-[var(--ink-muted)]">
+                Horas estimadas (tarea consecuente)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={consequenceDraft.nextEstimatedHours ?? consequenceTask.estimatedHours ?? ""}
+                  onChange={(event) =>
+                    setTaskDrafts((current) => ({
+                      ...current,
+                      [consequenceTask.id]: {
+                        ...current[consequenceTask.id],
+                        nextEstimatedHours: event.target.value,
+                      },
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                  placeholder="0"
+                  disabled={!consequenceEnabled}
+                />
+              </label>
             </div>
 
             <div className="mt-3 space-y-3">
@@ -945,14 +1298,14 @@ export default function TasksPage() {
             <div className="mt-4 flex flex-wrap justify-end gap-2">
               <button
                 onClick={() => setOpenedConsequenceTaskId("")}
-                className="rounded-lg border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+                className="ui-btn ui-btn-secondary"
               >
                 Cerrar
               </button>
               <button
                 onClick={() => void onSaveTaskQuickEdit(consequenceTask.id)}
                 disabled={savingTaskId === consequenceTask.id}
-                className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                className="ui-btn ui-btn-primary disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {savingTaskId === consequenceTask.id ? "Guardando..." : "Guardar cambios"}
               </button>

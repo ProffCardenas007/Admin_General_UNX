@@ -103,15 +103,15 @@ export default function NotificationsPage() {
           </div>
           <div className="flex flex-wrap gap-3">
             {role === "worker" ? (
-              <Link href="/tasks" className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]">
+              <Link href="/tasks" className="ui-btn ui-btn-secondary">
                 Ver tareas
               </Link>
             ) : (
-              <Link href="/dashboard" className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]">
+              <Link href="/dashboard" className="ui-btn ui-btn-secondary">
                 Volver al panel
               </Link>
             )}
-            <button onClick={() => void markAllRead()} className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110">
+            <button onClick={() => void markAllRead()} className="ui-btn ui-btn-primary">
               Marcar todo leido
             </button>
           </div>
@@ -121,7 +121,7 @@ export default function NotificationsPage() {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as "all" | "unread" | "read")}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+            className="ui-control"
           >
             <option value="all">Todas</option>
             <option value="unread">No leidas</option>
@@ -136,9 +136,11 @@ export default function NotificationsPage() {
 
       <section className="kpi-card fade-up overflow-hidden p-0">
         {loading ? (
-          <p className="p-5 text-sm text-[var(--ink-muted)]">Cargando notificaciones...</p>
+          <div className="p-5">
+            <div className="ui-skeleton h-6 w-56" />
+          </div>
         ) : notifications.length === 0 ? (
-          <p className="p-5 text-sm text-[var(--ink-muted)]">No hay notificaciones para este filtro.</p>
+          <p className="ui-empty m-4 px-4 py-3 text-sm">No hay notificaciones para este filtro.</p>
         ) : (
           <div className="divide-y divide-[var(--line)]/60">
             {notifications.map((notification) => (
@@ -164,7 +166,7 @@ export default function NotificationsPage() {
                     {!notification.isRead ? (
                       <button
                         onClick={() => void markRead(notification.id)}
-                        className="rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold transition hover:bg-[var(--background)]"
+                        className="ui-btn ui-btn-secondary ui-btn-sm"
                       >
                         Marcar leida
                       </button>

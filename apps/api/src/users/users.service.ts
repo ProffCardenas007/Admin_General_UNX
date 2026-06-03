@@ -101,4 +101,24 @@ export class UsersService {
 	async setPasswordHash(userId: string, passwordHash: string) {
 		await this.usersRepository.update({ id: userId }, { passwordHash });
 	}
+
+	async remove(userId: string) {
+		const user = await this.usersRepository.findOne({ where: { id: userId } });
+		if (!user) {
+			throw new NotFoundException('User not found');
+		}
+
+		if (user.role === 'manager') {
+			throw new BadRequestException('Manager users cannot be deleted');
+		}
+
+		try {
+			await this.usersRepository.delete({ id: userId });
+			return { deleted: true, userId };
+		} catch {
+			throw new BadRequestException(
+				'User cannot be deleted because it has related records (tasks, updates or notifications)',
+			);
+		}
+	}
 }

@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { getStoredRole } from "../lib/api";
 
 export default function AppBrandLink() {
+  const router = useRouter();
   const [href, setHref] = useState("/dashboard");
 
   useEffect(() => {
@@ -13,7 +15,16 @@ export default function AppBrandLink() {
   }, []);
 
   return (
-    <Link href={href} className="app-brand" aria-label="Ir al panel principal">
+    <Link
+      href={href}
+      className="app-brand"
+      aria-label="Ir al panel principal"
+      onClick={(event) => {
+        event.preventDefault();
+        const role = getStoredRole();
+        router.push(role === "worker" ? "/tasks" : "/dashboard");
+      }}
+    >
       <img src="/Logo%20UNX%20PIENSE.png" alt="Logo de la empresa" className="app-brand-logo" />
       <div>
         <p className="app-brand-name">UNX</p>

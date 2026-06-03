@@ -1,11 +1,9 @@
 export const LEAD_SPECIALTIES = [
-  'paa_mate',
-  'paa_espanol',
-  'exani_ii_mate',
-  'exani_ii_espanol',
-  'modulos_especificos',
-  'unam_mate',
-  'unam_espanol',
+  'paa',
+  'exani_ii',
+  'piense',
+  'unam',
+  'modulos',
 ] as const;
 
 export type LeadSpecialty = (typeof LEAD_SPECIALTIES)[number];
