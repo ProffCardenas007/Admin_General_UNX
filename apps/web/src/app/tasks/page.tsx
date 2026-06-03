@@ -94,6 +94,7 @@ export default function TasksPage() {
   const [loadingHistoryTaskId, setLoadingHistoryTaskId] = useState("");
   const [openedHistoryTaskId, setOpenedHistoryTaskId] = useState("");
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
+  const showCodeAndAssigneeColumns = role !== "worker";
   const [historyByTask, setHistoryByTask] = useState<Record<string, TaskUpdateRow[]>>({});
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
@@ -522,7 +523,7 @@ export default function TasksPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-            placeholder="Buscar por código o título"
+            placeholder={role === "worker" ? "Buscar por título" : "Buscar por código o título"}
           />
           <select
             value={projectFilter}
@@ -644,11 +645,11 @@ export default function TasksPage() {
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
-                  <th className="px-4 py-3 font-semibold">Código</th>
+                  {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Código</th> : null}
                   <th className="px-4 py-3 font-semibold">Título</th>
                   <th className="px-4 py-3 font-semibold">Actividad</th>
                   <th className="px-4 py-3 font-semibold">Proyecto</th>
-                  <th className="px-4 py-3 font-semibold">Asignado</th>
+                  {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Asignado</th> : null}
                   <th className="px-4 py-3 font-semibold">Estado</th>
                   <th className="px-4 py-3 font-semibold">Prioridad</th>
                   <th className="px-4 py-3 font-semibold">Vence</th>
@@ -660,7 +661,9 @@ export default function TasksPage() {
                 {filteredTasks.map((task) => (
                   <Fragment key={task.id}>
                     <tr className="border-b border-[var(--line)]/60 align-top">
-                      <td className="px-4 py-3 font-mono text-xs">{task.code}</td>
+                      {showCodeAndAssigneeColumns ? (
+                        <td className="px-4 py-3 font-mono text-xs">{task.code}</td>
+                      ) : null}
                       <td className="px-4 py-3">
                         <p className="font-semibold">{task.title}</p>
                         {task.description ? (
@@ -669,31 +672,33 @@ export default function TasksPage() {
                       </td>
                       <td className="px-4 py-3">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
                       <td className="px-4 py-3">{projectLabel(task.projectId)}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={taskDrafts[task.id]?.assigneeId ?? ""}
-                          onChange={(event) =>
-                            setTaskDrafts((current) => ({
-                              ...current,
-                              [task.id]: {
-                                ...current[task.id],
-                                assigneeId: event.target.value,
-                              },
-                            }))
-                          }
-                          className="w-full min-w-[200px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
-                        >
-                          <option value="">Sin asignar</option>
-                          {users.map((user) => (
-                            <option key={user.id} value={user.id}>
-                              {user.fullName} ({roleLabels[user.role] ?? user.role})
-                            </option>
-                          ))}
-                        </select>
-                        <p className="mt-1 text-xs text-[var(--ink-muted)]">
-                          Actual: {assigneeLabel(task.assigneeId)}
-                        </p>
-                      </td>
+                      {showCodeAndAssigneeColumns ? (
+                        <td className="px-4 py-3">
+                          <select
+                            value={taskDrafts[task.id]?.assigneeId ?? ""}
+                            onChange={(event) =>
+                              setTaskDrafts((current) => ({
+                                ...current,
+                                [task.id]: {
+                                  ...current[task.id],
+                                  assigneeId: event.target.value,
+                                },
+                              }))
+                            }
+                            className="w-full min-w-[200px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                          >
+                            <option value="">Sin asignar</option>
+                            {users.map((user) => (
+                              <option key={user.id} value={user.id}>
+                                {user.fullName} ({roleLabels[user.role] ?? user.role})
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                            Actual: {assigneeLabel(task.assigneeId)}
+                          </p>
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3">
                         <select
                           value={taskDrafts[task.id]?.status ?? task.status}
@@ -779,7 +784,7 @@ export default function TasksPage() {
 
                     {openedHistoryTaskId === task.id ? (
                       <tr className="border-b border-[var(--line)]/60">
-                        <td colSpan={10} className="bg-[var(--background)]/35 px-4 py-3">
+                        <td colSpan={showCodeAndAssigneeColumns ? 10 : 8} className="bg-[var(--background)]/35 px-4 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
                             Historial de updates
                           </p>
