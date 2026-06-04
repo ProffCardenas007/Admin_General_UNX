@@ -1,15 +1,27 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 
-const ALLOWED_SPECIALTIES = new Set([
-  "paa_mate",
-  "paa_espanol",
-  "exani_ii_mate",
-  "exani_ii_espanol",
-  "modulos_especificos",
-  "unam_mate",
-  "unam_espanol",
-]);
+const SPECIALTY_ALIAS: Record<string, string> = {
+  paa: "paa",
+  paa_mate: "paa",
+  paa_espanol: "paa",
+  exani_ii: "exani_ii",
+  exani_mate: "exani_ii",
+  exani_espanol: "exani_ii",
+  exani_ii_mate: "exani_ii",
+  exani_ii_espanol: "exani_ii",
+  piense: "piense",
+  unam: "unam",
+  unam_mate: "unam",
+  unam_espanol: "unam",
+  modulos: "modulos",
+  modulos_especificos: "modulos",
+};
+
+function normalizeStoredSpecialty(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return SPECIALTY_ALIAS[normalized] ?? "";
+}
 
 export function getStoredToken() {
   return window.localStorage.getItem("sistema_mvp_token") ?? "";
@@ -47,8 +59,9 @@ export function getStoredRole() {
 
 export function getStoredSpecialty() {
   const directSpecialty = window.localStorage.getItem("sistema_mvp_specialty") ?? "";
-  if (directSpecialty && ALLOWED_SPECIALTIES.has(directSpecialty)) {
-    return directSpecialty;
+  const normalizedDirectSpecialty = normalizeStoredSpecialty(directSpecialty);
+  if (normalizedDirectSpecialty) {
+    return normalizedDirectSpecialty;
   }
 
   const token = getStoredToken();
@@ -65,8 +78,7 @@ export function getStoredSpecialty() {
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
     const parsed = JSON.parse(window.atob(padded)) as { specialty?: string };
-    const tokenSpecialty = parsed.specialty ?? "";
-    return ALLOWED_SPECIALTIES.has(tokenSpecialty) ? tokenSpecialty : "";
+    return normalizeStoredSpecialty(parsed.specialty ?? "");
   } catch {
     return "";
   }
