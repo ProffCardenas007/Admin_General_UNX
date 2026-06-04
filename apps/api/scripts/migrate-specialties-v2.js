@@ -22,15 +22,16 @@ async function run() {
 
     await client.query('COMMIT');
 
-    await client.query("UPDATE users SET specialty = 'paa' WHERE specialty IN ('paa_mate', 'paa_espanol')");
-    await client.query("UPDATE users SET specialty = 'exani_ii' WHERE specialty IN ('exani_ii_mate', 'exani_ii_espanol')");
-    await client.query("UPDATE users SET specialty = 'unam' WHERE specialty IN ('unam_mate', 'unam_espanol')");
-    await client.query("UPDATE users SET specialty = 'modulos' WHERE specialty = 'modulos_especificos'");
+    // Match by text to support multiple legacy enum labels without casting errors.
+    await client.query("UPDATE users SET specialty = 'paa' WHERE specialty::text LIKE 'paa%'");
+    await client.query("UPDATE users SET specialty = 'exani_ii' WHERE specialty::text LIKE 'exani%'");
+    await client.query("UPDATE users SET specialty = 'unam' WHERE specialty::text LIKE 'unam%'");
+    await client.query("UPDATE users SET specialty = 'modulos' WHERE specialty::text LIKE 'modulos%'");
 
-    await client.query("UPDATE projects SET scope = 'paa' WHERE scope IN ('paa_mate', 'paa_espanol')");
-    await client.query("UPDATE projects SET scope = 'exani_ii' WHERE scope IN ('exani_ii_mate', 'exani_ii_espanol')");
-    await client.query("UPDATE projects SET scope = 'unam' WHERE scope IN ('unam_mate', 'unam_espanol')");
-    await client.query("UPDATE projects SET scope = 'modulos' WHERE scope = 'modulos_especificos'");
+    await client.query("UPDATE projects SET scope = 'paa' WHERE scope::text LIKE 'paa%'");
+    await client.query("UPDATE projects SET scope = 'exani_ii' WHERE scope::text LIKE 'exani%'");
+    await client.query("UPDATE projects SET scope = 'unam' WHERE scope::text LIKE 'unam%'");
+    await client.query("UPDATE projects SET scope = 'modulos' WHERE scope::text LIKE 'modulos%'");
 
     await client.query('BEGIN');
 
