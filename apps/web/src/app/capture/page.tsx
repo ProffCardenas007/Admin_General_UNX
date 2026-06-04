@@ -12,7 +12,12 @@ import {
   getStoredSpecialty,
   getStoredToken,
 } from "../../lib/api";
-import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import {
+  LEAD_SPECIALTIES,
+  normalizeLeadSpecialtyInput,
+  specialtyLabels,
+  type LeadSpecialty,
+} from "../../lib/specialties";
 
 type ProjectOption = {
   id: string;
@@ -170,7 +175,7 @@ export default function CapturePage() {
           (user) => user.email.toLowerCase() === currentEmail,
         );
 
-        const resolvedSpecialty = (currentLead?.specialty ?? "").trim();
+        const resolvedSpecialty = normalizeLeadSpecialtyInput(currentLead?.specialty ?? "");
         if (resolvedSpecialty.length > 0) {
           setSpecialty(resolvedSpecialty);
           setProjectForm((current) => ({ ...current, scope: resolvedSpecialty }));
@@ -219,7 +224,7 @@ export default function CapturePage() {
       return;
     }
 
-    const savedSpecialty = getStoredSpecialty();
+    const savedSpecialty = normalizeLeadSpecialtyInput(getStoredSpecialty());
     setEmail(getStoredEmail());
     setRole(savedRole);
     setSpecialty(savedSpecialty);
@@ -248,10 +253,13 @@ export default function CapturePage() {
     }
 
     try {
+      const normalizedScope = normalizeLeadSpecialtyInput(
+        role === "lead" ? specialty || projectForm.scope : projectForm.scope,
+      );
       const payload = {
         code: projectForm.code,
         name: projectForm.name,
-        scope: role === "lead" ? specialty || projectForm.scope || undefined : projectForm.scope || undefined,
+        scope: normalizedScope || undefined,
         status: projectForm.status,
         startDate: projectForm.startDate || undefined,
         endDate: projectForm.endDate || undefined,

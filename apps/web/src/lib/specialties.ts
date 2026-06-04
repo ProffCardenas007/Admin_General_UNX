@@ -16,6 +16,23 @@ export const specialtyLabels: Record<LeadSpecialty, string> = {
   modulos: 'Módulos',
 };
 
+const leadSpecialtyAliases: Record<string, LeadSpecialty> = {
+  paa: 'paa',
+  paa_mate: 'paa',
+  paa_espanol: 'paa',
+  exani_ii: 'exani_ii',
+  exani_mate: 'exani_ii',
+  exani_espanol: 'exani_ii',
+  exani_ii_mate: 'exani_ii',
+  exani_ii_espanol: 'exani_ii',
+  piense: 'piense',
+  unam: 'unam',
+  unam_mate: 'unam',
+  unam_espanol: 'unam',
+  modulos: 'modulos',
+  modulos_especificos: 'modulos',
+};
+
 const legacySpecialtyByCurrent: Partial<Record<LeadSpecialty, string>> = {
   paa: 'paa_mate',
   exani_ii: 'exani_ii_mate',
@@ -25,4 +42,13 @@ const legacySpecialtyByCurrent: Partial<Record<LeadSpecialty, string>> = {
 
 export function toLegacyLeadSpecialty(specialty: LeadSpecialty): string | undefined {
   return legacySpecialtyByCurrent[specialty];
+}
+
+export function normalizeLeadSpecialtyInput(value?: string | null): LeadSpecialty | "" {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return leadSpecialtyAliases[normalized] ?? "";
 }
