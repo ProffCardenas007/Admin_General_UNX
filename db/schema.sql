@@ -12,27 +12,11 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'lead_specialty') THEN
-        CREATE TYPE lead_specialty AS ENUM (
-            'paa_mate',
-            'paa_espanol',
-            'exani_ii_mate',
-            'exani_ii_espanol',
-            'modulos_especificos',
-            'unam_mate',
-            'unam_espanol'
-        );
+        CREATE TYPE lead_specialty AS ENUM ('EXANI-II');
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_scope') THEN
-        CREATE TYPE project_scope AS ENUM (
-            'paa_mate',
-            'paa_espanol',
-            'exani_ii_mate',
-            'exani_ii_espanol',
-            'modulos_especificos',
-            'unam_mate',
-            'unam_espanol'
-        );
+        CREATE TYPE project_scope AS ENUM ('EXANI-II');
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_status') THEN
@@ -207,3 +191,4 @@ LEFT JOIN tasks t ON t.project_id = p.id
 GROUP BY p.id, p.code, p.name;
 
 COMMIT;
+
