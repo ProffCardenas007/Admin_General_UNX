@@ -5,7 +5,7 @@ import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
-import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { LEAD_SPECIALTIES, specialtyLabels, toLegacyLeadSpecialty, type LeadSpecialty } from "../../lib/specialties";
 
 type UserRow = {
   id: string;
@@ -60,6 +60,13 @@ const taskStatusLabels: Record<TaskStatsRow["status"], string> = {
   blocked: "bloqueada",
   done: "finalizada",
 };
+
+function isLegacySpecialtyValidationMessage(message: string) {
+  return (
+    message.includes("specialty must be one of the following values") &&
+    message.includes("paa_mate")
+  );
+}
 
 export default function UsersPage() {
   const router = useRouter();
@@ -360,18 +367,58 @@ export default function UsersPage() {
     setInfo("");
     setSavingUserId(userId);
 
+    const payload = {
+      fullName: draft.fullName,
+      role: draft.role,
+      specialty: draft.role === "lead" ? draft.specialty || undefined : null,
+      isActive: draft.isActive,
+      password: draft.password.trim().length > 0 ? draft.password : undefined,
+    };
+
     try {
-      const response = await axios.patch(
-        `${API_URL}/users/${userId}`,
-        {
-          fullName: draft.fullName,
-          role: draft.role,
-          specialty: draft.role === "lead" ? draft.specialty || undefined : null,
-          isActive: draft.isActive,
-          password: draft.password.trim().length > 0 ? draft.password : undefined,
-        },
-        { headers: authHeaders() },
-      );
+      let response;
+
+      try {
+        response = await axios.patch(`${API_URL}/users/${userId}`, payload, { headers: authHeaders() });
+      } catch (firstError) {
+        if (!axios.isAxiosError(firstError)) {
+          throw firstError;
+        }
+
+        const status = firstError.response?.status;
+        const rawMessage = firstError.response?.data?.message;
+        const message =
+          typeof rawMessage === "string"
+            ? rawMessage
+            : Array.isArray(rawMessage)
+              ? rawMessage.join(". ")
+              : "";
+
+        const canRetryLegacy =
+          draft.role === "lead" &&
+          !!draft.specialty &&
+          status === 400 &&
+          isLegacySpecialtyValidationMessage(message);
+
+        if (!canRetryLegacy) {
+          throw firstError;
+        }
+
+        if (!draft.specialty) {
+          throw firstError;
+        }
+
+        const legacySpecialty = toLegacyLeadSpecialty(draft.specialty as LeadSpecialty);
+        if (!legacySpecialty) {
+          throw firstError;
+        }
+
+        response = await axios.patch(
+          `${API_URL}/users/${userId}`,
+          { ...payload, specialty: legacySpecialty },
+          { headers: authHeaders() },
+        );
+      }
 
       const updated = response.data as UserRow;
       setUsers((current) =>
