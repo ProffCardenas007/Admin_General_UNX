@@ -57,7 +57,7 @@ export default function Home() {
               Sistema de proyectos
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
-              Control ejecutivo tipo monday
+              Control Academico UNX
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
               Inicia sesion y observa avance global, carga por persona y tendencia

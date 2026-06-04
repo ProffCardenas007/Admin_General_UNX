@@ -6,6 +6,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { LEAD_SPECIALTY_INPUTS } from '../../common/specialties';
 
 export class CreateUserDto {
@@ -20,6 +21,7 @@ export class CreateUserDto {
   role: 'manager' | 'lead' | 'worker';
 
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsIn(LEAD_SPECIALTY_INPUTS)
   specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number];
 

@@ -352,8 +352,24 @@ export default function CapturePage() {
         teamId: "",
       });
       await loadLookups();
-    } catch {
-      setMessage("No se pudo crear el usuario. Revisa nombre, correo, rol y contrasena (minimo 6). ");
+    } catch (caughtError) {
+      if (axios.isAxiosError(caughtError)) {
+        const rawMessage = caughtError.response?.data?.message;
+        const backendMessage =
+          typeof rawMessage === "string"
+            ? rawMessage
+            : Array.isArray(rawMessage)
+              ? rawMessage.join(". ")
+              : "";
+
+        if (backendMessage) {
+          setMessage(`No se pudo crear el usuario: ${backendMessage}`);
+        } else {
+          setMessage("No se pudo crear el usuario. Revisa nombre, correo, rol y contrasena (minimo 6).");
+        }
+      } else {
+        setMessage("No se pudo crear el usuario. Revisa nombre, correo, rol y contrasena (minimo 6).");
+      }
     }
   };
 
