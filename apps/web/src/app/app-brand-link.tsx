@@ -25,7 +25,6 @@ export default function AppBrandLink() {
         router.push(role === "worker" ? "/tasks" : "/dashboard");
       }}
     >
-      <img src="/Logo%20UNX%20PIENSE.png" alt="Logo de la empresa" className="app-brand-logo" />
       <div>
         <p className="app-brand-name">UNX</p>
         <p className="app-brand-subtitle">Sistema de Proyectos</p>
