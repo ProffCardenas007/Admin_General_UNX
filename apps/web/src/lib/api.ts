@@ -3,19 +3,10 @@ export const API_URL =
 
 const SPECIALTY_ALIAS: Record<string, string> = {
   paa: "paa",
-  paa_mate: "paa",
-  paa_espanol: "paa",
   exani_ii: "exani_ii",
-  exani_mate: "exani_ii",
-  exani_espanol: "exani_ii",
-  exani_ii_mate: "exani_ii",
-  exani_ii_espanol: "exani_ii",
   piense: "piense",
   unam: "unam",
-  unam_mate: "unam",
-  unam_espanol: "unam",
   modulos: "modulos",
-  modulos_especificos: "modulos",
 };
 
 function normalizeStoredSpecialty(value: string) {

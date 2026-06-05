@@ -247,6 +247,31 @@ export default function CapturePage() {
   const submitProject = async () => {
     setMessage("");
 
+    const trimmedCode = projectForm.code.trim();
+    const trimmedName = projectForm.name.trim();
+
+    if (!trimmedCode || !trimmedName) {
+      setMessage("No se pudo crear el proyecto: academia y nombre son obligatorios.");
+      return;
+    }
+
+    const usedNames = new Set(
+      projects.map((project) => project.name.trim().toLowerCase()),
+    );
+
+    if (usedNames.has(trimmedName.toLowerCase())) {
+      let suggestedName = trimmedName;
+      let suffix = 2;
+
+      while (usedNames.has(suggestedName.toLowerCase())) {
+        suggestedName = `${trimmedName} ${suffix}`;
+        suffix += 1;
+      }
+
+      setMessage(`No se pudo crear el proyecto: el nombre ${trimmedName} ya existe. Prueba con ${suggestedName}.`);
+      return;
+    }
+
     if (role === "lead" && !specialty && !projectForm.scope) {
       setMessage("No se pudo crear el proyecto: tu cuenta de lider no tiene especialidad asignada.");
       return;
@@ -257,8 +282,8 @@ export default function CapturePage() {
         role === "lead" ? specialty || projectForm.scope : projectForm.scope,
       );
       const payload = {
-        code: projectForm.code,
-        name: projectForm.name,
+        code: trimmedCode,
+        name: trimmedName,
         scope: normalizedScope || undefined,
         status: projectForm.status,
         startDate: projectForm.startDate || undefined,
@@ -266,7 +291,7 @@ export default function CapturePage() {
       };
 
       await axios.post(`${API_URL}/projects`, payload, { headers: authHeaders() });
-      setMessage(`Proyecto ${projectForm.code} creado.`);
+      setMessage(`Proyecto ${trimmedCode} creado.`);
       setProjectForm({
         code: "",
         name: "",

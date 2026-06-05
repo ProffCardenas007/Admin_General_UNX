@@ -10,6 +10,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "migrate:specialties:v2": "node scripts/migrate-specialties-v2.js",
+    "migrate:projects:uniqueness": "node scripts/migrate-project-uniqueness.js",
     "upsert:manager": "node scripts/upsert-manager.js",
     "free-port": "node scripts/free-port.js 4000",
     "start:dev": "npm run free-port && ts-node-dev --respawn --transpile-only src/main.ts",

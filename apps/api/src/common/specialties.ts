@@ -6,22 +6,7 @@ export const LEAD_SPECIALTIES = [
   'modulos',
 ] as const;
 
-export const LEGACY_LEAD_SPECIALTY_ALIASES = {
-  paa_mate: 'paa',
-  paa_espanol: 'paa',
-  exani_mate: 'exani_ii',
-  exani_espanol: 'exani_ii',
-  exani_ii_mate: 'exani_ii',
-  exani_ii_espanol: 'exani_ii',
-  unam_mate: 'unam',
-  unam_espanol: 'unam',
-  modulos_especificos: 'modulos',
-} as const;
-
-export const LEAD_SPECIALTY_INPUTS = [
-  ...LEAD_SPECIALTIES,
-  ...Object.keys(LEGACY_LEAD_SPECIALTY_ALIASES),
-] as const;
+export const LEAD_SPECIALTY_INPUTS = LEAD_SPECIALTIES;
 
 export type LeadSpecialty = (typeof LEAD_SPECIALTIES)[number];
 export type LeadSpecialtyInput = (typeof LEAD_SPECIALTY_INPUTS)[number];
@@ -39,7 +24,7 @@ export function normalizeLeadSpecialty(value?: string | null): LeadSpecialty | u
     return normalized as LeadSpecialty;
   }
 
-  return (LEGACY_LEAD_SPECIALTY_ALIASES as Record<string, LeadSpecialty>)[normalized];
+  return undefined;
 }
 
 export function isLeadSpecialty(value?: string | null): value is LeadSpecialty {

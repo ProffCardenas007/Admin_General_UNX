@@ -14,10 +14,10 @@ export class ProjectEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 40, unique: true })
+  @Column({ type: 'varchar', length: 40 })
   code: string;
 
-  @Column({ type: 'varchar', length: 160 })
+  @Column({ type: 'varchar', length: 160, unique: true })
   name: string;
 
   @Column({ name: 'client_name', type: 'varchar', length: 160, nullable: true })

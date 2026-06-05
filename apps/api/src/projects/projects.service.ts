@@ -1,6 +1,12 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+	BadRequestException,
+	ConflictException,
+	ForbiddenException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { UserEntity } from '../database/entities/user.entity';
@@ -82,6 +88,18 @@ export class ProjectsService {
 		dto: CreateProjectDto,
 		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
 	) {
+		const normalizedCode = dto.code.trim();
+		const normalizedName = dto.name.trim();
+
+		const existingByName = await this.projectsRepository
+			.createQueryBuilder('project')
+			.where('LOWER(project.name) = LOWER(:name)', { name: normalizedName })
+			.getOne();
+
+		if (existingByName) {
+			throw new ConflictException('Project name already exists');
+		}
+
 		let resolvedScope = dto.scope ?? null;
 		const leadSpecialty = await this.resolveLeadSpecialty(actor);
 
@@ -98,10 +116,53 @@ export class ProjectsService {
 
 		const project = this.projectsRepository.create({
 			...dto,
+			code: normalizedCode,
+			name: normalizedName,
 			scope: resolvedScope,
 			status: dto.status ?? 'planned',
 		});
-		return this.projectsRepository.save(project);
+
+		try {
+			return await this.projectsRepository.save(project);
+		} catch (error) {
+			if (error instanceof QueryFailedError) {
+				const dbError = error as QueryFailedError & {
+					code?: string;
+					constraint?: string;
+					detail?: string;
+				};
+
+				if (dbError.code === '23505') {
+					if (dbError.constraint?.includes('projects_name')) {
+						throw new ConflictException('Project name already exists');
+					}
+
+					if (dbError.constraint?.includes('projects_code')) {
+						throw new ConflictException('Project code already exists');
+					}
+
+					throw new ConflictException('Duplicate project data');
+				}
+
+				if (dbError.code === '23503') {
+					if (dbError.constraint?.includes('owner_team_id')) {
+						throw new BadRequestException('Owner team does not exist');
+					}
+
+					throw new BadRequestException('Related record not found');
+				}
+
+				if (dbError.code === '22P02') {
+					throw new BadRequestException('Invalid project data format');
+				}
+
+				if (dbError.code === '23514') {
+					throw new BadRequestException('Project data violates database constraints');
+				}
+			}
+
+			throw error;
+		}
 	}
 
 	async getProgress(
