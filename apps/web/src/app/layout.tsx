@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import AppBrandLink from "./app-brand-link";
 import "./globals.css";
 
@@ -36,6 +37,7 @@ export default function RootLayout({
           </div>
         </header>
         <main className="flex-1">{children}</main>
+        <SpeedInsights />
       </body>
     </html>
   );
