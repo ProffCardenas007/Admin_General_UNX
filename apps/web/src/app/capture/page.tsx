@@ -12,7 +12,12 @@ import {
   getStoredSpecialty,
   getStoredToken,
 } from "../../lib/api";
-import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import {
+  LEAD_SPECIALTIES,
+  normalizeLeadSpecialtyInput,
+  specialtyLabels,
+  type LeadSpecialty,
+} from "../../lib/specialties";
 
 type ProjectOption = {
   id: string;
@@ -26,6 +31,7 @@ type UserOption = {
   fullName: string;
   email: string;
   role: string;
+  specialty?: string | null;
 };
 
 type TaskOption = {
@@ -68,7 +74,7 @@ const priorityOptions = [
 const roleOptions = [
   { value: "manager", label: "gerencia" },
   { value: "lead", label: "líder" },
-  { value: "worker", label: "trabajador" },
+  { value: "worker", label: "colaborador" },
 ] as const;
 
 export default function CapturePage() {
@@ -82,6 +88,29 @@ export default function CapturePage() {
   const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const projectCodeLabel = role === "manager" || role === "lead" ? "Academia" : "Código";
+
+  const projectTaskSpecialtyLabel = (project?: ProjectOption) => {
+    if (!project?.scope) {
+      return "";
+    }
+
+    return specialtyLabels[project.scope];
+  };
+
+  const getLeadSpecialtyLabel = () => {
+    const rawSpecialty = (specialty || projectForm.scope || "").trim();
+    if (!rawSpecialty) {
+      return "Sin especialidad asignada";
+    }
+
+    const normalizedSpecialty = rawSpecialty.toLowerCase() as LeadSpecialty;
+    if ((LEAD_SPECIALTIES as readonly string[]).includes(normalizedSpecialty)) {
+      return specialtyLabels[normalizedSpecialty];
+    }
+
+    return rawSpecialty;
+  };
 
   const [projectForm, setProjectForm] = useState({
     code: "",
@@ -103,6 +132,8 @@ export default function CapturePage() {
     dueDate: "",
     estimatedHours: "",
   });
+
+  const selectedTaskProject = projects.find((project) => project.id === taskForm.projectId);
 
   const [userForm, setUserForm] = useState({
     fullName: "",
@@ -137,8 +168,31 @@ export default function CapturePage() {
       setUsers(userResponse.data as UserOption[]);
       setTasks(taskResponse.data as TaskOption[]);
 
+      const currentRole = getStoredRole();
+      const currentEmail = getStoredEmail().toLowerCase();
+      if (currentRole === "lead" && userResponse.data?.length > 0) {
+        const currentLead = (userResponse.data as UserOption[]).find(
+          (user) => user.email.toLowerCase() === currentEmail,
+        );
+
+        const resolvedSpecialty = normalizeLeadSpecialtyInput(currentLead?.specialty ?? "");
+        if (resolvedSpecialty.length > 0) {
+          setSpecialty(resolvedSpecialty);
+          setProjectForm((current) => ({ ...current, scope: resolvedSpecialty }));
+          setUserForm((current) => ({ ...current, specialty: resolvedSpecialty }));
+        }
+      }
+
       if (projectResponse.data?.length > 0) {
-        setTaskForm((current) => ({ ...current, projectId: projectResponse.data[0].id }));
+        setTaskForm((current) => {
+          const hasSelectedProject = projectResponse.data.some(
+            (project: ProjectOption) => project.id === current.projectId,
+          );
+
+          return hasSelectedProject
+            ? current
+            : { ...current, projectId: projectResponse.data[0].id };
+        });
       }
 
       if (userResponse.data?.length > 0) {
@@ -164,17 +218,27 @@ export default function CapturePage() {
       return;
     }
 
-    const savedSpecialty = getStoredSpecialty();
+    const savedRole = getStoredRole();
+    if (savedRole === "worker") {
+      router.replace("/tasks");
+      return;
+    }
+
+    const savedSpecialty = normalizeLeadSpecialtyInput(getStoredSpecialty());
     setEmail(getStoredEmail());
-    setRole(getStoredRole());
+    setRole(savedRole);
     setSpecialty(savedSpecialty);
     if (savedSpecialty) {
       setProjectForm((current) => ({ ...current, scope: savedSpecialty }));
       setUserForm((current) => ({ ...current, specialty: savedSpecialty }));
     }
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
+    const requestedProjectId = new URLSearchParams(window.location.search).get("projectId");
     if (requestedMode === "project" || requestedMode === "task") {
       setCaptureMode(requestedMode);
+    }
+    if (requestedProjectId) {
+      setTaskForm((current) => ({ ...current, projectId: requestedProjectId }));
     }
 
     void loadLookups();
@@ -183,23 +247,51 @@ export default function CapturePage() {
   const submitProject = async () => {
     setMessage("");
 
+    const trimmedCode = projectForm.code.trim();
+    const trimmedName = projectForm.name.trim();
+
+    if (!trimmedCode || !trimmedName) {
+      setMessage("No se pudo crear el proyecto: academia y nombre son obligatorios.");
+      return;
+    }
+
+    const usedNames = new Set(
+      projects.map((project) => project.name.trim().toLowerCase()),
+    );
+
+    if (usedNames.has(trimmedName.toLowerCase())) {
+      let suggestedName = trimmedName;
+      let suffix = 2;
+
+      while (usedNames.has(suggestedName.toLowerCase())) {
+        suggestedName = `${trimmedName} ${suffix}`;
+        suffix += 1;
+      }
+
+      setMessage(`No se pudo crear el proyecto: el nombre ${trimmedName} ya existe. Prueba con ${suggestedName}.`);
+      return;
+    }
+
     if (role === "lead" && !specialty && !projectForm.scope) {
       setMessage("No se pudo crear el proyecto: tu cuenta de lider no tiene especialidad asignada.");
       return;
     }
 
     try {
+      const normalizedScope = normalizeLeadSpecialtyInput(
+        role === "lead" ? specialty || projectForm.scope : projectForm.scope,
+      );
       const payload = {
-        code: projectForm.code,
-        name: projectForm.name,
-        scope: role === "lead" ? specialty || projectForm.scope || undefined : projectForm.scope || undefined,
+        code: trimmedCode,
+        name: trimmedName,
+        scope: normalizedScope || undefined,
         status: projectForm.status,
         startDate: projectForm.startDate || undefined,
         endDate: projectForm.endDate || undefined,
       };
 
       await axios.post(`${API_URL}/projects`, payload, { headers: authHeaders() });
-      setMessage(`Proyecto ${projectForm.code} creado.`);
+      setMessage(`Proyecto ${trimmedCode} creado.`);
       setProjectForm({
         code: "",
         name: "",
@@ -293,8 +385,24 @@ export default function CapturePage() {
         teamId: "",
       });
       await loadLookups();
-    } catch {
-      setMessage("No se pudo crear el usuario. Revisa nombre, correo, rol y contrasena (minimo 6). ");
+    } catch (caughtError) {
+      if (axios.isAxiosError(caughtError)) {
+        const rawMessage = caughtError.response?.data?.message;
+        const backendMessage =
+          typeof rawMessage === "string"
+            ? rawMessage
+            : Array.isArray(rawMessage)
+              ? rawMessage.join(". ")
+              : "";
+
+        if (backendMessage) {
+          setMessage(`No se pudo crear el usuario: ${backendMessage}`);
+        } else {
+          setMessage("No se pudo crear el usuario. Revisa nombre, correo, rol y contrasena (minimo 6).");
+        }
+      } else {
+        setMessage("No se pudo crear el usuario. Revisa nombre, correo, rol y contrasena (minimo 6).");
+      }
     }
   };
 
@@ -339,7 +447,7 @@ export default function CapturePage() {
               Carga de datos
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesión activa como ${email}.` : "Sesión activa."} Aquí puedes crear proyectos, tareas y usuarios.
+              {email ? `Sesión activa como ${email}.` : "Sesión activa."} {role === "manager" ? "Aquí puedes crear proyectos, tareas y usuarios." : "Aquí puedes crear proyectos y tareas."}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -349,12 +457,14 @@ export default function CapturePage() {
             >
               Volver al panel
             </Link>
-            <Link
-              href="/users"
-              className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
-            >
-              Ver usuarios
-            </Link>
+            {role === "manager" ? (
+              <Link
+                href="/users"
+                className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+              >
+                Ver usuarios
+              </Link>
+            ) : null}
           </div>
         </div>
 
@@ -405,21 +515,29 @@ export default function CapturePage() {
           <p className="mt-1 text-sm text-[var(--ink-muted)]">Llena esto para registrar un proyecto.</p>
 
           <div className="mt-5 space-y-3">
-            <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Código" value={projectForm.code} onChange={(event) => setProjectForm({ ...projectForm, code: event.target.value })} />
+            <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder={projectCodeLabel} value={projectForm.code} onChange={(event) => setProjectForm({ ...projectForm, code: event.target.value })} />
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Nombre" value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} />
-            <select
-              className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-              value={projectForm.scope}
-              onChange={(event) => setProjectForm({ ...projectForm, scope: event.target.value })}
-              disabled={role === "lead" && Boolean(specialty)}
-            >
-              <option value="">Especialidad del proyecto</option>
-              {LEAD_SPECIALTIES.map((item) => (
-                <option key={item} value={item}>
-                  {specialtyLabels[item]}
-                </option>
-              ))}
-            </select>
+            {role === "lead" ? (
+              <input
+                className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
+                placeholder="Especialidad del proyecto"
+                value={getLeadSpecialtyLabel()}
+                readOnly
+              />
+            ) : (
+              <select
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={projectForm.scope}
+                onChange={(event) => setProjectForm({ ...projectForm, scope: event.target.value })}
+              >
+                <option value="">Especialidad del proyecto</option>
+                {LEAD_SPECIALTIES.map((item) => (
+                  <option key={item} value={item}>
+                    {specialtyLabels[item]}
+                  </option>
+                ))}
+              </select>
+            )}
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={projectForm.status} onChange={(event) => setProjectForm({ ...projectForm, status: event.target.value })}>
               {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
@@ -435,17 +553,31 @@ export default function CapturePage() {
         {captureMode === "task" ? (
         <article className="kpi-card fade-up p-5">
           <h2 className="text-lg font-semibold">Nueva tarea</h2>
-          <p className="mt-1 text-sm text-[var(--ink-muted)]">Campos requeridos: proyecto, actividad, titulo y descripcion.</p>
+          <p className="mt-1 text-sm text-[var(--ink-muted)]">Campos requeridos: nombre del proyecto, academia, especialidad, actividad, titulo y descripcion.</p>
 
           <div className="mt-5 space-y-3">
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.projectId} onChange={(event) => setTaskForm({ ...taskForm, projectId: event.target.value })}>
-              <option value="">Proyecto</option>
+              <option value="">Nombre del proyecto</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
-                  {project.code} - {project.name}{project.scope ? ` (${specialtyLabels[project.scope]})` : ""}
+                  {project.name}
                 </option>
               ))}
             </select>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
+                placeholder="Academia"
+                value={selectedTaskProject?.code ?? ""}
+                readOnly
+              />
+              <input
+                className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
+                placeholder="Especialidad"
+                value={projectTaskSpecialtyLabel(selectedTaskProject)}
+                readOnly
+              />
+            </div>
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.activityType} onChange={(event) => setTaskForm({ ...taskForm, activityType: event.target.value })}>
               {activityTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>

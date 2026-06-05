@@ -177,6 +177,8 @@ export class TasksService {
 			handoffMessage,
 			nextActivityType,
 			nextTitle,
+			nextDueDate,
+			nextEstimatedHours,
 			...taskFields
 		} = dto;
 
@@ -205,8 +207,11 @@ export class TasksService {
 				assigneeId: handoffToUserId,
 				status: 'todo',
 				priority: task.priority,
-				dueDate: task.dueDate,
-				estimatedHours: task.estimatedHours,
+				dueDate: nextDueDate ?? task.dueDate,
+				estimatedHours:
+					typeof nextEstimatedHours === 'number'
+						? String(nextEstimatedHours)
+						: task.estimatedHours,
 			});
 
 			await this.tasksRepository.save(consequentTask);

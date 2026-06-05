@@ -1,18 +1,32 @@
 export const LEAD_SPECIALTIES = [
-  'paa_mate',
-  'paa_espanol',
-  'exani_ii_mate',
-  'exani_ii_espanol',
-  'modulos_especificos',
-  'unam_mate',
-  'unam_espanol',
+  'paa',
+  'exani_ii',
+  'piense',
+  'unam',
+  'modulos',
 ] as const;
 
+export const LEAD_SPECIALTY_INPUTS = LEAD_SPECIALTIES;
+
 export type LeadSpecialty = (typeof LEAD_SPECIALTIES)[number];
+export type LeadSpecialtyInput = (typeof LEAD_SPECIALTY_INPUTS)[number];
 
 export const PROJECT_SCOPES = LEAD_SPECIALTIES;
 export type ProjectScope = LeadSpecialty;
 
+export function normalizeLeadSpecialty(value?: string | null): LeadSpecialty | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if ((LEAD_SPECIALTIES as readonly string[]).includes(normalized)) {
+    return normalized as LeadSpecialty;
+  }
+
+  return undefined;
+}
+
 export function isLeadSpecialty(value?: string | null): value is LeadSpecialty {
-  return !!value && (LEAD_SPECIALTIES as readonly string[]).includes(value);
+  return !!normalizeLeadSpecialty(value);
 }

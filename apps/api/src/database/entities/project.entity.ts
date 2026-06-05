@@ -14,10 +14,10 @@ export class ProjectEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 40, unique: true })
+  @Column({ type: 'varchar', length: 40 })
   code: string;
 
-  @Column({ type: 'varchar', length: 160 })
+  @Column({ type: 'varchar', length: 160, unique: true })
   name: string;
 
   @Column({ name: 'client_name', type: 'varchar', length: 160, nullable: true })
@@ -30,13 +30,11 @@ export class ProjectEntity {
     name: 'scope',
     type: 'enum',
     enum: [
-      'paa_mate',
-      'paa_espanol',
-      'exani_ii_mate',
-      'exani_ii_espanol',
-      'modulos_especificos',
-      'unam_mate',
-      'unam_espanol',
+      'paa',
+      'exani_ii',
+      'piense',
+      'unam',
+      'modulos',
     ],
     enumName: 'project_scope',
     nullable: true,

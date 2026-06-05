@@ -13,25 +13,21 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'lead_specialty') THEN
         CREATE TYPE lead_specialty AS ENUM (
-            'paa_mate',
-            'paa_espanol',
-            'exani_ii_mate',
-            'exani_ii_espanol',
-            'modulos_especificos',
-            'unam_mate',
-            'unam_espanol'
+            'paa',
+            'exani_ii',
+            'piense',
+            'unam',
+            'modulos'
         );
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_scope') THEN
         CREATE TYPE project_scope AS ENUM (
-            'paa_mate',
-            'paa_espanol',
-            'exani_ii_mate',
-            'exani_ii_espanol',
-            'modulos_especificos',
-            'unam_mate',
-            'unam_espanol'
+            'paa',
+            'exani_ii',
+            'piense',
+            'unam',
+            'modulos'
         );
     END IF;
 
@@ -90,8 +86,8 @@ CREATE TABLE IF NOT EXISTS team_members (
 
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code VARCHAR(40) NOT NULL UNIQUE,
-    name VARCHAR(160) NOT NULL,
+    code VARCHAR(40) NOT NULL,
+    name VARCHAR(160) NOT NULL UNIQUE,
     client_name VARCHAR(160),
     owner_team_id UUID REFERENCES teams(id),
     scope project_scope,
@@ -104,6 +100,28 @@ CREATE TABLE IF NOT EXISTS projects (
 
 ALTER TABLE IF EXISTS projects
     ADD COLUMN IF NOT EXISTS scope project_scope;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'projects_code_key'
+          AND conrelid = 'projects'::regclass
+    ) THEN
+        ALTER TABLE projects DROP CONSTRAINT projects_code_key;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'projects_name_key'
+          AND conrelid = 'projects'::regclass
+    ) THEN
+        ALTER TABLE projects ADD CONSTRAINT projects_name_key UNIQUE (name);
+    END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

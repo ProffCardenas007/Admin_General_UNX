@@ -10,7 +10,7 @@ import { Repository } from 'typeorm';
 import { UserEntity } from '../database/entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { isLeadSpecialty } from '../common/specialties';
+import { isLeadSpecialty, normalizeLeadSpecialty } from '../common/specialties';
 
 @Injectable()
 export class UsersService {
@@ -44,7 +44,9 @@ export class UsersService {
 			throw new ConflictException('Email already registered');
 		}
 
-		if (dto.role === 'lead' && !isLeadSpecialty(dto.specialty)) {
+		const normalizedSpecialty = normalizeLeadSpecialty(dto.specialty);
+
+		if (dto.role === 'lead' && !isLeadSpecialty(normalizedSpecialty)) {
 			throw new BadRequestException('Lead specialty is required');
 		}
 
@@ -54,7 +56,7 @@ export class UsersService {
 			fullName: dto.fullName,
 			email: dto.email,
 			role: dto.role,
-			specialty: dto.role === 'lead' ? dto.specialty : null,
+			specialty: dto.role === 'lead' ? normalizedSpecialty : null,
 			passwordHash,
 			isActive: true,
 		});
@@ -76,7 +78,7 @@ export class UsersService {
 		}
 
 		if (typeof dto.specialty !== 'undefined') {
-			user.specialty = dto.specialty ?? null;
+			user.specialty = normalizeLeadSpecialty(dto.specialty) ?? null;
 		}
 
 		if (user.role === 'lead' && !isLeadSpecialty(user.specialty)) {
@@ -100,5 +102,25 @@ export class UsersService {
 
 	async setPasswordHash(userId: string, passwordHash: string) {
 		await this.usersRepository.update({ id: userId }, { passwordHash });
+	}
+
+	async remove(userId: string) {
+		const user = await this.usersRepository.findOne({ where: { id: userId } });
+		if (!user) {
+			throw new NotFoundException('User not found');
+		}
+
+		if (user.role === 'manager') {
+			throw new BadRequestException('Manager users cannot be deleted');
+		}
+
+		try {
+			await this.usersRepository.delete({ id: userId });
+			return { deleted: true, userId };
+		} catch {
+			throw new BadRequestException(
+				'User cannot be deleted because it has related records (tasks, updates or notifications)',
+			);
+		}
 	}
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
-import Link from "next/link";
+import AppBrandLink from "./app-brand-link";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -32,13 +32,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <header className="app-brand-bar">
           <div className="app-brand-wrap">
-            <Link href="/dashboard" className="app-brand" aria-label="Ir al panel principal">
-              <img src="/Logo%20UNX%20PIENSE.png" alt="Logo de la empresa" className="app-brand-logo" />
-              <div>
-                <p className="app-brand-name">UNX</p>
-                <p className="app-brand-subtitle">Sistema de Proyectos</p>
-              </div>
-            </Link>
+            <AppBrandLink />
           </div>
         </header>
         <main className="flex-1">{children}</main>
