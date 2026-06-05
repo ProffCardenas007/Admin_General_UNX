@@ -750,6 +750,7 @@ export default function DashboardPage() {
 
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <input
+              name="dashboard-project-search"
               value={projectSearch}
               onChange={(event) => setProjectSearch(event.target.value)}
               className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
@@ -757,6 +758,7 @@ export default function DashboardPage() {
             />
 
             <select
+              name="dashboard-project-status-filter"
               value={projectStatusFilter}
               onChange={(event) => setProjectStatusFilter(event.target.value as "" | ProjectRow["status"])}
               className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
@@ -770,6 +772,7 @@ export default function DashboardPage() {
             </select>
 
             <select
+              name="dashboard-project-risk-filter"
               value={projectRiskFilter}
               onChange={(event) => setProjectRiskFilter(event.target.value as "all" | RiskLevel)}
               className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
@@ -890,6 +893,7 @@ export default function DashboardPage() {
 
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <select
+              name="dashboard-task-project-filter"
               value={taskProjectFilter}
               onChange={(event) => setTaskProjectFilter(event.target.value)}
               className="ui-control"
@@ -903,6 +907,7 @@ export default function DashboardPage() {
             </select>
 
             <input
+              name="dashboard-task-search"
               value={taskSearchFilter}
               onChange={(event) => setTaskSearchFilter(event.target.value)}
               className="ui-control"
@@ -910,6 +915,7 @@ export default function DashboardPage() {
             />
 
             <select
+              name="dashboard-task-user-filter"
               value={taskUserFilter}
               onChange={(event) => setTaskUserFilter(event.target.value)}
               className="ui-control"
@@ -1094,6 +1100,7 @@ export default function DashboardPage() {
 
             <div className="mt-4 grid gap-3 md:grid-cols-[minmax(260px,340px),1fr]">
               <select
+                name="dashboard-user-stats-select"
                 value={selectedDashboardUserId}
                 onChange={(event) => setSelectedDashboardUserId(event.target.value)}
                 className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
@@ -1207,6 +1214,7 @@ export default function DashboardPage() {
 
             <div className="mt-4 space-y-3">
               <select
+                name="task-modal-project"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 value={taskForm.projectId}
                 onChange={(event) => setTaskForm({ ...taskForm, projectId: event.target.value })}
@@ -1221,12 +1229,14 @@ export default function DashboardPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <input
+                  name="task-modal-academia"
                   className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
                   placeholder="Academia"
                   value={selectedTaskProject?.code ?? ""}
                   readOnly
                 />
                 <input
+                  name="task-modal-especialidad"
                   className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
                   placeholder="Especialidad"
                   value={projectTaskSpecialtyLabel(selectedTaskProject)}
@@ -1235,6 +1245,7 @@ export default function DashboardPage() {
               </div>
 
               <select
+                name="task-modal-activity"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 value={taskForm.activityType}
                 onChange={(event) =>
@@ -1249,6 +1260,7 @@ export default function DashboardPage() {
               </select>
 
               <input
+                name="task-modal-title"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 placeholder="Titulo"
                 value={taskForm.title}
@@ -1256,6 +1268,7 @@ export default function DashboardPage() {
               />
 
               <textarea
+                name="task-modal-description"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 placeholder="Descripcion"
                 value={taskForm.description}
@@ -1264,6 +1277,7 @@ export default function DashboardPage() {
               />
 
               <select
+                name="task-modal-assignee"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 value={taskForm.assigneeId}
                 onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}
@@ -1278,6 +1292,7 @@ export default function DashboardPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <select
+                  name="task-modal-status"
                   className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                   value={taskForm.status}
                   onChange={(event) =>
@@ -1292,6 +1307,7 @@ export default function DashboardPage() {
                 </select>
 
                 <select
+                  name="task-modal-priority"
                   className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                   value={taskForm.priority}
                   onChange={(event) =>
@@ -1308,12 +1324,14 @@ export default function DashboardPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <input
+                  name="task-modal-due-date"
                   type="date"
                   className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                   value={taskForm.dueDate}
                   onChange={(event) => setTaskForm({ ...taskForm, dueDate: event.target.value })}
                 />
                 <input
+                  name="task-modal-estimated-hours"
                   type="number"
                   min="0"
                   step="0.5"

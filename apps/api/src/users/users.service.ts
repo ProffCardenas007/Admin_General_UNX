@@ -20,10 +20,21 @@ export class UsersService {
 	) {}
 
 	findAll(role?: string) {
-		if (role) {
-			return this.usersRepository.find({ where: { role: role as UserEntity['role'] } });
+		const normalizedRole = role?.trim().toLowerCase();
+
+		if (!normalizedRole || normalizedRole === 'all') {
+			return this.usersRepository.find();
 		}
-		return this.usersRepository.find();
+
+		if (!this.isUserRole(normalizedRole)) {
+			throw new BadRequestException('Invalid role filter. Use manager, lead, worker or all');
+		}
+
+		return this.usersRepository.find({ where: { role: normalizedRole } });
+	}
+
+	private isUserRole(role: string): role is UserEntity['role'] {
+		return role === 'manager' || role === 'lead' || role === 'worker';
 	}
 
 	findByEmail(email: string) {

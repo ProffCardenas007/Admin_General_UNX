@@ -512,12 +512,14 @@ export default function UsersPage() {
 
         <div className="mt-6 grid gap-3 md:grid-cols-3">
           <input
+            name="users-search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className="ui-control"
             placeholder="Buscar por nombre o correo"
           />
           <select
+            name="users-role-filter"
             value={roleFilter}
             onChange={(event) => setRoleFilter(event.target.value)}
             className="ui-control"
@@ -528,6 +530,7 @@ export default function UsersPage() {
             <option value="worker">colaborador</option>
           </select>
           <select
+            name="users-status-filter"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
             className="ui-control"
@@ -561,6 +564,7 @@ export default function UsersPage() {
           </div>
           <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
             <select
+              name="users-stats-user"
               value={selectedStatsUserId}
               onChange={(event) => setSelectedStatsUserId(event.target.value)}
               className="ui-control w-full md:w-[340px]"
@@ -575,6 +579,7 @@ export default function UsersPage() {
                 ))}
             </select>
             <select
+              name="users-stats-period"
               value={statsPeriod}
               onChange={(event) => setStatsPeriod(event.target.value as "all" | "7d" | "30d" | "custom")}
               className="ui-control w-full md:w-[160px]"
@@ -590,12 +595,14 @@ export default function UsersPage() {
         {statsPeriod === "custom" ? (
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <input
+              name="users-stats-from"
               type="date"
               className="ui-control"
               value={statsFrom}
               onChange={(event) => setStatsFrom(event.target.value)}
             />
             <input
+              name="users-stats-to"
               type="date"
               className="ui-control"
               value={statsTo}
@@ -720,6 +727,7 @@ export default function UsersPage() {
                     <td className="px-4 py-3">
                       {isManager ? (
                         <input
+                          name={`user-fullname-${user.id}`}
                           value={userDrafts[user.id]?.fullName ?? user.fullName}
                           onChange={(event) =>
                             setUserDrafts((current) => ({
@@ -747,6 +755,7 @@ export default function UsersPage() {
                       {isManager ? (
                         <div className="space-y-2">
                           <select
+                            name={`user-role-${user.id}`}
                             value={userDrafts[user.id]?.role ?? user.role}
                             onChange={(event) =>
                               setUserDrafts((current) => ({
@@ -775,6 +784,7 @@ export default function UsersPage() {
                           </select>
                           {(userDrafts[user.id]?.role ?? user.role) === "lead" ? (
                             <select
+                              name={`user-specialty-${user.id}`}
                               value={userDrafts[user.id]?.specialty ?? user.specialty ?? ""}
                               onChange={(event) =>
                                 setUserDrafts((current) => ({
@@ -811,6 +821,7 @@ export default function UsersPage() {
                     <td className="px-4 py-3">
                       {isManager ? (
                         <select
+                          name={`user-status-${user.id}`}
                           value={(userDrafts[user.id]?.isActive ?? user.isActive) ? "active" : "inactive"}
                           onChange={(event) =>
                             setUserDrafts((current) => ({
@@ -841,6 +852,7 @@ export default function UsersPage() {
                     <td className="px-4 py-3">
                       {isManager ? (
                         <input
+                          name={`user-password-${user.id}`}
                           type="password"
                           value={userDrafts[user.id]?.password ?? ""}
                           onChange={(event) =>

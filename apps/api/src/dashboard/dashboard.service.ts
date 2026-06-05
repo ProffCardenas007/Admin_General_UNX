@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ProjectEntity } from '../database/entities/project.entity';
@@ -21,6 +21,10 @@ export class DashboardService {
 		filters: { from?: string; to?: string; projectId?: string },
 		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
 	) {
+		const from = this.normalizeDateFilter(filters.from, 'from');
+		const to = this.normalizeDateFilter(filters.to, 'to');
+		const projectId = this.normalizeProjectIdFilter(filters.projectId);
+
 		const activeProjectsQb = this.projectsRepository
 			.createQueryBuilder('project')
 			.where('project.status = :status', { status: 'active' });
@@ -36,9 +40,9 @@ export class DashboardService {
 			activeProjectsQb.andWhere('project.scope = :scope', { scope: actor.specialty });
 		}
 
-		if (filters.projectId) {
+		if (projectId) {
 			activeProjectsQb.andWhere('project.id = :projectId', {
-				projectId: filters.projectId,
+				projectId,
 			});
 		}
 		const activeProjects = await activeProjectsQb.getCount();
@@ -48,8 +52,8 @@ export class DashboardService {
 			tasksQb.innerJoin(ProjectEntity, 'project_scope', 'project_scope.id = task.project_id');
 			tasksQb.andWhere('project_scope.scope = :scope', { scope: actor.specialty });
 		}
-		if (filters.projectId) {
-			tasksQb.andWhere('task.project_id = :projectId', { projectId: filters.projectId });
+		if (projectId) {
+			tasksQb.andWhere('task.project_id = :projectId', { projectId });
 		}
 		if (actor.role === 'worker') {
 			tasksQb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
@@ -69,14 +73,14 @@ export class DashboardService {
 			.select('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
 			.innerJoin(TaskEntity, 'task', 'task.id = update.task_id');
 
-		if (filters.projectId) {
-			hoursQb.andWhere('task.project_id = :projectId', { projectId: filters.projectId });
+		if (projectId) {
+			hoursQb.andWhere('task.project_id = :projectId', { projectId });
 		}
-		if (filters.from) {
-			hoursQb.andWhere('update.update_date >= :from', { from: filters.from });
+		if (from) {
+			hoursQb.andWhere('update.update_date >= :from', { from });
 		}
-		if (filters.to) {
-			hoursQb.andWhere('update.update_date <= :to', { to: filters.to });
+		if (to) {
+			hoursQb.andWhere('update.update_date <= :to', { to });
 		}
 		if (actor.role === 'worker') {
 			hoursQb.andWhere('update.user_id = :actorId', { actorId: actor.id });
@@ -97,6 +101,8 @@ export class DashboardService {
 		filters: { projectId?: string },
 		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
 	) {
+		const projectId = this.normalizeProjectIdFilter(filters.projectId);
+
 		const qb = this.taskUpdatesRepository
 			.createQueryBuilder('update')
 			.select('update.user_id', 'userId')
@@ -111,8 +117,8 @@ export class DashboardService {
 			qb.andWhere('project_scope.scope = :scope', { scope: actor.specialty });
 		}
 
-		if (filters.projectId) {
-			qb.andWhere('task.project_id = :projectId', { projectId: filters.projectId });
+		if (projectId) {
+			qb.andWhere('task.project_id = :projectId', { projectId });
 		}
 		if (actor.role === 'worker') {
 			qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
@@ -129,13 +135,19 @@ export class DashboardService {
 		filters: { from?: string; to?: string; projectId?: string },
 		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
 	) {
+		const from = this.normalizeDateFilter(filters.from, 'from');
+		const to = this.normalizeDateFilter(filters.to, 'to');
+		const projectId = this.normalizeProjectIdFilter(filters.projectId);
+		const weekStartExpression =
+			"DATE_TRUNC('week', CASE WHEN update.update_date::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN to_date(update.update_date::text, 'YYYY-MM-DD') ELSE update.created_at::date END)";
+
 		const qb = this.taskUpdatesRepository
 			.createQueryBuilder('update')
-			.select("DATE_TRUNC('week', update.update_date)", 'weekStart')
+			.select(weekStartExpression, 'weekStart')
 			.addSelect('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
 			.addSelect('COUNT(update.id)', 'updatesCount')
 			.innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
-			.groupBy("DATE_TRUNC('week', update.update_date)")
+			.groupBy(weekStartExpression)
 			.orderBy('"weekStart"', 'ASC');
 
 		if (actor.role === 'lead' && isLeadSpecialty(actor.specialty)) {
@@ -143,14 +155,14 @@ export class DashboardService {
 			qb.andWhere('project_scope.scope = :scope', { scope: actor.specialty });
 		}
 
-		if (filters.projectId) {
-			qb.andWhere('task.project_id = :projectId', { projectId: filters.projectId });
+		if (projectId) {
+			qb.andWhere('task.project_id = :projectId', { projectId });
 		}
-		if (filters.from) {
-			qb.andWhere('update.update_date >= :from', { from: filters.from });
+		if (from) {
+			qb.andWhere('update.update_date >= :from', { from });
 		}
-		if (filters.to) {
-			qb.andWhere('update.update_date <= :to', { to: filters.to });
+		if (to) {
+			qb.andWhere('update.update_date <= :to', { to });
 		}
 		if (actor.role === 'worker') {
 			qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
@@ -161,5 +173,33 @@ export class DashboardService {
 			hoursWorked: string;
 			updatesCount: string;
 		}>();
+	}
+
+	private normalizeDateFilter(value: string | undefined, fieldName: 'from' | 'to') {
+		if (!value || value.trim().length === 0) {
+			return undefined;
+		}
+
+		const normalized = value.trim();
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+			throw new BadRequestException(
+				`Invalid ${fieldName} date. Use YYYY-MM-DD format`,
+			);
+		}
+
+		return normalized;
+	}
+
+	private normalizeProjectIdFilter(value: string | undefined) {
+		if (!value || value.trim().length === 0 || value.trim().toLowerCase() === 'all') {
+			return undefined;
+		}
+
+		const normalized = value.trim();
+		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) {
+			throw new BadRequestException('Invalid projectId filter. Use a UUID or all');
+		}
+
+		return normalized;
 	}
 }
