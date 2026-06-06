@@ -808,13 +808,13 @@ export default function DashboardPage() {
                 ) : (
                   filteredProjectRows.map((project) => (
                     <tr key={project.id} className="border-b border-[var(--line)]/50 align-top">
-                      <td className="px-3 py-3 font-mono text-xs">{project.code}</td>
                       <td className="px-3 py-3">
                         <p className="font-semibold">{project.name}</p>
                         <p className="mt-1 text-xs text-[var(--ink-muted)]">
                           Fin: {project.endDate ?? "sin fecha"}
                         </p>
                       </td>
+                      <td className="px-3 py-3 font-mono text-xs">{project.code}</td>
                       <td className="px-3 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
                       <td className="px-3 py-3">{projectStatusLabels[project.status] ?? project.status}</td>
                       <td className="px-3 py-3">{project.completionRate.toFixed(1)}%</td>
