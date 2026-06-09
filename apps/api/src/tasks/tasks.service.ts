@@ -135,7 +135,7 @@ export class TasksService {
 				throw new ForbiddenException('Lead specialty is required');
 			}
 
-			if (!leadSpecialties.includes(project.scope)) {
+			if (!project.scope || !leadSpecialties.includes(project.scope)) {
 				throw new ForbiddenException('Leads can only create tasks within their specialties');
 			}
 		}

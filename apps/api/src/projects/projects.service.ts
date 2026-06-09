@@ -217,7 +217,7 @@ export class ProjectsService {
 				throw new ForbiddenException('Lead specialty is required');
 			}
 
-			if (!leadSpecialties.includes(project.scope)) {
+			if (!project.scope || !leadSpecialties.includes(project.scope)) {
 				throw new ForbiddenException('Leads can only view progress for their specialties');
 			}
 		}
