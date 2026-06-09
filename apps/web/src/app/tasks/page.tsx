@@ -626,6 +626,7 @@ export default function TasksPage() {
     window.localStorage.removeItem("sistema_mvp_email");
     window.localStorage.removeItem("sistema_mvp_role");
     window.localStorage.removeItem("sistema_mvp_specialty");
+    window.localStorage.removeItem("sistema_mvp_specialties");
     router.replace("/");
   };
 

@@ -15,7 +15,14 @@ export class TasksController {
 	@Get()
 	@Roles('manager', 'lead', 'worker')
 	findAll(
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 		@Query('projectId') projectId?: string,
 		@Query('assigneeId') assigneeId?: string,
 		@Query('status') status?: string,
@@ -32,7 +39,14 @@ export class TasksController {
 	@Roles('manager', 'lead', 'worker')
 	create(
 		@Body() dto: CreateTaskDto,
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 	) {
 		return this.tasksService.create(dto, req.user);
 	}
@@ -42,7 +56,14 @@ export class TasksController {
 	update(
 		@Param('taskId') taskId: string,
 		@Body() dto: UpdateTaskDto,
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 	) {
 		return this.tasksService.update(taskId, dto, req.user);
 	}

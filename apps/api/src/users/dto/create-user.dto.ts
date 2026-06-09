@@ -1,5 +1,8 @@
 import {
+  ArrayMaxSize,
+  ArrayUnique,
   IsEmail,
+  IsArray,
   IsIn,
   IsOptional,
   IsString,
@@ -24,6 +27,22 @@ export class CreateUserDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsIn(LEAD_SPECIALTY_INPUTS)
   specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (!Array.isArray(value)) {
+      return value;
+    }
+
+    return value.map((item) =>
+      typeof item === 'string' ? item.trim().toLowerCase() : item,
+    );
+  })
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(2)
+  @IsIn(LEAD_SPECIALTY_INPUTS, { each: true })
+  specialties?: Array<(typeof LEAD_SPECIALTY_INPUTS)[number]>;
 
 	@IsString()
 	@MinLength(6)

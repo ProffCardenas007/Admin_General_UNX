@@ -32,3 +32,21 @@ export function normalizeLeadSpecialtyInput(value?: string | null): LeadSpecialt
   const normalized = value.trim().toLowerCase();
   return leadSpecialtyAliases[normalized] ?? "";
 }
+
+export function normalizeLeadSpecialtiesInput(values?: Array<string | null | undefined> | string | null): LeadSpecialty[] {
+  if (typeof values === "undefined" || values === null) {
+    return [];
+  }
+
+  const rawValues = Array.isArray(values) ? values : [values];
+  const normalized: LeadSpecialty[] = [];
+
+  rawValues.forEach((value) => {
+    const specialty = normalizeLeadSpecialtyInput(value);
+    if (specialty && !normalized.includes(specialty)) {
+      normalized.push(specialty);
+    }
+  });
+
+  return normalized;
+}

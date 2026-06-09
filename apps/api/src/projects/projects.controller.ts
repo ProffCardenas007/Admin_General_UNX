@@ -25,7 +25,14 @@ export class ProjectsController {
 	@Roles('manager', 'lead')
 	create(
 		@Body() dto: CreateProjectDto,
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 	) {
 		return this.projectsService.create(dto, req.user);
 	}
@@ -34,7 +41,14 @@ export class ProjectsController {
 	@Roles('manager', 'lead', 'worker')
 	getProgress(
 		@Param('projectId') projectId: string,
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 	) {
 		return this.projectsService.getProgress(projectId, req.user);
 	}

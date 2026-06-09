@@ -13,8 +13,17 @@ type UserRow = {
   email: string;
   role: "manager" | "lead" | "worker";
   specialty?: LeadSpecialty | null;
+  specialties?: LeadSpecialty[] | null;
   isActive: boolean;
   createdAt: string;
+};
+
+type UserDraft = {
+  fullName: string;
+  role: UserRow["role"];
+  specialties: LeadSpecialty[];
+  isActive: boolean;
+  password: string;
 };
 
 type TaskStatsRow = {
@@ -79,9 +88,29 @@ export default function UsersPage() {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [selectedUserUpdates, setSelectedUserUpdates] = useState<TaskUpdateRow[]>([]);
-  const [userDrafts, setUserDrafts] = useState<
-    Record<string, { fullName: string; role: UserRow["role"]; specialty: LeadSpecialty | ""; isActive: boolean; password: string }>
-  >({});
+  const [userDrafts, setUserDrafts] = useState<Record<string, UserDraft>>({});
+
+  const toDraftSpecialties = (user: UserRow) => {
+    const normalized = Array.isArray(user.specialties)
+      ? user.specialties.filter((specialty): specialty is LeadSpecialty =>
+          (LEAD_SPECIALTIES as readonly string[]).includes(specialty),
+        )
+      : [];
+
+    if (normalized.length > 0) {
+      return normalized;
+    }
+
+    return user.specialty ? [user.specialty] : [];
+  };
+
+  const buildUserDraft = (user: UserRow): UserDraft => ({
+    fullName: user.fullName,
+    role: user.role,
+    specialties: toDraftSpecialties(user),
+    isActive: user.isActive,
+    password: "",
+  });
 
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -129,13 +158,7 @@ export default function UsersPage() {
           Object.fromEntries(
             loadedUsers.map((user) => [
               user.id,
-              {
-                fullName: user.fullName,
-                role: user.role,
-                specialty: user.specialty ?? "",
-                isActive: user.isActive,
-                password: "",
-              },
+              buildUserDraft(user),
             ]),
           ),
         );
@@ -330,8 +353,8 @@ export default function UsersPage() {
       return;
     }
 
-    if (draft.role === "lead" && !draft.specialty) {
-      setError("Para asignar rol de lider debes seleccionar una especialidad.");
+    if (draft.role === "lead" && draft.specialties.length === 0) {
+      setError("Para asignar rol de lider debes seleccionar al menos una especialidad.");
       setInfo("");
       return;
     }
@@ -363,7 +386,7 @@ export default function UsersPage() {
     const payload = {
       fullName: draft.fullName,
       role: draft.role,
-      specialty: draft.role === "lead" ? draft.specialty || undefined : null,
+      specialties: draft.role === "lead" ? draft.specialties : null,
       isActive: draft.isActive,
       password: draft.password.trim().length > 0 ? draft.password : undefined,
     };
@@ -378,13 +401,7 @@ export default function UsersPage() {
       setUserDrafts((current) => ({
         ...current,
         [userId]: {
-          ...(current[userId] ?? {
-            fullName: updated.fullName,
-            role: updated.role,
-            specialty: updated.specialty ?? "",
-            isActive: updated.isActive,
-            password: "",
-          }),
+          ...(current[userId] ?? buildUserDraft(updated)),
           password: "",
         },
       }));
@@ -733,13 +750,7 @@ export default function UsersPage() {
                             setUserDrafts((current) => ({
                               ...current,
                               [user.id]: {
-                                ...(current[user.id] ?? {
-                                  fullName: user.fullName,
-                                  role: user.role,
-                                  specialty: user.specialty ?? "",
-                                  isActive: user.isActive,
-                                  password: "",
-                                }),
+                                ...(current[user.id] ?? buildUserDraft(user)),
                                 fullName: event.target.value,
                               },
                             }))
@@ -761,18 +772,12 @@ export default function UsersPage() {
                               setUserDrafts((current) => ({
                                 ...current,
                                 [user.id]: {
-                                  ...(current[user.id] ?? {
-                                    fullName: user.fullName,
-                                    role: user.role,
-                                    specialty: user.specialty ?? "",
-                                    isActive: user.isActive,
-                                    password: "",
-                                  }),
+                                  ...(current[user.id] ?? buildUserDraft(user)),
                                   role: event.target.value as UserRow["role"],
-                                  specialty:
+                                  specialties:
                                     event.target.value === "lead"
-                                      ? (current[user.id]?.specialty ?? "")
-                                      : "",
+                                      ? (current[user.id]?.specialties ?? toDraftSpecialties(user))
+                                      : [],
                                 },
                               }))
                             }
@@ -783,33 +788,55 @@ export default function UsersPage() {
                             <option value="worker">{roleLabels.worker}</option>
                           </select>
                           {(userDrafts[user.id]?.role ?? user.role) === "lead" ? (
-                            <select
-                              name={`user-specialty-${user.id}`}
-                              value={userDrafts[user.id]?.specialty ?? user.specialty ?? ""}
-                              onChange={(event) =>
-                                setUserDrafts((current) => ({
-                                  ...current,
-                                  [user.id]: {
-                                    ...(current[user.id] ?? {
-                                      fullName: user.fullName,
-                                      role: user.role,
-                                      specialty: user.specialty ?? "",
-                                      isActive: user.isActive,
-                                      password: "",
-                                    }),
-                                    specialty: event.target.value as LeadSpecialty,
-                                  },
-                                }))
-                              }
-                              className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
-                            >
-                              <option value="">Especialidad</option>
-                              {LEAD_SPECIALTIES.map((specialty) => (
-                                <option key={specialty} value={specialty}>
-                                  {specialtyLabels[specialty]}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs">
+                              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                                Especialidades (max 2)
+                              </p>
+                              <div className="grid gap-1">
+                                {LEAD_SPECIALTIES.map((specialty) => {
+                                  const selectedSpecialties = userDrafts[user.id]?.specialties ?? toDraftSpecialties(user);
+                                  const checked = selectedSpecialties.includes(specialty);
+
+                                  return (
+                                    <label key={specialty} className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(event) => {
+                                          setUserDrafts((current) => {
+                                            const base = current[user.id] ?? buildUserDraft(user);
+                                            const currentSpecialties = base.specialties;
+
+                                            if (event.target.checked) {
+                                              if (currentSpecialties.length >= 2) {
+                                                return current;
+                                              }
+
+                                              return {
+                                                ...current,
+                                                [user.id]: {
+                                                  ...base,
+                                                  specialties: [...currentSpecialties, specialty],
+                                                },
+                                              };
+                                            }
+
+                                            return {
+                                              ...current,
+                                              [user.id]: {
+                                                ...base,
+                                                specialties: currentSpecialties.filter((item) => item !== specialty),
+                                              },
+                                            };
+                                          });
+                                        }}
+                                      />
+                                      {specialtyLabels[specialty]}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           ) : null}
                         </div>
                       ) : (
@@ -827,13 +854,7 @@ export default function UsersPage() {
                             setUserDrafts((current) => ({
                               ...current,
                               [user.id]: {
-                                ...(current[user.id] ?? {
-                                  fullName: user.fullName,
-                                  role: user.role,
-                                  specialty: user.specialty ?? "",
-                                  isActive: user.isActive,
-                                  password: "",
-                                }),
+                                ...(current[user.id] ?? buildUserDraft(user)),
                                 isActive: event.target.value === "active",
                               },
                             }))
@@ -859,13 +880,7 @@ export default function UsersPage() {
                             setUserDrafts((current) => ({
                               ...current,
                               [user.id]: {
-                                ...(current[user.id] ?? {
-                                  fullName: user.fullName,
-                                  role: user.role,
-                                  specialty: user.specialty ?? "",
-                                  isActive: user.isActive,
-                                  password: "",
-                                }),
+                                ...(current[user.id] ?? buildUserDraft(user)),
                                 password: event.target.value,
                               },
                             }))

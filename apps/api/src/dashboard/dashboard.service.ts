@@ -1,10 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
-import { ProjectScope, isLeadSpecialty } from '../common/specialties';
+import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
 export class DashboardService {
@@ -19,11 +19,17 @@ export class DashboardService {
 
 	async getSummary(
 		filters: { from?: string; to?: string; projectId?: string },
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
+		actor: {
+			id: string;
+			role: 'manager' | 'lead' | 'worker';
+			specialty?: ProjectScope | null;
+			specialties?: ProjectScope[] | null;
+		},
 	) {
 		const from = this.normalizeDateFilter(filters.from, 'from');
 		const to = this.normalizeDateFilter(filters.to, 'to');
 		const projectId = this.normalizeProjectIdFilter(filters.projectId);
+		const leadSpecialties = normalizeLeadSpecialties(actor.specialties ?? actor.specialty);
 
 		const activeProjectsQb = this.projectsRepository
 			.createQueryBuilder('project')
@@ -36,8 +42,12 @@ export class DashboardService {
 				'task_scope.project_id = project.id AND task_scope.assignee_id = :actorId',
 				{ actorId: actor.id },
 			).distinct(true);
-		} else if (actor.role === 'lead' && isLeadSpecialty(actor.specialty)) {
-			activeProjectsQb.andWhere('project.scope = :scope', { scope: actor.specialty });
+		} else if (actor.role === 'lead') {
+			if (leadSpecialties.length === 0) {
+				throw new ForbiddenException('Lead specialty is required');
+			}
+
+			activeProjectsQb.andWhere('project.scope IN (:...scopes)', { scopes: leadSpecialties });
 		}
 
 		if (projectId) {
@@ -48,9 +58,13 @@ export class DashboardService {
 		const activeProjects = await activeProjectsQb.getCount();
 
 		const tasksQb = this.tasksRepository.createQueryBuilder('task');
-		if (actor.role === 'lead' && isLeadSpecialty(actor.specialty)) {
+		if (actor.role === 'lead') {
+			if (leadSpecialties.length === 0) {
+				throw new ForbiddenException('Lead specialty is required');
+			}
+
 			tasksQb.innerJoin(ProjectEntity, 'project_scope', 'project_scope.id = task.project_id');
-			tasksQb.andWhere('project_scope.scope = :scope', { scope: actor.specialty });
+			tasksQb.andWhere('project_scope.scope IN (:...scopes)', { scopes: leadSpecialties });
 		}
 		if (projectId) {
 			tasksQb.andWhere('task.project_id = :projectId', { projectId });
@@ -99,9 +113,15 @@ export class DashboardService {
 
 	async getWorkload(
 		filters: { projectId?: string },
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
+		actor: {
+			id: string;
+			role: 'manager' | 'lead' | 'worker';
+			specialty?: ProjectScope | null;
+			specialties?: ProjectScope[] | null;
+		},
 	) {
 		const projectId = this.normalizeProjectIdFilter(filters.projectId);
+		const leadSpecialties = normalizeLeadSpecialties(actor.specialties ?? actor.specialty);
 
 		const qb = this.taskUpdatesRepository
 			.createQueryBuilder('update')
@@ -112,9 +132,13 @@ export class DashboardService {
 			.groupBy('update.user_id')
 			.orderBy('"hoursWorked"', 'DESC');
 
-		if (actor.role === 'lead' && isLeadSpecialty(actor.specialty)) {
+		if (actor.role === 'lead') {
+			if (leadSpecialties.length === 0) {
+				throw new ForbiddenException('Lead specialty is required');
+			}
+
 			qb.innerJoin(ProjectEntity, 'project_scope', 'project_scope.id = task.project_id');
-			qb.andWhere('project_scope.scope = :scope', { scope: actor.specialty });
+			qb.andWhere('project_scope.scope IN (:...scopes)', { scopes: leadSpecialties });
 		}
 
 		if (projectId) {
@@ -133,11 +157,17 @@ export class DashboardService {
 
 	async getTrends(
 		filters: { from?: string; to?: string; projectId?: string },
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
+		actor: {
+			id: string;
+			role: 'manager' | 'lead' | 'worker';
+			specialty?: ProjectScope | null;
+			specialties?: ProjectScope[] | null;
+		},
 	) {
 		const from = this.normalizeDateFilter(filters.from, 'from');
 		const to = this.normalizeDateFilter(filters.to, 'to');
 		const projectId = this.normalizeProjectIdFilter(filters.projectId);
+		const leadSpecialties = normalizeLeadSpecialties(actor.specialties ?? actor.specialty);
 		const weekStartExpression =
 			"DATE_TRUNC('week', CASE WHEN update.update_date::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN to_date(update.update_date::text, 'YYYY-MM-DD') ELSE update.created_at::date END)";
 
@@ -150,9 +180,13 @@ export class DashboardService {
 			.groupBy(weekStartExpression)
 			.orderBy('"weekStart"', 'ASC');
 
-		if (actor.role === 'lead' && isLeadSpecialty(actor.specialty)) {
+		if (actor.role === 'lead') {
+			if (leadSpecialties.length === 0) {
+				throw new ForbiddenException('Lead specialty is required');
+			}
+
 			qb.innerJoin(ProjectEntity, 'project_scope', 'project_scope.id = task.project_id');
-			qb.andWhere('project_scope.scope = :scope', { scope: actor.specialty });
+			qb.andWhere('project_scope.scope IN (:...scopes)', { scopes: leadSpecialties });
 		}
 
 		if (projectId) {

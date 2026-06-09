@@ -9,11 +9,12 @@ import {
   authHeaders,
   getStoredEmail,
   getStoredRole,
-  getStoredSpecialty,
+  getStoredSpecialties,
   getStoredToken,
 } from "../../lib/api";
 import {
   LEAD_SPECIALTIES,
+  normalizeLeadSpecialtiesInput,
   normalizeLeadSpecialtyInput,
   specialtyLabels,
   type LeadSpecialty,
@@ -32,6 +33,7 @@ type UserOption = {
   email: string;
   role: string;
   specialty?: string | null;
+  specialties?: string[] | null;
 };
 
 type TaskOption = {
@@ -81,7 +83,7 @@ export default function CapturePage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
-  const [specialty, setSpecialty] = useState("");
+  const [specialties, setSpecialties] = useState<LeadSpecialty[]>([]);
   const [captureMode, setCaptureMode] = useState<"" | "project" | "task">("");
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -96,20 +98,6 @@ export default function CapturePage() {
     }
 
     return specialtyLabels[project.scope];
-  };
-
-  const getLeadSpecialtyLabel = () => {
-    const rawSpecialty = (specialty || projectForm.scope || "").trim();
-    if (!rawSpecialty) {
-      return "Sin especialidad asignada";
-    }
-
-    const normalizedSpecialty = rawSpecialty.toLowerCase() as LeadSpecialty;
-    if ((LEAD_SPECIALTIES as readonly string[]).includes(normalizedSpecialty)) {
-      return specialtyLabels[normalizedSpecialty];
-    }
-
-    return rawSpecialty;
   };
 
   const [projectForm, setProjectForm] = useState({
@@ -139,7 +127,7 @@ export default function CapturePage() {
     fullName: "",
     email: "",
     role: "worker",
-    specialty: "",
+    specialties: [] as LeadSpecialty[],
     password: "",
     teamId: "",
   });
@@ -175,11 +163,14 @@ export default function CapturePage() {
           (user) => user.email.toLowerCase() === currentEmail,
         );
 
-        const resolvedSpecialty = normalizeLeadSpecialtyInput(currentLead?.specialty ?? "");
-        if (resolvedSpecialty.length > 0) {
-          setSpecialty(resolvedSpecialty);
-          setProjectForm((current) => ({ ...current, scope: resolvedSpecialty }));
-          setUserForm((current) => ({ ...current, specialty: resolvedSpecialty }));
+        const resolvedSpecialties = normalizeLeadSpecialtiesInput([
+          ...(Array.isArray(currentLead?.specialties) ? currentLead.specialties : []),
+          currentLead?.specialty,
+        ]);
+        if (resolvedSpecialties.length > 0) {
+          setSpecialties(resolvedSpecialties);
+          setProjectForm((current) => ({ ...current, scope: resolvedSpecialties[0] }));
+          setUserForm((current) => ({ ...current, specialties: resolvedSpecialties }));
         }
       }
 
@@ -224,13 +215,14 @@ export default function CapturePage() {
       return;
     }
 
-    const savedSpecialty = normalizeLeadSpecialtyInput(getStoredSpecialty());
+    const savedSpecialties = normalizeLeadSpecialtiesInput(getStoredSpecialties());
+    const savedSpecialty = savedSpecialties[0] ?? "";
     setEmail(getStoredEmail());
     setRole(savedRole);
-    setSpecialty(savedSpecialty);
-    if (savedSpecialty) {
+    setSpecialties(savedSpecialties);
+    if (savedSpecialties.length > 0) {
       setProjectForm((current) => ({ ...current, scope: savedSpecialty }));
-      setUserForm((current) => ({ ...current, specialty: savedSpecialty }));
+      setUserForm((current) => ({ ...current, specialties: savedSpecialties }));
     }
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     const requestedProjectId = new URLSearchParams(window.location.search).get("projectId");
@@ -272,15 +264,21 @@ export default function CapturePage() {
       return;
     }
 
-    if (role === "lead" && !specialty && !projectForm.scope) {
+    if (role === "lead" && specialties.length === 0) {
       setMessage("No se pudo crear el proyecto: tu cuenta de lider no tiene especialidad asignada.");
       return;
     }
 
     try {
       const normalizedScope = normalizeLeadSpecialtyInput(
-        role === "lead" ? specialty || projectForm.scope : projectForm.scope,
+        role === "lead" ? projectForm.scope : projectForm.scope,
       );
+
+      if (role === "lead" && (!normalizedScope || !specialties.includes(normalizedScope))) {
+        setMessage("No se pudo crear el proyecto: selecciona una especialidad valida de tu perfil.");
+        return;
+      }
+
       const payload = {
         code: trimmedCode,
         name: trimmedName,
@@ -295,7 +293,7 @@ export default function CapturePage() {
       setProjectForm({
         code: "",
         name: "",
-        scope: specialty || "",
+        scope: specialties[0] ?? "",
         status: "active",
         startDate: "",
         endDate: "",
@@ -369,7 +367,7 @@ export default function CapturePage() {
         fullName: userForm.fullName,
         email: userForm.email,
         role: userForm.role,
-        specialty: userForm.role === "lead" ? userForm.specialty || undefined : undefined,
+        specialties: userForm.role === "lead" ? userForm.specialties : undefined,
         password: userForm.password,
         teamId: userForm.teamId || undefined,
       };
@@ -380,7 +378,7 @@ export default function CapturePage() {
         fullName: "",
         email: "",
         role: "worker",
-        specialty: specialty || "",
+        specialties: specialties,
         password: "",
         teamId: "",
       });
@@ -518,12 +516,18 @@ export default function CapturePage() {
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder={projectCodeLabel} value={projectForm.code} onChange={(event) => setProjectForm({ ...projectForm, code: event.target.value })} />
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Nombre" value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} />
             {role === "lead" ? (
-              <input
+              <select
                 className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
-                placeholder="Especialidad del proyecto"
-                value={getLeadSpecialtyLabel()}
-                readOnly
-              />
+                value={projectForm.scope}
+                onChange={(event) => setProjectForm({ ...projectForm, scope: event.target.value })}
+              >
+                <option value="">Especialidad del proyecto</option>
+                {specialties.map((item) => (
+                  <option key={item} value={item}>
+                    {specialtyLabels[item]}
+                  </option>
+                ))}
+              </select>
             ) : (
               <select
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
@@ -622,18 +626,45 @@ export default function CapturePage() {
               ))}
             </select>
             {userForm.role === "lead" ? (
-              <select
-                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-                value={userForm.specialty}
-                onChange={(event) => setUserForm({ ...userForm, specialty: event.target.value })}
-              >
-                <option value="">Especialidad del líder</option>
-                {LEAD_SPECIALTIES.map((item) => (
-                  <option key={item} value={item}>
-                    {specialtyLabels[item]}
-                  </option>
-                ))}
-              </select>
+              <div className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  Especialidades del lider (max 2)
+                </p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {LEAD_SPECIALTIES.map((item) => {
+                    const checked = userForm.specialties.includes(item);
+
+                    return (
+                      <label key={item} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            setUserForm((current) => {
+                              if (event.target.checked) {
+                                if (current.specialties.length >= 2) {
+                                  return current;
+                                }
+
+                                return {
+                                  ...current,
+                                  specialties: [...current.specialties, item],
+                                };
+                              }
+
+                              return {
+                                ...current,
+                                specialties: current.specialties.filter((specialtyItem) => specialtyItem !== item),
+                              };
+                            });
+                          }}
+                        />
+                        {specialtyLabels[item]}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
             ) : null}
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Contraseña" type="password" value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} />
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Equipo (opcional)" value={userForm.teamId} onChange={(event) => setUserForm({ ...userForm, teamId: event.target.value })} />

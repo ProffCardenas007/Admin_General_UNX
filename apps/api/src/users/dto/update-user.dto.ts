@@ -1,6 +1,9 @@
 import {
+  ArrayMaxSize,
+  ArrayUnique,
   IsBoolean,
   IsIn,
+  IsArray,
   IsOptional,
   IsString,
   MaxLength,
@@ -23,6 +26,22 @@ export class UpdateUserDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsIn(LEAD_SPECIALTY_INPUTS)
   specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number] | null;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (!Array.isArray(value)) {
+      return value;
+    }
+
+    return value.map((item) =>
+      typeof item === 'string' ? item.trim().toLowerCase() : item,
+    );
+  })
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(2)
+  @IsIn(LEAD_SPECIALTY_INPUTS, { each: true })
+  specialties?: Array<(typeof LEAD_SPECIALTY_INPUTS)[number]> | null;
 
   @IsOptional()
   @IsBoolean()

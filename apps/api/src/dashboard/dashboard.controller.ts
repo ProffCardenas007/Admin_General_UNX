@@ -13,7 +13,14 @@ export class DashboardController {
 	@Get('summary')
 	@Roles('manager', 'lead', 'worker')
 	getSummary(
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 		@Query('from') from?: string,
 		@Query('to') to?: string,
 		@Query('projectId') projectId?: string,
@@ -24,7 +31,14 @@ export class DashboardController {
 	@Get('workload')
 	@Roles('manager', 'lead', 'worker')
 	getWorkload(
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 		@Query('projectId') projectId?: string,
 	) {
 		return this.dashboardService.getWorkload({ projectId }, req.user);
@@ -33,7 +47,14 @@ export class DashboardController {
 	@Get('trends')
 	@Roles('manager', 'lead', 'worker')
 	getTrends(
-		@Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null } },
+		@Req() req: {
+			user: {
+				id: string;
+				role: 'manager' | 'lead' | 'worker';
+				specialty?: ProjectScope | null;
+				specialties?: ProjectScope[] | null;
+			};
+		},
 		@Query('from') from?: string,
 		@Query('to') to?: string,
 		@Query('projectId') projectId?: string,

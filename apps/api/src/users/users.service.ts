@@ -10,7 +10,7 @@ import { Repository } from 'typeorm';
 import { UserEntity } from '../database/entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { isLeadSpecialty, normalizeLeadSpecialty } from '../common/specialties';
+import { normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
 export class UsersService {
@@ -55,9 +55,11 @@ export class UsersService {
 			throw new ConflictException('Email already registered');
 		}
 
-		const normalizedSpecialty = normalizeLeadSpecialty(dto.specialty);
+		const normalizedSpecialties = normalizeLeadSpecialties(
+			typeof dto.specialties !== 'undefined' ? dto.specialties : dto.specialty,
+		);
 
-		if (dto.role === 'lead' && !isLeadSpecialty(normalizedSpecialty)) {
+		if (dto.role === 'lead' && normalizedSpecialties.length === 0) {
 			throw new BadRequestException('Lead specialty is required');
 		}
 
@@ -67,7 +69,8 @@ export class UsersService {
 			fullName: dto.fullName,
 			email: dto.email,
 			role: dto.role,
-			specialty: dto.role === 'lead' ? normalizedSpecialty : null,
+			specialty: dto.role === 'lead' ? normalizedSpecialties[0] ?? null : null,
+			specialties: dto.role === 'lead' ? normalizedSpecialties : null,
 			passwordHash,
 			isActive: true,
 		});
@@ -88,16 +91,27 @@ export class UsersService {
 			user.role = dto.role;
 		}
 
-		if (typeof dto.specialty !== 'undefined') {
-			user.specialty = normalizeLeadSpecialty(dto.specialty) ?? null;
+		if (typeof dto.specialties !== 'undefined' || typeof dto.specialty !== 'undefined') {
+			const normalizedSpecialties = normalizeLeadSpecialties(
+				typeof dto.specialties !== 'undefined' ? dto.specialties : dto.specialty,
+			);
+			user.specialties = normalizedSpecialties.length > 0 ? normalizedSpecialties : null;
+			user.specialty = normalizedSpecialties[0] ?? null;
 		}
 
-		if (user.role === 'lead' && !isLeadSpecialty(user.specialty)) {
-			throw new BadRequestException('Lead specialty is required');
+		if (user.role === 'lead') {
+			const currentSpecialties = normalizeLeadSpecialties(user.specialties ?? user.specialty);
+			if (currentSpecialties.length === 0) {
+				throw new BadRequestException('Lead specialty is required');
+			}
+
+			user.specialties = currentSpecialties;
+			user.specialty = currentSpecialties[0];
 		}
 
 		if (user.role !== 'lead') {
 			user.specialty = null;
+			user.specialties = null;
 		}
 
 		if (typeof dto.isActive !== 'undefined') {

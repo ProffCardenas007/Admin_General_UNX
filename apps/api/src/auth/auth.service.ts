@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
+import { normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
 export class AuthService {
@@ -36,10 +37,14 @@ export class AuthService {
 			throw new UnauthorizedException('Invalid credentials');
 		}
 
+		const specialties = normalizeLeadSpecialties(user.specialties ?? user.specialty);
+		const specialty = specialties[0] ?? null;
+
 		const accessToken = await this.jwtService.signAsync({
 			sub: user.id,
 			role: user.role,
-			specialty: user.specialty,
+			specialty,
+			specialties,
 			email: user.email,
 		});
 
@@ -50,7 +55,8 @@ export class AuthService {
 				fullName: user.fullName,
 				email: user.email,
 				role: user.role,
-				specialty: user.specialty,
+				specialty,
+				specialties,
 			},
 		};
 	}

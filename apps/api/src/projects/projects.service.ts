@@ -11,7 +11,7 @@ import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
-import { ProjectScope, isLeadSpecialty } from '../common/specialties';
+import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
 export class ProjectsService {
@@ -24,36 +24,43 @@ export class ProjectsService {
 		private readonly usersRepository: Repository<UserEntity>,
 	) {}
 
-	private async resolveLeadSpecialty(actor: {
+	private async resolveLeadSpecialties(actor: {
 		id: string;
 		role: 'manager' | 'lead' | 'worker';
 		specialty?: ProjectScope | null;
+		specialties?: ProjectScope[] | null;
 	}) {
 		if (actor.role !== 'lead') {
-			return null;
+			return [];
 		}
 
-		if (isLeadSpecialty(actor.specialty)) {
-			return actor.specialty;
+		const actorSpecialties = normalizeLeadSpecialties(actor.specialties ?? actor.specialty);
+		if (actorSpecialties.length > 0) {
+			return actorSpecialties;
 		}
 
 		const user = await this.usersRepository.findOne({ where: { id: actor.id } });
-		return isLeadSpecialty(user?.specialty) ? user.specialty : null;
+		return normalizeLeadSpecialties(user?.specialties ?? user?.specialty);
 	}
 
 	async findAll(
 		filters: { status?: string; search?: string },
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
+		actor: {
+			id: string;
+			role: 'manager' | 'lead' | 'worker';
+			specialty?: ProjectScope | null;
+			specialties?: ProjectScope[] | null;
+		},
 	) {
 		const qb = this.projectsRepository.createQueryBuilder('project');
-		const leadSpecialty = await this.resolveLeadSpecialty(actor);
+		const leadSpecialties = await this.resolveLeadSpecialties(actor);
 
 		if (actor.role === 'lead') {
-			if (!leadSpecialty) {
+			if (leadSpecialties.length === 0) {
 				throw new ForbiddenException('Lead specialty is required');
 			}
 
-			qb.andWhere('project.scope = :scope', { scope: leadSpecialty });
+			qb.andWhere('project.scope IN (:...scopes)', { scopes: leadSpecialties });
 		}
 
 		if (actor.role === 'worker') {
@@ -79,14 +86,24 @@ export class ProjectsService {
 
 	create(
 		dto: CreateProjectDto,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
+		actor: {
+			id: string;
+			role: 'manager' | 'lead' | 'worker';
+			specialty?: ProjectScope | null;
+			specialties?: ProjectScope[] | null;
+		},
 	) {
 		return this.createInternal(dto, actor);
 	}
 
 	private async createInternal(
 		dto: CreateProjectDto,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
+		actor: {
+			id: string;
+			role: 'manager' | 'lead' | 'worker';
+			specialty?: ProjectScope | null;
+			specialties?: ProjectScope[] | null;
+		},
 	) {
 		const normalizedCode = dto.code.trim();
 		const normalizedName = dto.name.trim();
@@ -101,15 +118,20 @@ export class ProjectsService {
 		}
 
 		let resolvedScope = dto.scope ?? null;
-		const leadSpecialty = await this.resolveLeadSpecialty(actor);
+		const leadSpecialties = await this.resolveLeadSpecialties(actor);
 
 		if (actor.role === 'lead') {
-			if (!leadSpecialty) {
+			if (leadSpecialties.length === 0) {
 				throw new BadRequestException('Lead specialty is required');
 			}
 
-			// Keep lead project scope aligned with their assigned specialty.
-			resolvedScope = leadSpecialty;
+			if (!resolvedScope) {
+				throw new BadRequestException('Project scope is required for lead users');
+			}
+
+			if (!leadSpecialties.includes(resolvedScope)) {
+				throw new ForbiddenException('Leads can only create projects in their specialties');
+			}
 		} else if (!resolvedScope) {
 			throw new BadRequestException('Project scope is required');
 		}
@@ -167,9 +189,14 @@ export class ProjectsService {
 
 	async getProgress(
 		projectId: string,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
+		actor: {
+			id: string;
+			role: 'manager' | 'lead' | 'worker';
+			specialty?: ProjectScope | null;
+			specialties?: ProjectScope[] | null;
+		},
 	) {
-		const leadSpecialty = await this.resolveLeadSpecialty(actor);
+		const leadSpecialties = await this.resolveLeadSpecialties(actor);
 		const project = await this.projectsRepository.findOne({ where: { id: projectId } });
 		if (!project) {
 			throw new NotFoundException('Project not found');
@@ -186,12 +213,12 @@ export class ProjectsService {
 		const tasks = await tasksQb.getMany();
 
 		if (actor.role === 'lead') {
-			if (!leadSpecialty) {
+			if (leadSpecialties.length === 0) {
 				throw new ForbiddenException('Lead specialty is required');
 			}
 
-			if (project.scope !== leadSpecialty) {
-				throw new ForbiddenException('Leads can only view progress for their specialty');
+			if (!leadSpecialties.includes(project.scope)) {
+				throw new ForbiddenException('Leads can only view progress for their specialties');
 			}
 		}
 

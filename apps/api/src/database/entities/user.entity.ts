@@ -51,6 +51,22 @@ export class UserEntity {
   })
   specialty?: LeadSpecialty | null;
 
+  @Column({
+    name: 'specialties',
+    type: 'enum',
+    enum: [
+      'paa',
+      'exani_ii',
+      'piense',
+      'unam',
+      'modulos',
+    ],
+    enumName: 'lead_specialty',
+    array: true,
+    nullable: true,
+  })
+  specialties?: LeadSpecialty[] | null;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 const DEFAULT_LOGIN_EMAIL =
-  process.env.NEXT_PUBLIC_DEFAULT_LOGIN_EMAIL ?? "gerente@empresa.com";
+  process.env.NEXT_PUBLIC_DEFAULT_LOGIN_EMAIL ?? "gerente@unx.mx";
 
 export default function Home() {
   const router = useRouter();
@@ -29,11 +29,21 @@ export default function Home() {
       const accessToken = loginResponse.data.accessToken as string;
       const role = (loginResponse.data.user?.role as string | undefined) ?? "";
       const specialty = (loginResponse.data.user?.specialty as string | undefined) ?? "";
+      const specialties = Array.isArray(loginResponse.data.user?.specialties)
+        ? (loginResponse.data.user.specialties as string[])
+        : specialty
+          ? [specialty]
+          : [];
       const nextRoute = role === "worker" ? "/tasks" : "/dashboard";
       window.localStorage.setItem("sistema_mvp_token", accessToken);
       window.localStorage.setItem("sistema_mvp_email", email);
       if (role) {
         window.localStorage.setItem("sistema_mvp_role", role);
+      }
+      if (specialties.length > 0) {
+        window.localStorage.setItem("sistema_mvp_specialties", JSON.stringify(specialties));
+      } else {
+        window.localStorage.removeItem("sistema_mvp_specialties");
       }
       if (specialty) {
         window.localStorage.setItem("sistema_mvp_specialty", specialty);
