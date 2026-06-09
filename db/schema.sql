@@ -167,6 +167,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_role user_role NOT NULL,
+    actor_email VARCHAR(180),
+    entity_type VARCHAR(40) NOT NULL,
+    entity_id UUID NOT NULL,
+    entity_label VARCHAR(220),
+    action VARCHAR(80) NOT NULL,
+    changes_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS excel_imports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
@@ -205,6 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
 CREATE INDEX IF NOT EXISTS idx_task_updates_task_date ON task_updates(task_id, update_date DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_excel_imports_user_date ON excel_imports(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kpi_project_date ON kpi_snapshots(project_id, snapshot_date DESC);
 

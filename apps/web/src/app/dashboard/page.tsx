@@ -649,6 +649,14 @@ export default function DashboardPage() {
                   Ver usuarios
                 </Link>
               ) : null}
+              {role === "manager" ? (
+                <Link
+                  href="/history"
+                  className="ui-btn ui-btn-secondary"
+                >
+                  Ver historial
+                </Link>
+              ) : null}
               <Link
                 href="/notifications"
                 className="ui-btn ui-btn-secondary"

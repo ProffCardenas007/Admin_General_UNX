@@ -12,6 +12,7 @@ import { ImportsModule } from './imports/imports.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { UserEntity } from './database/entities/user.entity';
 import { ProjectEntity } from './database/entities/project.entity';
 import { TaskEntity } from './database/entities/task.entity';
@@ -19,6 +20,7 @@ import { TaskUpdateEntity } from './database/entities/task-update.entity';
 import { ExcelImportEntity } from './database/entities/excel-import.entity';
 import { ExcelImportErrorEntity } from './database/entities/excel-import-error.entity';
 import { NotificationEntity } from './database/entities/notification.entity';
+import { AuditLogEntity } from './database/entities/audit-log.entity';
 
 @Module({
   imports: [
@@ -59,6 +61,7 @@ import { NotificationEntity } from './database/entities/notification.entity';
             ExcelImportEntity,
             ExcelImportErrorEntity,
             NotificationEntity,
+            AuditLogEntity,
           ],
           synchronize: false,
         };
@@ -73,6 +76,7 @@ import { NotificationEntity } from './database/entities/notification.entity';
     DashboardModule,
     ReportsModule,
     NotificationsModule,
+    AuditLogsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

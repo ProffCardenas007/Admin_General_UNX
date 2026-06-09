@@ -100,6 +100,7 @@ export default function TasksPage() {
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
   const showCodeAndAssigneeColumns = role !== "worker";
   const isWorker = role === "worker";
+  const canManagePlanning = role === "manager" || role === "lead";
   const [historyByTask, setHistoryByTask] = useState<Record<string, TaskUpdateRow[]>>({});
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
@@ -116,6 +117,8 @@ export default function TasksPage() {
         status: TaskRow["status"];
         priority: TaskRow["priority"];
         assigneeId: string;
+        description: string;
+        dueDate: string;
         handoffToUserId: string;
         handoffTitle: string;
         handoffMessage: string;
@@ -165,6 +168,8 @@ export default function TasksPage() {
               status: task.status,
               priority: task.priority,
               assigneeId: task.assigneeId ?? "",
+              description: task.description ?? "",
+              dueDate: task.dueDate ?? "",
               handoffToUserId: "",
               handoffTitle: "",
               handoffMessage: "",
@@ -438,6 +443,8 @@ export default function TasksPage() {
         status: draft.status,
         priority: draft.priority,
         assigneeId: draft.assigneeId || undefined,
+        description: canManagePlanning ? draft.description || undefined : undefined,
+        dueDate: canManagePlanning ? draft.dueDate || undefined : undefined,
         handoffToUserId:
           draft.status === "done" && draft.handoffToUserId
             ? draft.handoffToUserId
@@ -480,6 +487,8 @@ export default function TasksPage() {
             status: task.status,
             priority: task.priority,
             assigneeId: task.assigneeId ?? "",
+            description: task.description ?? "",
+            dueDate: task.dueDate ?? "",
             handoffToUserId: "",
             handoffTitle: "",
             handoffMessage: "",
@@ -959,6 +968,25 @@ export default function TasksPage() {
                       <tr className="border-b border-[var(--line)]/60 align-top">
                         <td className="px-4 py-3">
                           <p className="font-semibold">{task.title}</p>
+                          {canManagePlanning ? (
+                            <label className="mt-2 block text-xs text-[var(--ink-muted)]">
+                              Descripción
+                              <textarea
+                                value={taskDrafts[task.id]?.description ?? task.description ?? ""}
+                                onChange={(event) =>
+                                  setTaskDrafts((current) => ({
+                                    ...current,
+                                    [task.id]: {
+                                      ...current[task.id],
+                                      description: event.target.value,
+                                    },
+                                  }))
+                                }
+                                rows={2}
+                                className="mt-1 block w-full min-w-[220px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              />
+                            </label>
+                          ) : null}
                           {task.description ? (
                             <>
                               <button
@@ -1052,6 +1080,25 @@ export default function TasksPage() {
                             <span className={`h-2.5 w-2.5 rounded-full ${due.dotClass}`} />
                             {due.label}
                           </span>
+                          {canManagePlanning ? (
+                            <label className="mt-2 block text-xs text-[var(--ink-muted)]">
+                              Fecha fin
+                              <input
+                                type="date"
+                                value={taskDrafts[task.id]?.dueDate ?? task.dueDate ?? ""}
+                                onChange={(event) =>
+                                  setTaskDrafts((current) => ({
+                                    ...current,
+                                    [task.id]: {
+                                      ...current[task.id],
+                                      dueDate: event.target.value,
+                                    },
+                                  }))
+                                }
+                                className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              />
+                            </label>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3">{task.estimatedHours}</td>
                         <td className="px-4 py-3 min-w-[270px]">
