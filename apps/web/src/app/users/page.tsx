@@ -497,9 +497,9 @@ export default function UsersPage() {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-      <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10 lg:px-10">
+      <section className="glass-panel fade-up p-6 md:p-8 lg:p-10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
@@ -527,7 +527,7 @@ export default function UsersPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-3">
+        <div className="mt-6 grid gap-3 md:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <input
             name="users-search"
             value={search}
@@ -571,20 +571,20 @@ export default function UsersPage() {
       </section>
 
       {role === "manager" ? (
-      <section className="kpi-card fade-up p-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <section className="kpi-card fade-up p-6 md:p-8">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <h2 className="text-lg font-semibold">Estadisticas por usuario</h2>
             <p className="mt-1 text-sm text-[var(--ink-muted)]">
               Selecciona un lider o colaborador para ver actividades asignadas y su resumen operativo.
             </p>
           </div>
-          <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
+          <div className="grid w-full gap-3 md:grid-cols-2 xl:w-auto xl:grid-cols-[minmax(0,20rem)_minmax(0,10rem)]">
             <select
               name="users-stats-user"
               value={selectedStatsUserId}
               onChange={(event) => setSelectedStatsUserId(event.target.value)}
-              className="ui-control w-full md:w-[340px]"
+              className="ui-control w-full"
             >
               <option value="">Selecciona un usuario</option>
               {users
@@ -599,7 +599,7 @@ export default function UsersPage() {
               name="users-stats-period"
               value={statsPeriod}
               onChange={(event) => setStatsPeriod(event.target.value as "all" | "7d" | "30d" | "custom")}
-              className="ui-control w-full md:w-[160px]"
+              className="ui-control w-full"
             >
               <option value="all">Todo</option>
               <option value="7d">Ultimos 7 dias</option>
@@ -610,7 +610,7 @@ export default function UsersPage() {
         </div>
 
         {statsPeriod === "custom" ? (
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:max-w-2xl">
             <input
               name="users-stats-from"
               type="date"

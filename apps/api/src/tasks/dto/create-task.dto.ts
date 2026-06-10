@@ -1,4 +1,11 @@
-import { IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateTaskDto {
   @IsString()
@@ -10,8 +17,21 @@ export class CreateTaskDto {
   code?: string;
 
   @IsString()
-  @IsIn(['revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma'])
-  activityType: 'revision' | 'edicion' | 'creacion' | 'presentaciones' | 'grabacion' | 'plataforma';
+  @IsIn([
+    'revision',
+    'edicion',
+    'creacion',
+    'presentaciones',
+    'grabacion',
+    'plataforma',
+  ])
+  activityType:
+    | 'revision'
+    | 'edicion'
+    | 'creacion'
+    | 'presentaciones'
+    | 'grabacion'
+    | 'plataforma';
 
   @IsString()
   @MaxLength(220)

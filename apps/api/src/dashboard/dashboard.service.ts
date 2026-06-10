@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ProjectEntity } from '../database/entities/project.entity';
@@ -8,232 +12,280 @@ import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
 export class DashboardService {
-	constructor(
-		@InjectRepository(ProjectEntity)
-		private readonly projectsRepository: Repository<ProjectEntity>,
-		@InjectRepository(TaskEntity)
-		private readonly tasksRepository: Repository<TaskEntity>,
-		@InjectRepository(TaskUpdateEntity)
-		private readonly taskUpdatesRepository: Repository<TaskUpdateEntity>,
-	) {}
+  constructor(
+    @InjectRepository(ProjectEntity)
+    private readonly projectsRepository: Repository<ProjectEntity>,
+    @InjectRepository(TaskEntity)
+    private readonly tasksRepository: Repository<TaskEntity>,
+    @InjectRepository(TaskUpdateEntity)
+    private readonly taskUpdatesRepository: Repository<TaskUpdateEntity>,
+  ) {}
 
-	async getSummary(
-		filters: { from?: string; to?: string; projectId?: string },
-		actor: {
-			id: string;
-			role: 'manager' | 'lead' | 'worker';
-			specialty?: ProjectScope | null;
-			specialties?: ProjectScope[] | null;
-		},
-	) {
-		const from = this.normalizeDateFilter(filters.from, 'from');
-		const to = this.normalizeDateFilter(filters.to, 'to');
-		const projectId = this.normalizeProjectIdFilter(filters.projectId);
-		const leadSpecialties = normalizeLeadSpecialties(actor.specialties ?? actor.specialty);
+  async getSummary(
+    filters: { from?: string; to?: string; projectId?: string },
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const from = this.normalizeDateFilter(filters.from, 'from');
+    const to = this.normalizeDateFilter(filters.to, 'to');
+    const projectId = this.normalizeProjectIdFilter(filters.projectId);
+    const leadSpecialties = normalizeLeadSpecialties(
+      actor.specialties ?? actor.specialty,
+    );
 
-		const activeProjectsQb = this.projectsRepository
-			.createQueryBuilder('project')
-			.where('project.status = :status', { status: 'active' });
+    const activeProjectsQb = this.projectsRepository
+      .createQueryBuilder('project')
+      .where('project.status = :status', { status: 'active' });
 
-		if (actor.role === 'worker') {
-			activeProjectsQb.innerJoin(
-				TaskEntity,
-				'task_scope',
-				'task_scope.project_id = project.id AND task_scope.assignee_id = :actorId',
-				{ actorId: actor.id },
-			).distinct(true);
-		} else if (actor.role === 'lead') {
-			if (leadSpecialties.length === 0) {
-				throw new ForbiddenException('Lead specialty is required');
-			}
+    if (actor.role === 'worker') {
+      activeProjectsQb
+        .innerJoin(
+          TaskEntity,
+          'task_scope',
+          'task_scope.project_id = project.id AND task_scope.assignee_id = :actorId',
+          { actorId: actor.id },
+        )
+        .distinct(true);
+    } else if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
 
-			activeProjectsQb.andWhere('project.scope IN (:...scopes)', { scopes: leadSpecialties });
-		}
+      activeProjectsQb.andWhere('project.scope IN (:...scopes)', {
+        scopes: leadSpecialties,
+      });
+    }
 
-		if (projectId) {
-			activeProjectsQb.andWhere('project.id = :projectId', {
-				projectId,
-			});
-		}
-		const activeProjects = await activeProjectsQb.getCount();
+    if (projectId) {
+      activeProjectsQb.andWhere('project.id = :projectId', {
+        projectId,
+      });
+    }
+    const activeProjects = await activeProjectsQb.getCount();
 
-		const tasksQb = this.tasksRepository.createQueryBuilder('task');
-		if (actor.role === 'lead') {
-			if (leadSpecialties.length === 0) {
-				throw new ForbiddenException('Lead specialty is required');
-			}
+    const tasksQb = this.tasksRepository.createQueryBuilder('task');
+    if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
 
-			tasksQb.innerJoin(ProjectEntity, 'project_scope', 'project_scope.id = task.project_id');
-			tasksQb.andWhere('project_scope.scope IN (:...scopes)', { scopes: leadSpecialties });
-		}
-		if (projectId) {
-			tasksQb.andWhere('task.project_id = :projectId', { projectId });
-		}
-		if (actor.role === 'worker') {
-			tasksQb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
-		}
-		const tasks = await tasksQb.getMany();
-		const totalTasks = tasks.length;
-		const doneTasks = tasks.filter((task) => task.status === 'done').length;
-		const blockedTasks = tasks.filter((task) => task.status === 'blocked').length;
+      tasksQb.innerJoin(
+        ProjectEntity,
+        'project_scope',
+        'project_scope.id = task.project_id',
+      );
+      tasksQb.andWhere('project_scope.scope IN (:...scopes)', {
+        scopes: leadSpecialties,
+      });
+    }
+    if (projectId) {
+      tasksQb.andWhere('task.project_id = :projectId', { projectId });
+    }
+    if (actor.role === 'worker') {
+      tasksQb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
+    }
+    const tasks = await tasksQb.getMany();
+    const totalTasks = tasks.length;
+    const doneTasks = tasks.filter((task) => task.status === 'done').length;
+    const blockedTasks = tasks.filter(
+      (task) => task.status === 'blocked',
+    ).length;
 
-		const today = new Date();
-		const overdueTasks = tasks.filter(
-			(task) => task.status !== 'done' && task.dueDate && new Date(task.dueDate) < today,
-		).length;
+    const today = new Date();
+    const overdueTasks = tasks.filter(
+      (task) =>
+        task.status !== 'done' &&
+        task.dueDate &&
+        new Date(task.dueDate) < today,
+    ).length;
 
-		const hoursQb = this.taskUpdatesRepository
-			.createQueryBuilder('update')
-			.select('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
-			.innerJoin(TaskEntity, 'task', 'task.id = update.task_id');
+    const hoursQb = this.taskUpdatesRepository
+      .createQueryBuilder('update')
+      .select('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
+      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id');
 
-		if (projectId) {
-			hoursQb.andWhere('task.project_id = :projectId', { projectId });
-		}
-		if (from) {
-			hoursQb.andWhere('update.update_date >= :from', { from });
-		}
-		if (to) {
-			hoursQb.andWhere('update.update_date <= :to', { to });
-		}
-		if (actor.role === 'worker') {
-			hoursQb.andWhere('update.user_id = :actorId', { actorId: actor.id });
-		}
-		const hoursResult = await hoursQb.getRawOne<{ hoursWorked: string }>();
+    if (projectId) {
+      hoursQb.andWhere('task.project_id = :projectId', { projectId });
+    }
+    if (from) {
+      hoursQb.andWhere('update.update_date >= :from', { from });
+    }
+    if (to) {
+      hoursQb.andWhere('update.update_date <= :to', { to });
+    }
+    if (actor.role === 'worker') {
+      hoursQb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+    }
+    const hoursResult = await hoursQb.getRawOne<{ hoursWorked: string }>();
 
-		return {
-			activeProjects,
-			completionRate:
-				totalTasks === 0 ? 0 : Number(((doneTasks / totalTasks) * 100).toFixed(2)),
-			overdueTasks,
-			blockedTasks,
-			hoursWorked: Number(hoursResult?.hoursWorked ?? 0),
-		};
-	}
+    return {
+      activeProjects,
+      completionRate:
+        totalTasks === 0
+          ? 0
+          : Number(((doneTasks / totalTasks) * 100).toFixed(2)),
+      overdueTasks,
+      blockedTasks,
+      hoursWorked: Number(hoursResult?.hoursWorked ?? 0),
+    };
+  }
 
-	async getWorkload(
-		filters: { projectId?: string },
-		actor: {
-			id: string;
-			role: 'manager' | 'lead' | 'worker';
-			specialty?: ProjectScope | null;
-			specialties?: ProjectScope[] | null;
-		},
-	) {
-		const projectId = this.normalizeProjectIdFilter(filters.projectId);
-		const leadSpecialties = normalizeLeadSpecialties(actor.specialties ?? actor.specialty);
+  async getWorkload(
+    filters: { projectId?: string },
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const projectId = this.normalizeProjectIdFilter(filters.projectId);
+    const leadSpecialties = normalizeLeadSpecialties(
+      actor.specialties ?? actor.specialty,
+    );
 
-		const qb = this.taskUpdatesRepository
-			.createQueryBuilder('update')
-			.select('update.user_id', 'userId')
-			.addSelect('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
-			.addSelect('COUNT(update.id)', 'updatesCount')
-			.innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
-			.groupBy('update.user_id')
-			.orderBy('"hoursWorked"', 'DESC');
+    const qb = this.taskUpdatesRepository
+      .createQueryBuilder('update')
+      .select('update.user_id', 'userId')
+      .addSelect('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
+      .addSelect('COUNT(update.id)', 'updatesCount')
+      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
+      .groupBy('update.user_id')
+      .orderBy('"hoursWorked"', 'DESC');
 
-		if (actor.role === 'lead') {
-			if (leadSpecialties.length === 0) {
-				throw new ForbiddenException('Lead specialty is required');
-			}
+    if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
 
-			qb.innerJoin(ProjectEntity, 'project_scope', 'project_scope.id = task.project_id');
-			qb.andWhere('project_scope.scope IN (:...scopes)', { scopes: leadSpecialties });
-		}
+      qb.innerJoin(
+        ProjectEntity,
+        'project_scope',
+        'project_scope.id = task.project_id',
+      );
+      qb.andWhere('project_scope.scope IN (:...scopes)', {
+        scopes: leadSpecialties,
+      });
+    }
 
-		if (projectId) {
-			qb.andWhere('task.project_id = :projectId', { projectId });
-		}
-		if (actor.role === 'worker') {
-			qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
-		}
+    if (projectId) {
+      qb.andWhere('task.project_id = :projectId', { projectId });
+    }
+    if (actor.role === 'worker') {
+      qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+    }
 
-		return qb.getRawMany<{
-			userId: string;
-			hoursWorked: string;
-			updatesCount: string;
-		}>();
-	}
+    return qb.getRawMany<{
+      userId: string;
+      hoursWorked: string;
+      updatesCount: string;
+    }>();
+  }
 
-	async getTrends(
-		filters: { from?: string; to?: string; projectId?: string },
-		actor: {
-			id: string;
-			role: 'manager' | 'lead' | 'worker';
-			specialty?: ProjectScope | null;
-			specialties?: ProjectScope[] | null;
-		},
-	) {
-		const from = this.normalizeDateFilter(filters.from, 'from');
-		const to = this.normalizeDateFilter(filters.to, 'to');
-		const projectId = this.normalizeProjectIdFilter(filters.projectId);
-		const leadSpecialties = normalizeLeadSpecialties(actor.specialties ?? actor.specialty);
-		const weekStartExpression =
-			"DATE_TRUNC('week', CASE WHEN update.update_date::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN to_date(update.update_date::text, 'YYYY-MM-DD') ELSE update.created_at::date END)";
+  async getTrends(
+    filters: { from?: string; to?: string; projectId?: string },
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const from = this.normalizeDateFilter(filters.from, 'from');
+    const to = this.normalizeDateFilter(filters.to, 'to');
+    const projectId = this.normalizeProjectIdFilter(filters.projectId);
+    const leadSpecialties = normalizeLeadSpecialties(
+      actor.specialties ?? actor.specialty,
+    );
+    const weekStartExpression =
+      "DATE_TRUNC('week', CASE WHEN update.update_date::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN to_date(update.update_date::text, 'YYYY-MM-DD') ELSE update.created_at::date END)";
 
-		const qb = this.taskUpdatesRepository
-			.createQueryBuilder('update')
-			.select(weekStartExpression, 'weekStart')
-			.addSelect('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
-			.addSelect('COUNT(update.id)', 'updatesCount')
-			.innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
-			.groupBy(weekStartExpression)
-			.orderBy('"weekStart"', 'ASC');
+    const qb = this.taskUpdatesRepository
+      .createQueryBuilder('update')
+      .select(weekStartExpression, 'weekStart')
+      .addSelect('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
+      .addSelect('COUNT(update.id)', 'updatesCount')
+      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
+      .groupBy(weekStartExpression)
+      .orderBy('"weekStart"', 'ASC');
 
-		if (actor.role === 'lead') {
-			if (leadSpecialties.length === 0) {
-				throw new ForbiddenException('Lead specialty is required');
-			}
+    if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
 
-			qb.innerJoin(ProjectEntity, 'project_scope', 'project_scope.id = task.project_id');
-			qb.andWhere('project_scope.scope IN (:...scopes)', { scopes: leadSpecialties });
-		}
+      qb.innerJoin(
+        ProjectEntity,
+        'project_scope',
+        'project_scope.id = task.project_id',
+      );
+      qb.andWhere('project_scope.scope IN (:...scopes)', {
+        scopes: leadSpecialties,
+      });
+    }
 
-		if (projectId) {
-			qb.andWhere('task.project_id = :projectId', { projectId });
-		}
-		if (from) {
-			qb.andWhere('update.update_date >= :from', { from });
-		}
-		if (to) {
-			qb.andWhere('update.update_date <= :to', { to });
-		}
-		if (actor.role === 'worker') {
-			qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
-		}
+    if (projectId) {
+      qb.andWhere('task.project_id = :projectId', { projectId });
+    }
+    if (from) {
+      qb.andWhere('update.update_date >= :from', { from });
+    }
+    if (to) {
+      qb.andWhere('update.update_date <= :to', { to });
+    }
+    if (actor.role === 'worker') {
+      qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+    }
 
-		return qb.getRawMany<{
-			weekStart: string;
-			hoursWorked: string;
-			updatesCount: string;
-		}>();
-	}
+    return qb.getRawMany<{
+      weekStart: string;
+      hoursWorked: string;
+      updatesCount: string;
+    }>();
+  }
 
-	private normalizeDateFilter(value: string | undefined, fieldName: 'from' | 'to') {
-		if (!value || value.trim().length === 0) {
-			return undefined;
-		}
+  private normalizeDateFilter(
+    value: string | undefined,
+    fieldName: 'from' | 'to',
+  ) {
+    if (!value || value.trim().length === 0) {
+      return undefined;
+    }
 
-		const normalized = value.trim();
-		if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-			throw new BadRequestException(
-				`Invalid ${fieldName} date. Use YYYY-MM-DD format`,
-			);
-		}
+    const normalized = value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      throw new BadRequestException(
+        `Invalid ${fieldName} date. Use YYYY-MM-DD format`,
+      );
+    }
 
-		return normalized;
-	}
+    return normalized;
+  }
 
-	private normalizeProjectIdFilter(value: string | undefined) {
-		if (!value || value.trim().length === 0 || value.trim().toLowerCase() === 'all') {
-			return undefined;
-		}
+  private normalizeProjectIdFilter(value: string | undefined) {
+    if (
+      !value ||
+      value.trim().length === 0 ||
+      value.trim().toLowerCase() === 'all'
+    ) {
+      return undefined;
+    }
 
-		const normalized = value.trim();
-		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) {
-			throw new BadRequestException('Invalid projectId filter. Use a UUID or all');
-		}
+    const normalized = value.trim();
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        normalized,
+      )
+    ) {
+      throw new BadRequestException(
+        'Invalid projectId filter. Use a UUID or all',
+      );
+    }
 
-		return normalized;
-	}
+    return normalized;
+  }
 }

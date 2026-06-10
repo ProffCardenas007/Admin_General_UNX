@@ -5,7 +5,7 @@ import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
-import type { LeadSpecialty } from "../../lib/specialties";
+import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type TaskRow = {
   id: string;
@@ -242,6 +242,11 @@ export default function TasksPage() {
     [projects],
   );
 
+  const projectById = useMemo(
+    () => Object.fromEntries(projects.map((project) => [project.id, project])),
+    [projects],
+  );
+
   const todayIso = useMemo(() => {
     const now = new Date();
     const month = `${now.getMonth() + 1}`.padStart(2, "0");
@@ -424,6 +429,16 @@ export default function TasksPage() {
     return user
       ? `${user.fullName} (${roleLabels[user.role] ?? user.role})`
       : assigneeId.slice(0, 8);
+  };
+
+  const projectLabel = (projectId: string) => {
+    const project = projectById[projectId];
+    if (!project) {
+      return "Proyecto no encontrado";
+    }
+
+    const specialty = project.scope ? specialtyLabels[project.scope] : "Sin especialidad";
+    return `${project.code} · ${project.name} · ${specialty}`;
   };
 
   const onSaveTaskQuickEdit = async (taskId: string) => {
@@ -946,17 +961,16 @@ export default function TasksPage() {
         ) : displayTasks.length === 0 ? (
           <p className="ui-empty m-4 px-4 py-3 text-sm">No hay tareas con esos filtros.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="ui-table min-w-full">
+          <div className="max-w-full overflow-x-auto">
+            <table className="ui-table min-w-full w-full">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
                   <th className="px-4 py-3 font-semibold">Título</th>
-                  <th className="px-4 py-3 font-semibold">Actividad</th>
+                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Actividad</th>
                   {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Asignado</th> : null}
                   <th className="px-4 py-3 font-semibold">Estado</th>
-                  <th className="px-4 py-3 font-semibold">Prioridad</th>
+                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Prioridad</th>
                   <th className="px-4 py-3 font-semibold">Semáforo</th>
-                  <th className="px-4 py-3 font-semibold">Horas est.</th>
                   <th className="px-4 py-3 font-semibold">Acción</th>
                 </tr>
               </thead>
@@ -966,8 +980,11 @@ export default function TasksPage() {
                   return (
                     <Fragment key={task.id}>
                       <tr className="border-b border-[var(--line)]/60 align-top">
-                        <td className="px-4 py-3">
-                          <p className="font-semibold">{task.title}</p>
+                        <td className="px-4 py-3 break-words">
+                          <p className="font-semibold break-words">{task.title}</p>
+                          <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                            {projectLabel(task.projectId)}
+                          </p>
                           {canManagePlanning ? (
                             <label className="mt-2 block text-xs text-[var(--ink-muted)]">
                               Descripción
@@ -983,7 +1000,7 @@ export default function TasksPage() {
                                   }))
                                 }
                                 rows={2}
-                                className="mt-1 block w-full min-w-[220px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                                className="mt-1 block w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[220px]"
                               />
                             </label>
                           ) : null}
@@ -1007,9 +1024,9 @@ export default function TasksPage() {
                             </>
                           ) : null}
                         </td>
-                        <td className="px-4 py-3">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
+                        <td className="px-4 py-3 hidden xl:table-cell">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
                         {showCodeAndAssigneeColumns ? (
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-normal break-words">
                             <select
                               value={taskDrafts[task.id]?.assigneeId ?? ""}
                               onChange={(event) =>
@@ -1021,7 +1038,7 @@ export default function TasksPage() {
                                   },
                                 }))
                               }
-                              className="w-full min-w-[200px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[200px]"
                             >
                               <option value="">Sin asignar</option>
                               {users.map((user) => (
@@ -1055,7 +1072,7 @@ export default function TasksPage() {
                             <option value="done">{statusLabels.done}</option>
                           </select>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 hidden xl:table-cell">
                           <select
                             value={taskDrafts[task.id]?.priority ?? task.priority}
                             onChange={(event) =>
@@ -1100,9 +1117,8 @@ export default function TasksPage() {
                             </label>
                           ) : null}
                         </td>
-                        <td className="px-4 py-3">{task.estimatedHours}</td>
-                        <td className="px-4 py-3 min-w-[270px]">
-                          <div className="flex flex-col gap-2">
+                        <td className="px-4 py-3 md:min-w-[220px]">
+                          <div className="grid gap-2 lg:grid-cols-2">
                             <button
                               onClick={() => void onSaveTaskQuickEdit(task.id)}
                               disabled={savingTaskId === task.id}
@@ -1153,7 +1169,7 @@ export default function TasksPage() {
 
                       {openedHistoryTaskId === task.id ? (
                         <tr className="border-b border-[var(--line)]/60">
-                          <td colSpan={showCodeAndAssigneeColumns ? 8 : 7} className="bg-[var(--background)]/35 px-4 py-3">
+                          <td colSpan={showCodeAndAssigneeColumns ? 7 : 6} className="bg-[var(--background)]/35 px-4 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
                             Historial de updates
                           </p>

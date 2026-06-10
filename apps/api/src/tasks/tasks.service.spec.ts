@@ -35,15 +35,25 @@ describe('TasksService', () => {
   });
 
   it('blocks worker updating task not assigned to them', async () => {
-    tasksRepository.findOne.mockResolvedValue({ id: 'task-1', assigneeId: 'worker-2' });
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: 'worker-2',
+    });
 
     await expect(
-      service.update('task-1', { status: 'done' }, { id: 'worker-1', role: 'worker' }),
+      service.update(
+        'task-1',
+        { status: 'done' },
+        { id: 'worker-1', role: 'worker' },
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('allows manager updating any task', async () => {
-    tasksRepository.findOne.mockResolvedValue({ id: 'task-1', assigneeId: 'worker-2' });
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: 'worker-2',
+    });
     tasksRepository.save.mockResolvedValue({ id: 'task-1', status: 'done' });
 
     const result = await service.update(

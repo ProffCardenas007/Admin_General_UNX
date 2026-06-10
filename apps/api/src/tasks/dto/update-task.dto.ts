@@ -34,8 +34,21 @@ export class UpdateTaskDto {
   handoffMessage?: string;
 
   @IsOptional()
-  @IsIn(['revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma'])
-  nextActivityType?: 'revision' | 'edicion' | 'creacion' | 'presentaciones' | 'grabacion' | 'plataforma';
+  @IsIn([
+    'revision',
+    'edicion',
+    'creacion',
+    'presentaciones',
+    'grabacion',
+    'plataforma',
+  ])
+  nextActivityType?:
+    | 'revision'
+    | 'edicion'
+    | 'creacion'
+    | 'presentaciones'
+    | 'grabacion'
+    | 'plataforma';
 
   @IsOptional()
   @IsString()

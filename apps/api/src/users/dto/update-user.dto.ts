@@ -23,7 +23,9 @@ export class UpdateUserDto {
   role?: 'manager' | 'lead' | 'worker';
 
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   @IsIn(LEAD_SPECIALTY_INPUTS)
   specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number] | null;
 

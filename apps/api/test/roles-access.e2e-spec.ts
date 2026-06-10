@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, INestApplication, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  INestApplication,
+  Injectable,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -24,7 +29,9 @@ class MockJwtAuthGuard implements CanActivate {
     const roleHeader = request.headers['x-test-role'];
     const userIdHeader = request.headers['x-test-user-id'];
     const role =
-      roleHeader === 'manager' || roleHeader === 'lead' || roleHeader === 'worker'
+      roleHeader === 'manager' ||
+      roleHeader === 'lead' ||
+      roleHeader === 'worker'
         ? roleHeader
         : 'worker';
 

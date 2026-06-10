@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -10,67 +21,70 @@ import { ProjectScope } from '../common/specialties';
 @Controller('tasks')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TasksController {
-	constructor(private readonly tasksService: TasksService) {}
+  constructor(private readonly tasksService: TasksService) {}
 
-	@Get()
-	@Roles('manager', 'lead', 'worker')
-	findAll(
-		@Req() req: {
-			user: {
-				id: string;
-				role: 'manager' | 'lead' | 'worker';
-				specialty?: ProjectScope | null;
-				specialties?: ProjectScope[] | null;
-			};
-		},
-		@Query('projectId') projectId?: string,
-		@Query('assigneeId') assigneeId?: string,
-		@Query('status') status?: string,
-		@Query('priority') priority?: string,
-		@Query('scope') scope?: string,
-	) {
-		return this.tasksService.findAll(
-			{ projectId, assigneeId, status, priority, scope },
-			req.user,
-		);
-	}
+  @Get()
+  @Roles('manager', 'lead', 'worker')
+  findAll(
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
+    @Query('projectId') projectId?: string,
+    @Query('assigneeId') assigneeId?: string,
+    @Query('status') status?: string,
+    @Query('priority') priority?: string,
+    @Query('scope') scope?: string,
+  ) {
+    return this.tasksService.findAll(
+      { projectId, assigneeId, status, priority, scope },
+      req.user,
+    );
+  }
 
-	@Post()
-	@Roles('manager', 'lead', 'worker')
-	create(
-		@Body() dto: CreateTaskDto,
-		@Req() req: {
-			user: {
-				id: string;
-				role: 'manager' | 'lead' | 'worker';
-				specialty?: ProjectScope | null;
-				specialties?: ProjectScope[] | null;
-			};
-		},
-	) {
-		return this.tasksService.create(dto, req.user);
-	}
+  @Post()
+  @Roles('manager', 'lead', 'worker')
+  create(
+    @Body() dto: CreateTaskDto,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
+  ) {
+    return this.tasksService.create(dto, req.user);
+  }
 
-	@Patch(':taskId')
-	@Roles('manager', 'lead', 'worker')
-	update(
-		@Param('taskId') taskId: string,
-		@Body() dto: UpdateTaskDto,
-		@Req() req: {
-			user: {
-				id: string;
-				role: 'manager' | 'lead' | 'worker';
-				specialty?: ProjectScope | null;
-				specialties?: ProjectScope[] | null;
-			};
-		},
-	) {
-		return this.tasksService.update(taskId, dto, req.user);
-	}
+  @Patch(':taskId')
+  @Roles('manager', 'lead', 'worker')
+  update(
+    @Param('taskId') taskId: string,
+    @Body() dto: UpdateTaskDto,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
+  ) {
+    return this.tasksService.update(taskId, dto, req.user);
+  }
 
-	@Delete(':taskId')
-	@Roles('manager')
-	remove(@Param('taskId') taskId: string) {
-		return this.tasksService.remove(taskId);
-	}
+  @Delete(':taskId')
+  @Roles('manager')
+  remove(@Param('taskId') taskId: string) {
+    return this.tasksService.remove(taskId);
+  }
 }

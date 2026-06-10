@@ -30,7 +30,14 @@ export class TaskEntity {
   @Column({
     name: 'activity_type',
     type: 'enum',
-    enum: ['revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma'],
+    enum: [
+      'revision',
+      'edicion',
+      'creacion',
+      'presentaciones',
+      'grabacion',
+      'plataforma',
+    ],
     enumName: 'task_activity_type',
   })
   activityType: TaskActivityType;

@@ -14,7 +14,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET', 'change_this_secret'),
+      secretOrKey: configService.get<string>(
+        'JWT_SECRET',
+        'change_this_secret',
+      ),
     });
   }
 
@@ -30,7 +33,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException();
     }
 
-    const specialties = normalizeLeadSpecialties(user.specialties ?? user.specialty);
+    const specialties = normalizeLeadSpecialties(
+      user.specialties ?? user.specialty,
+    );
 
     return {
       id: user.id,

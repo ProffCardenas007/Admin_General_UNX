@@ -24,7 +24,9 @@ export class CreateUserDto {
   role: 'manager' | 'lead' | 'worker';
 
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   @IsIn(LEAD_SPECIALTY_INPUTS)
   specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number];
 
@@ -44,10 +46,10 @@ export class CreateUserDto {
   @IsIn(LEAD_SPECIALTY_INPUTS, { each: true })
   specialties?: Array<(typeof LEAD_SPECIALTY_INPUTS)[number]>;
 
-	@IsString()
-	@MinLength(6)
-	@MaxLength(120)
-	password: string;
+  @IsString()
+  @MinLength(6)
+  @MaxLength(120)
+  password: string;
 
   @IsOptional()
   @IsString()

@@ -7,7 +7,12 @@ import {
 } from 'typeorm';
 import type { ProjectScope } from '../../common/specialties';
 
-export type ProjectStatus = 'planned' | 'active' | 'on_hold' | 'done' | 'cancelled';
+export type ProjectStatus =
+  | 'planned'
+  | 'active'
+  | 'on_hold'
+  | 'done'
+  | 'cancelled';
 
 @Entity({ name: 'projects' })
 export class ProjectEntity {
@@ -29,13 +34,7 @@ export class ProjectEntity {
   @Column({
     name: 'scope',
     type: 'enum',
-    enum: [
-      'paa',
-      'exani_ii',
-      'piense',
-      'unam',
-      'modulos',
-    ],
+    enum: ['paa', 'exani_ii', 'piense', 'unam', 'modulos'],
     enumName: 'project_scope',
     nullable: true,
   })

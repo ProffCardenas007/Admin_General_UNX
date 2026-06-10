@@ -396,8 +396,8 @@ export default function ProjectsPage() {
         ) : filteredProjects.length === 0 ? (
           <p className="ui-empty m-4 px-4 py-3 text-sm">No hay proyectos para esos filtros.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="ui-table min-w-full">
+          <div className="max-w-full overflow-x-auto">
+            <table className="ui-table min-w-full w-full">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
                   <th className="px-4 py-3 font-semibold">Tareas</th>
@@ -431,7 +431,7 @@ export default function ProjectsPage() {
                           </button>
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">{project.code}</td>
-                        <td className="px-4 py-3 font-semibold">
+                        <td className="px-4 py-3 font-semibold break-words">
                           {canEditProjects ? (
                             <input
                               value={draft?.name ?? project.name}
@@ -449,13 +449,13 @@ export default function ProjectsPage() {
                                   },
                                 }))
                               }
-                              className="w-full min-w-[200px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[200px]"
                             />
                           ) : (
                             project.name
                           )}
                         </td>
-                        <td className="px-4 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
+                        <td className="px-4 py-3 whitespace-normal break-words">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
                         <td className="px-4 py-3">
                           {canEditProjects ? (
                             <select
@@ -474,7 +474,7 @@ export default function ProjectsPage() {
                                   },
                                 }))
                               }
-                              className="w-full min-w-[160px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[160px]"
                             >
                               <option value="planned">planificado</option>
                               <option value="active">activo</option>
@@ -486,7 +486,7 @@ export default function ProjectsPage() {
                             statusLabels[project.status] ?? project.status
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           {canEditProjects ? (
                             <input
                               type="date"
@@ -505,13 +505,13 @@ export default function ProjectsPage() {
                                   },
                                 }))
                               }
-                              className="w-full min-w-[140px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[140px]"
                             />
                           ) : (
                             project.startDate ?? "-"
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           {canEditProjects ? (
                             <input
                               type="date"
@@ -530,7 +530,7 @@ export default function ProjectsPage() {
                                   },
                                 }))
                               }
-                              className="w-full min-w-[140px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[140px]"
                             />
                           ) : (
                             project.endDate ?? "-"
