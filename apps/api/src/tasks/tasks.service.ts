@@ -1,11 +1,12 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { NotificationEntity } from '../database/entities/notification.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
@@ -173,8 +174,88 @@ export class TasksService {
     activityType: CreateTaskDto['activityType'],
   ) {
     const prefix = this.activityCodePrefix(activityType);
-    const count = await this.tasksRepository.count({ where: { projectId } });
-    return `${prefix}-${String(count + 1).padStart(3, '0')}`;
+    const rows = await this.tasksRepository
+      .createQueryBuilder('task')
+      .select('task.code', 'code')
+      .where('task.project_id = :projectId', { projectId })
+      .andWhere('task.code LIKE :pattern', { pattern: `${prefix}-%` })
+      .getRawMany<{ code: string }>();
+
+    const maxSequence = rows.reduce((currentMax, row) => {
+      const rawCode = row?.code;
+      if (!rawCode || !rawCode.startsWith(`${prefix}-`)) {
+        return currentMax;
+      }
+
+      const suffix = rawCode.slice(prefix.length + 1);
+      const parsed = Number.parseInt(suffix, 10);
+      if (Number.isNaN(parsed)) {
+        return currentMax;
+      }
+
+      return Math.max(currentMax, parsed);
+    }, 0);
+
+    return `${prefix}-${String(maxSequence + 1).padStart(3, '0')}`;
+  }
+
+  private isTaskCodeConflict(error: unknown) {
+    if (!(error instanceof QueryFailedError)) {
+      return false;
+    }
+
+    const dbError = error as QueryFailedError & {
+      code?: string;
+      constraint?: string;
+      detail?: string;
+    };
+
+    return (
+      dbError.code === '23505' &&
+      (dbError.constraint === 'tasks_project_id_code_key' ||
+        dbError.detail?.includes('(project_id, code)') ||
+        false)
+    );
+  }
+
+  private async createTaskWithGeneratedCode(
+    input: {
+      projectId: string;
+      activityType: CreateTaskDto['activityType'];
+      title: string;
+      description?: string;
+      assigneeId?: string;
+      status: 'todo' | 'doing' | 'blocked' | 'done';
+      priority: 'low' | 'medium' | 'high' | 'urgent';
+      dueDate?: string;
+      estimatedHours: string;
+    },
+    maxAttempts = 5,
+  ) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const generatedCode = await this.buildGeneratedCode(
+        input.projectId,
+        input.activityType,
+      );
+
+      const task = this.tasksRepository.create({
+        ...input,
+        code: generatedCode,
+      });
+
+      try {
+        return await this.tasksRepository.save(task);
+      } catch (error) {
+        if (this.isTaskCodeConflict(error) && attempt < maxAttempts - 1) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new ConflictException(
+      'No se pudo generar un codigo unico para la tarea. Intenta nuevamente.',
+    );
   }
 
   async create(
@@ -206,22 +287,30 @@ export class TasksService {
       }
     }
 
-    const resolvedCode = dto.code?.trim().length
-      ? dto.code.trim()
-      : await this.buildGeneratedCode(dto.projectId, dto.activityType);
-
     const resolvedAssigneeId =
       actor.role === 'worker' ? actor.id : dto.assigneeId;
 
-    const task = this.tasksRepository.create({
-      ...dto,
-      code: resolvedCode,
+    const taskPayload = {
+      projectId: dto.projectId,
+      activityType: dto.activityType,
+      title: dto.title,
+      description: dto.description,
       assigneeId: resolvedAssigneeId,
       status: dto.status ?? 'todo',
       priority: dto.priority ?? 'medium',
+      dueDate: dto.dueDate,
       estimatedHours: String(dto.estimatedHours ?? 0),
-    });
-    return this.tasksRepository.save(task);
+    };
+
+    if (dto.code?.trim().length) {
+      const task = this.tasksRepository.create({
+        ...taskPayload,
+        code: dto.code.trim(),
+      });
+      return this.tasksRepository.save(task);
+    }
+
+    return this.createTaskWithGeneratedCode(taskPayload);
   }
 
   async update(
@@ -349,15 +438,9 @@ export class TasksService {
 
     if (taskFields.status === 'done' && handoffToUserId) {
       const consequentActivityType = nextActivityType ?? task.activityType;
-      const consequentCode = await this.buildGeneratedCode(
-        task.projectId,
-        consequentActivityType,
-      );
-
-      const consequentTask = this.tasksRepository.create({
+      const consequentTask = await this.createTaskWithGeneratedCode({
         projectId: task.projectId,
         activityType: consequentActivityType,
-        code: consequentCode,
         title: nextTitle?.trim().length
           ? nextTitle
           : `Continuacion de ${task.title}`,
@@ -374,8 +457,6 @@ export class TasksService {
             : task.estimatedHours,
       });
 
-      await this.tasksRepository.save(consequentTask);
-
       const notification = this.notificationsRepository.create({
         userId: handoffToUserId,
         taskId: consequentTask.id,
@@ -389,8 +470,8 @@ export class TasksService {
       const today = new Date().toISOString().slice(0, 10);
       const consequentAssigneeLabel = handoffToUserId.slice(0, 8);
       const continuityComment = handoffMessage?.trim().length
-        ? `Tarea finalizada y derivada a ${consequentCode} para ${consequentAssigneeLabel}. Nota: ${handoffMessage}`
-        : `Tarea finalizada y derivada a ${consequentCode} para ${consequentAssigneeLabel}.`;
+        ? `Tarea finalizada y derivada a ${consequentTask.code} para ${consequentAssigneeLabel}. Nota: ${handoffMessage}`
+        : `Tarea finalizada y derivada a ${consequentTask.code} para ${consequentAssigneeLabel}.`;
 
       const continuityUpdate = this.taskUpdatesRepository.create({
         taskId: task.id,
