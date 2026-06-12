@@ -399,14 +399,18 @@ export class TasksService {
       where: { id: task.projectId },
     });
     if (actor.role === 'lead') {
-      if (leadSpecialties.length === 0) {
-        throw new ForbiddenException('Lead specialty is required');
-      }
+      const isLeadAssignee = task.assigneeId === actor.id;
 
-      if (!project?.scope || !leadSpecialties.includes(project.scope)) {
-        throw new ForbiddenException(
-          'Leads can only update tasks within their specialties',
-        );
+      if (!isLeadAssignee) {
+        if (leadSpecialties.length === 0) {
+          throw new ForbiddenException('Lead specialty is required');
+        }
+
+        if (!project?.scope || !leadSpecialties.includes(project.scope)) {
+          throw new ForbiddenException(
+            'Leads can only update tasks within their specialties',
+          );
+        }
       }
     }
 
