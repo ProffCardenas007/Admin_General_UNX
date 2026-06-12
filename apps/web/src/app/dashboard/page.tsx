@@ -5,7 +5,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
-import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type Summary = {
   activeProjects: number;
@@ -140,6 +140,7 @@ export default function DashboardPage() {
   const [projectProgressById, setProjectProgressById] = useState<Record<string, ProjectProgress>>({});
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatusFilter, setProjectStatusFilter] = useState<"" | ProjectRow["status"]>("");
+  const [projectSpecialtyFilter, setProjectSpecialtyFilter] = useState<"" | LeadSpecialty>("");
   const [projectRiskFilter, setProjectRiskFilter] = useState<"all" | RiskLevel>("all");
   const [taskProjectFilter, setTaskProjectFilter] = useState("");
   const [taskUserFilter, setTaskUserFilter] = useState("");
@@ -216,11 +217,12 @@ export default function DashboardPage() {
         project.code.toLowerCase().includes(projectSearch.toLowerCase()) ||
         project.name.toLowerCase().includes(projectSearch.toLowerCase());
       const byStatus = projectStatusFilter.length === 0 || project.status === projectStatusFilter;
+      const bySpecialty = projectSpecialtyFilter.length === 0 || project.scope === projectSpecialtyFilter;
       const byRisk = projectRiskFilter === "all" || project.risk === projectRiskFilter;
 
-      return bySearch && byStatus && byRisk;
+      return bySearch && byStatus && bySpecialty && byRisk;
     });
-  }, [projectPortfolioRows, projectRiskFilter, projectSearch, projectStatusFilter]);
+  }, [projectPortfolioRows, projectRiskFilter, projectSearch, projectSpecialtyFilter, projectStatusFilter]);
 
   const projectKpis = useMemo(() => {
     const total = projectPortfolioRows.length;
@@ -778,6 +780,20 @@ export default function DashboardPage() {
               <option value="on_hold">en pausa</option>
               <option value="done">finalizado</option>
               <option value="cancelled">cancelado</option>
+            </select>
+
+            <select
+              name="dashboard-project-specialty-filter"
+              value={projectSpecialtyFilter}
+              onChange={(event) => setProjectSpecialtyFilter(event.target.value as "" | LeadSpecialty)}
+              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+            >
+              <option value="">Todas las especialidades</option>
+              {LEAD_SPECIALTIES.map((specialty) => (
+                <option key={specialty} value={specialty}>
+                  {specialtyLabels[specialty]}
+                </option>
+              ))}
             </select>
 
             <select
