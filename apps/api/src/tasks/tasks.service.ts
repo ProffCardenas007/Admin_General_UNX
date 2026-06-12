@@ -401,7 +401,26 @@ export class TasksService {
         comments: continuityComment,
       });
 
-      await this.taskUpdatesRepository.save(continuityUpdate);
+      const existingContinuityUpdate = await this.taskUpdatesRepository.findOne({
+        where: {
+          taskId: task.id,
+          userId: actor.id,
+          updateDate: today,
+        },
+      });
+
+      if (existingContinuityUpdate) {
+        const previousComments = existingContinuityUpdate.comments?.trim() ?? '';
+        existingContinuityUpdate.workedHours = '0';
+        existingContinuityUpdate.progressPercent = '100';
+        existingContinuityUpdate.comments = previousComments.length > 0
+          ? `${previousComments}\n${continuityComment}`
+          : continuityComment;
+
+        await this.taskUpdatesRepository.save(existingContinuityUpdate);
+      } else {
+        await this.taskUpdatesRepository.save(continuityUpdate);
+      }
     }
 
     return savedTask;
