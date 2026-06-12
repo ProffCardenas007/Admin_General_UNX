@@ -56,6 +56,12 @@ type UserOption = {
   role: "manager" | "lead" | "worker";
 };
 
+type TeamOption = {
+  id: string;
+  name: string;
+  memberCount?: number;
+};
+
 type ProjectProgress = {
   projectId: string;
   totalTasks: number;
@@ -137,6 +143,7 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [teams, setTeams] = useState<TeamOption[]>([]);
   const [projectProgressById, setProjectProgressById] = useState<Record<string, ProjectProgress>>({});
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatusFilter, setProjectStatusFilter] = useState<"" | ProjectRow["status"]>("");
@@ -154,6 +161,7 @@ export default function DashboardPage() {
     title: "",
     description: "",
     assigneeId: "",
+    teamId: "",
     status: "todo" as TaskRow["status"],
     priority: "medium" as TaskRow["priority"],
     dueDate: "",
@@ -397,11 +405,12 @@ export default function DashboardPage() {
     const loadDashboard = async () => {
       try {
         const headers = authHeaders();
-        const [summaryResponse, workloadResponse, trendsResponse, projectsResponse] = await Promise.all([
+        const [summaryResponse, workloadResponse, trendsResponse, projectsResponse, teamsResponse] = await Promise.all([
           axios.get(`${API_URL}/dashboard/summary`, { headers }),
           axios.get(`${API_URL}/dashboard/workload`, { headers }),
           axios.get(`${API_URL}/dashboard/trends`, { headers }),
           axios.get(`${API_URL}/projects`, { headers }),
+          axios.get(`${API_URL}/teams`, { headers }),
         ]);
 
         let loadedTasks: TaskRow[] = [];
@@ -445,6 +454,7 @@ export default function DashboardPage() {
 
         const loadedProjects = projectsResponse.data as ProjectRow[];
         setProjects(loadedProjects);
+        setTeams(teamsResponse.data as TeamOption[]);
         setTaskForm((current) => {
           const selectedProjectId =
             current.projectId && loadedProjects.some((project) => project.id === current.projectId)
@@ -502,6 +512,7 @@ export default function DashboardPage() {
       ...current,
       projectId: projectId || current.projectId || projects[0]?.id || "",
       assigneeId: current.assigneeId || users[0]?.id || "",
+      teamId: "",
       title: "",
       description: "",
       dueDate: "",
@@ -521,7 +532,8 @@ export default function DashboardPage() {
         activityType: taskForm.activityType,
         title: taskForm.title,
         description: taskForm.description,
-        assigneeId: taskForm.assigneeId || undefined,
+        assigneeId: taskForm.teamId ? undefined : taskForm.assigneeId || undefined,
+        teamId: taskForm.teamId || undefined,
         status: taskForm.status,
         priority: taskForm.priority,
         dueDate: taskForm.dueDate || undefined,
@@ -1311,6 +1323,26 @@ export default function DashboardPage() {
                 {users.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.fullName} - {roleLabels[user.role] ?? user.role}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                name="task-modal-team"
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={taskForm.teamId}
+                onChange={(event) =>
+                  setTaskForm((current) => ({
+                    ...current,
+                    teamId: event.target.value,
+                    assigneeId: event.target.value ? "" : current.assigneeId,
+                  }))
+                }
+              >
+                <option value="">Asignar por equipo (opcional)</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name} ({team.memberCount ?? 0})
                   </option>
                 ))}
               </select>

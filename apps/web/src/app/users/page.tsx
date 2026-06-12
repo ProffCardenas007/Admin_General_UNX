@@ -14,14 +14,22 @@ type UserRow = {
   role: "manager" | "lead" | "worker";
   specialty?: LeadSpecialty | null;
   specialties?: LeadSpecialty[] | null;
+  teamIds?: string[];
   isActive: boolean;
   createdAt: string;
+};
+
+type TeamRow = {
+  id: string;
+  name: string;
+  memberCount?: number;
 };
 
 type UserDraft = {
   fullName: string;
   role: UserRow["role"];
   specialties: LeadSpecialty[];
+  teamIds: string[];
   isActive: boolean;
   password: string;
 };
@@ -80,6 +88,7 @@ export default function UsersPage() {
   const [savingUserId, setSavingUserId] = useState("");
   const [deletingUserId, setDeletingUserId] = useState("");
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [teams, setTeams] = useState<TeamRow[]>([]);
   const [tasksForStats, setTasksForStats] = useState<TaskStatsRow[]>([]);
   const [selectedStatsUserId, setSelectedStatsUserId] = useState("");
   const [statsPeriod, setStatsPeriod] = useState<"all" | "7d" | "30d" | "custom">("30d");
@@ -88,6 +97,9 @@ export default function UsersPage() {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [selectedUserUpdates, setSelectedUserUpdates] = useState<TaskUpdateRow[]>([]);
+  const [newTeamName, setNewTeamName] = useState("");
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [deletingTeamId, setDeletingTeamId] = useState("");
   const [userDrafts, setUserDrafts] = useState<Record<string, UserDraft>>({});
 
   const toDraftSpecialties = (user: UserRow) => {
@@ -108,6 +120,7 @@ export default function UsersPage() {
     fullName: user.fullName,
     role: user.role,
     specialties: toDraftSpecialties(user),
+    teamIds: user.teamIds ?? [],
     isActive: user.isActive,
     password: "",
   });
@@ -136,16 +149,18 @@ export default function UsersPage() {
     const loadUsers = async () => {
       try {
         const headers = authHeaders();
-        const response = await axios.get(`${API_URL}/users`, {
-          headers,
-        });
+        const [usersResponse, taskResponse, teamsResponse] = await Promise.all([
+          axios.get(`${API_URL}/users`, { headers }),
+          axios.get(`${API_URL}/tasks`, { headers }),
+          axios.get(`${API_URL}/teams`, { headers }),
+        ]);
 
-        const taskResponse = await axios.get(`${API_URL}/tasks`, { headers });
         const loadedTasks = taskResponse.data as TaskStatsRow[];
-
-        const loadedUsers = response.data as UserRow[];
+        const loadedUsers = usersResponse.data as UserRow[];
+        const loadedTeams = teamsResponse.data as TeamRow[];
         setTasksForStats(loadedTasks);
         setUsers(loadedUsers);
+        setTeams(loadedTeams);
         setSelectedStatsUserId((current) => {
           if (current && loadedUsers.some((user) => user.id === current)) {
             return current;
@@ -387,6 +402,7 @@ export default function UsersPage() {
       fullName: draft.fullName,
       role: draft.role,
       specialties: draft.role === "lead" ? draft.specialties : null,
+      teamIds: draft.teamIds,
       isActive: draft.isActive,
       password: draft.password.trim().length > 0 ? draft.password : undefined,
     };
@@ -402,9 +418,12 @@ export default function UsersPage() {
         ...current,
         [userId]: {
           ...(current[userId] ?? buildUserDraft(updated)),
+          teamIds: updated.teamIds ?? current[userId]?.teamIds ?? [],
           password: "",
         },
       }));
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
       setInfo(`Usuario ${updated.email} actualizado.`);
     } catch (caughtError) {
       if (axios.isAxiosError(caughtError)) {
@@ -472,6 +491,8 @@ export default function UsersPage() {
         const remaining = users.filter((item) => item.id !== userId && item.role !== "manager");
         return remaining[0]?.id ?? "";
       });
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
       setInfo(`Usuario ${user.email} eliminado.`);
     } catch (caughtError) {
       if (axios.isAxiosError(caughtError)) {
@@ -493,6 +514,75 @@ export default function UsersPage() {
       }
     } finally {
       setDeletingUserId("");
+    }
+  };
+
+  const onCreateTeam = async () => {
+    const trimmedName = newTeamName.trim();
+    if (!trimmedName) {
+      setError("Escribe un nombre de equipo.");
+      setInfo("");
+      return;
+    }
+
+    setError("");
+    setInfo("");
+    setCreatingTeam(true);
+    try {
+      await axios.post(
+        `${API_URL}/teams`,
+        { name: trimmedName },
+        { headers: authHeaders() },
+      );
+
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
+      setNewTeamName("");
+      setInfo(`Equipo ${trimmedName} creado.`);
+    } catch {
+      setError("No se pudo crear el equipo.");
+    } finally {
+      setCreatingTeam(false);
+    }
+  };
+
+  const onDeleteTeam = async (teamId: string) => {
+    const team = teams.find((item) => item.id === teamId);
+    if (!team) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Vas a eliminar el equipo ${team.name}. Sus membresias tambien se eliminaran. Continuar?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingTeamId(teamId);
+    setError("");
+    setInfo("");
+
+    try {
+      await axios.delete(`${API_URL}/teams/${teamId}`, { headers: authHeaders() });
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
+      setUserDrafts((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([userKey, draft]) => [
+            userKey,
+            {
+              ...draft,
+              teamIds: draft.teamIds.filter((item) => item !== teamId),
+            },
+          ]),
+        ),
+      );
+      setInfo(`Equipo ${team.name} eliminado.`);
+    } catch {
+      setError("No se pudo eliminar el equipo.");
+    } finally {
+      setDeletingTeamId("");
     }
   };
 
@@ -569,6 +659,60 @@ export default function UsersPage() {
           </p>
         ) : null}
       </section>
+
+      {isManager ? (
+        <section className="kpi-card fade-up p-6 md:p-8">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Equipos</h2>
+              <p className="mt-1 text-sm text-[var(--ink-muted)]">
+                Crea equipos y luego asigna miembros desde la tabla de usuarios.
+              </p>
+            </div>
+            <div className="flex w-full gap-2 xl:w-auto">
+              <input
+                name="users-new-team-name"
+                value={newTeamName}
+                onChange={(event) => setNewTeamName(event.target.value)}
+                className="ui-control w-full xl:w-80"
+                placeholder="Nombre del equipo"
+              />
+              <button
+                onClick={() => void onCreateTeam()}
+                disabled={creatingTeam}
+                className="ui-btn ui-btn-primary disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {creatingTeam ? "Creando..." : "Crear"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {teams.length === 0 ? (
+              <p className="text-sm text-[var(--ink-muted)]">No hay equipos creados.</p>
+            ) : (
+              teams.map((team) => (
+                <div
+                  key={team.id}
+                  className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-white px-3 py-2"
+                >
+                  <span className="text-sm font-semibold">{team.name}</span>
+                  <span className="text-xs text-[var(--ink-muted)]">
+                    {team.memberCount ?? 0} miembros
+                  </span>
+                  <button
+                    onClick={() => void onDeleteTeam(team.id)}
+                    disabled={deletingTeamId === team.id}
+                    className="ui-btn ui-btn-danger ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {deletingTeamId === team.id ? "..." : "Eliminar"}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      ) : null}
 
       {role === "manager" ? (
       <section className="kpi-card fade-up p-6 md:p-8">
@@ -732,6 +876,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3 font-semibold">Nombre</th>
                   <th className="px-4 py-3 font-semibold">Correo</th>
                   <th className="px-4 py-3 font-semibold">Rol</th>
+                  <th className="px-4 py-3 font-semibold">Equipos</th>
                   <th className="px-4 py-3 font-semibold">Estado</th>
                   <th className="px-4 py-3 font-semibold">Contrasena</th>
                   <th className="px-4 py-3 font-semibold">Creado</th>
@@ -842,6 +987,66 @@ export default function UsersPage() {
                       ) : (
                         <span className="text-sm text-[var(--foreground)]">
                           {roleLabels[user.role]}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isManager ? (
+                        <div className="space-y-1">
+                          {teams.length === 0 ? (
+                            <span className="text-xs text-[var(--ink-muted)]">Sin equipos</span>
+                          ) : (
+                            teams.map((team) => {
+                              const checked = (userDrafts[user.id]?.teamIds ?? user.teamIds ?? []).includes(team.id);
+
+                              return (
+                                <label key={team.id} className="flex items-center gap-2 text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) =>
+                                      setUserDrafts((current) => {
+                                        const base = current[user.id] ?? buildUserDraft(user);
+                                        const currentTeamIds = base.teamIds;
+
+                                        if (event.target.checked) {
+                                          if (currentTeamIds.includes(team.id)) {
+                                            return current;
+                                          }
+
+                                          return {
+                                            ...current,
+                                            [user.id]: {
+                                              ...base,
+                                              teamIds: [...currentTeamIds, team.id],
+                                            },
+                                          };
+                                        }
+
+                                        return {
+                                          ...current,
+                                          [user.id]: {
+                                            ...base,
+                                            teamIds: currentTeamIds.filter((item) => item !== team.id),
+                                          },
+                                        };
+                                      })
+                                    }
+                                  />
+                                  {team.name}
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-[var(--ink-muted)]">
+                          {(user.teamIds ?? []).length > 0
+                            ? teams
+                                .filter((team) => (user.teamIds ?? []).includes(team.id))
+                                .map((team) => team.name)
+                                .join(", ")
+                            : "Sin equipo"}
                         </span>
                       )}
                     </td>

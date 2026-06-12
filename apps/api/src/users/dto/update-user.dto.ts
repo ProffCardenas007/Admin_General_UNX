@@ -54,4 +54,14 @@ export class UpdateUserDto {
   @MinLength(6)
   @MaxLength(120)
   password?: string;
+
+  @IsOptional()
+  @IsString()
+  teamId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  teamIds?: string[] | null;
 }

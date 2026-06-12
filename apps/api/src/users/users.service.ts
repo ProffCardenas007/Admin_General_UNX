@@ -6,8 +6,10 @@ import {
 } from '@nestjs/common';
 import { hash } from 'bcryptjs';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { UserEntity } from '../database/entities/user.entity';
+import { TeamEntity } from '../database/entities/team.entity';
+import { TeamMemberEntity } from '../database/entities/team-member.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { normalizeLeadSpecialties } from '../common/specialties';
@@ -17,13 +19,92 @@ export class UsersService {
   constructor(
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
+    @InjectRepository(TeamEntity)
+    private readonly teamsRepository: Repository<TeamEntity>,
+    @InjectRepository(TeamMemberEntity)
+    private readonly teamMembersRepository: Repository<TeamMemberEntity>,
   ) {}
+
+  private normalizeTeamIdsInput(
+    teamIds?: string[] | null,
+    teamId?: string | null,
+  ) {
+    if (Array.isArray(teamIds)) {
+      return [...new Set(teamIds.map((item) => item.trim()).filter(Boolean))];
+    }
+
+    if (teamId && teamId.trim().length > 0) {
+      return [teamId.trim()];
+    }
+
+    return [];
+  }
+
+  private async ensureTeamsExist(teamIds: string[]) {
+    if (teamIds.length === 0) {
+      return;
+    }
+
+    const teams = await this.teamsRepository.find({
+      where: { id: In(teamIds) },
+    });
+    const foundIds = new Set(teams.map((team) => team.id));
+    const missing = teamIds.filter((id) => !foundIds.has(id));
+
+    if (missing.length > 0) {
+      throw new BadRequestException('One or more teams do not exist');
+    }
+  }
+
+  private async setUserTeams(userId: string, teamIds: string[]) {
+    await this.teamMembersRepository.delete({ userId });
+
+    if (teamIds.length === 0) {
+      return;
+    }
+
+    await this.teamMembersRepository.save(
+      teamIds.map((teamId) =>
+        this.teamMembersRepository.create({
+          teamId,
+          userId,
+        }),
+      ),
+    );
+  }
+
+  private async buildUserTeamIdsMap(userIds: string[]) {
+    if (userIds.length === 0) {
+      return {} as Record<string, string[]>;
+    }
+
+    const memberships = await this.teamMembersRepository.find({
+      where: { userId: In(userIds) },
+    });
+
+    return memberships.reduce<Record<string, string[]>>((acc, row) => {
+      if (!acc[row.userId]) {
+        acc[row.userId] = [];
+      }
+      acc[row.userId].push(row.teamId);
+      return acc;
+    }, {});
+  }
+
+  private async attachTeamIds<T extends { id: string }>(users: T[]) {
+    const teamIdsByUser = await this.buildUserTeamIdsMap(users.map((user) => user.id));
+
+    return users.map((user) => ({
+      ...user,
+      teamIds: teamIdsByUser[user.id] ?? [],
+    }));
+  }
 
   findAll(role?: string) {
     const normalizedRole = role?.trim().toLowerCase();
 
     if (!normalizedRole || normalizedRole === 'all') {
-      return this.usersRepository.find();
+      return this.usersRepository.find().then((users) => this.attachTeamIds(users));
     }
 
     if (!this.isUserRole(normalizedRole)) {
@@ -32,7 +113,9 @@ export class UsersService {
       );
     }
 
-    return this.usersRepository.find({ where: { role: normalizedRole } });
+    return this.usersRepository
+      .find({ where: { role: normalizedRole } })
+      .then((users) => this.attachTeamIds(users));
   }
 
   private isUserRole(role: string): role is UserEntity['role'] {
@@ -79,7 +162,14 @@ export class UsersService {
       passwordHash,
       isActive: true,
     });
-    return this.usersRepository.save(user);
+    const savedUser = await this.usersRepository.save(user);
+
+    const normalizedTeamIds = this.normalizeTeamIdsInput(dto.teamIds, dto.teamId);
+    await this.ensureTeamsExist(normalizedTeamIds);
+    await this.setUserTeams(savedUser.id, normalizedTeamIds);
+
+    const [withTeams] = await this.attachTeamIds([savedUser]);
+    return withTeams;
   }
 
   async update(userId: string, dto: UpdateUserDto) {
@@ -135,7 +225,19 @@ export class UsersService {
       user.passwordHash = await hash(dto.password, 10);
     }
 
-    return this.usersRepository.save(user);
+    const savedUser = await this.usersRepository.save(user);
+
+    const hasTeamChange =
+      typeof dto.teamIds !== 'undefined' || typeof dto.teamId !== 'undefined';
+
+    if (hasTeamChange) {
+      const normalizedTeamIds = this.normalizeTeamIdsInput(dto.teamIds ?? null, dto.teamId ?? null);
+      await this.ensureTeamsExist(normalizedTeamIds);
+      await this.setUserTeams(savedUser.id, normalizedTeamIds);
+    }
+
+    const [withTeams] = await this.attachTeamIds([savedUser]);
+    return withTeams;
   }
 
   async setPasswordHash(userId: string, passwordHash: string) {

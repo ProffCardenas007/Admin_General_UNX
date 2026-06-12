@@ -54,4 +54,10 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   teamId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  teamIds?: string[];
 }

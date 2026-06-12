@@ -34,6 +34,13 @@ type UserOption = {
   role: string;
   specialty?: string | null;
   specialties?: string[] | null;
+  teamIds?: string[];
+};
+
+type TeamOption = {
+  id: string;
+  name: string;
+  memberCount?: number;
 };
 
 type TaskOption = {
@@ -87,6 +94,7 @@ export default function CapturePage() {
   const [captureMode, setCaptureMode] = useState<"" | "project" | "task">("");
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [teams, setTeams] = useState<TeamOption[]>([]);
   const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -115,6 +123,7 @@ export default function CapturePage() {
     title: "",
     description: "",
     assigneeId: "",
+    teamId: "",
     status: "todo",
     priority: "medium",
     dueDate: "",
@@ -129,7 +138,7 @@ export default function CapturePage() {
     role: "worker",
     specialties: [] as LeadSpecialty[],
     password: "",
-    teamId: "",
+    teamIds: [] as string[],
   });
 
   const [updateForm, setUpdateForm] = useState({
@@ -146,15 +155,17 @@ export default function CapturePage() {
     try {
       setLoading(true);
       const headers = authHeaders();
-      const [projectResponse, userResponse, taskResponse] = await Promise.all([
+      const [projectResponse, userResponse, taskResponse, teamsResponse] = await Promise.all([
         axios.get(`${API_URL}/projects`, { headers }),
         axios.get(`${API_URL}/users`, { headers }),
         axios.get(`${API_URL}/tasks`, { headers }),
+        axios.get(`${API_URL}/teams`, { headers }),
       ]);
 
       setProjects(projectResponse.data as ProjectOption[]);
       setUsers(userResponse.data as UserOption[]);
       setTasks(taskResponse.data as TaskOption[]);
+      setTeams(teamsResponse.data as TeamOption[]);
 
       const currentRole = getStoredRole();
       const currentEmail = getStoredEmail().toLowerCase();
@@ -328,7 +339,8 @@ export default function CapturePage() {
         activityType: taskForm.activityType,
         title: taskForm.title,
         description: taskForm.description,
-        assigneeId: taskForm.assigneeId || undefined,
+        assigneeId: taskForm.teamId ? undefined : taskForm.assigneeId || undefined,
+        teamId: taskForm.teamId || undefined,
         status: taskForm.status,
         priority: taskForm.priority,
         dueDate: taskForm.dueDate || undefined,
@@ -369,7 +381,7 @@ export default function CapturePage() {
         role: userForm.role,
         specialties: userForm.role === "lead" ? userForm.specialties : undefined,
         password: userForm.password,
-        teamId: userForm.teamId || undefined,
+        teamIds: userForm.teamIds.length > 0 ? userForm.teamIds : undefined,
       };
 
       await axios.post(`${API_URL}/users`, payload, { headers: authHeaders() });
@@ -380,7 +392,7 @@ export default function CapturePage() {
         role: "worker",
         specialties: specialties,
         password: "",
-        teamId: "",
+        teamIds: [],
       });
       await loadLookups();
     } catch (caughtError) {
@@ -595,6 +607,24 @@ export default function CapturePage() {
                 <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
               ))}
             </select>
+            <select
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+              value={taskForm.teamId}
+              onChange={(event) =>
+                setTaskForm((current) => ({
+                  ...current,
+                  teamId: event.target.value,
+                  assigneeId: event.target.value ? "" : current.assigneeId,
+                }))
+              }
+            >
+              <option value="">Asignar por equipo (opcional)</option>
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name} ({team.memberCount ?? 0})
+                </option>
+              ))}
+            </select>
             <div className="grid gap-3 md:grid-cols-2">
               <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.status} onChange={(event) => setTaskForm({ ...taskForm, status: event.target.value })}>
                 {taskStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -667,7 +697,39 @@ export default function CapturePage() {
               </div>
             ) : null}
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Contraseña" type="password" value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} />
-            <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Equipo (opcional)" value={userForm.teamId} onChange={(event) => setUserForm({ ...userForm, teamId: event.target.value })} />
+            <div className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                Equipos (opcional)
+              </p>
+              <div className="grid gap-2 md:grid-cols-2">
+                {teams.map((team) => {
+                  const checked = userForm.teamIds.includes(team.id);
+                  return (
+                    <label key={team.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          setUserForm((current) => {
+                            if (event.target.checked) {
+                              return {
+                                ...current,
+                                teamIds: [...new Set([...current.teamIds, team.id])],
+                              };
+                            }
+                            return {
+                              ...current,
+                              teamIds: current.teamIds.filter((item) => item !== team.id),
+                            };
+                          });
+                        }}
+                      />
+                      {team.name}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
             <button onClick={submitUser} className="w-full rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110">Crear usuario</button>
           </div>
         </article>

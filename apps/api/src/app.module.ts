@@ -13,6 +13,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { TeamsModule } from './teams/teams.module';
 import { UserEntity } from './database/entities/user.entity';
 import { ProjectEntity } from './database/entities/project.entity';
 import { TaskEntity } from './database/entities/task.entity';
@@ -21,6 +22,8 @@ import { ExcelImportEntity } from './database/entities/excel-import.entity';
 import { ExcelImportErrorEntity } from './database/entities/excel-import-error.entity';
 import { NotificationEntity } from './database/entities/notification.entity';
 import { AuditLogEntity } from './database/entities/audit-log.entity';
+import { TeamEntity } from './database/entities/team.entity';
+import { TeamMemberEntity } from './database/entities/team-member.entity';
 
 @Module({
   imports: [
@@ -62,6 +65,8 @@ import { AuditLogEntity } from './database/entities/audit-log.entity';
             ExcelImportErrorEntity,
             NotificationEntity,
             AuditLogEntity,
+            TeamEntity,
+            TeamMemberEntity,
           ],
           synchronize: false,
         };
@@ -77,6 +82,7 @@ import { AuditLogEntity } from './database/entities/audit-log.entity';
     ReportsModule,
     NotificationsModule,
     AuditLogsModule,
+    TeamsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

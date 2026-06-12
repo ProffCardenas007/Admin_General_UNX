@@ -45,6 +45,10 @@ export class CreateTaskDto {
   assigneeId?: string;
 
   @IsOptional()
+  @IsString()
+  teamId?: string;
+
+  @IsOptional()
   @IsIn(['todo', 'doing', 'blocked', 'done'])
   status?: 'todo' | 'doing' | 'blocked' | 'done';
 

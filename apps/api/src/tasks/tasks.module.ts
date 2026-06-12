@@ -8,6 +8,8 @@ import { NotificationEntity } from '../database/entities/notification.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { AuditLogEntity } from '../database/entities/audit-log.entity';
+import { TeamEntity } from '../database/entities/team.entity';
+import { TeamMemberEntity } from '../database/entities/team-member.entity';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { AuditLogEntity } from '../database/entities/audit-log.entity';
       NotificationEntity,
       UserEntity,
       AuditLogEntity,
+      TeamEntity,
+      TeamMemberEntity,
     ]),
   ],
   controllers: [TasksController],

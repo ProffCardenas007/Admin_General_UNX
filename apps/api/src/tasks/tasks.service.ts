@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -6,13 +7,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { In, QueryFailedError, Repository } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { NotificationEntity } from '../database/entities/notification.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { AuditLogEntity } from '../database/entities/audit-log.entity';
+import { TeamEntity } from '../database/entities/team.entity';
+import { TeamMemberEntity } from '../database/entities/team-member.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
@@ -34,6 +37,10 @@ export class TasksService {
     private readonly usersRepository: Repository<UserEntity>,
     @InjectRepository(AuditLogEntity)
     private readonly auditLogsRepository: Repository<AuditLogEntity>,
+    @InjectRepository(TeamEntity)
+    private readonly teamsRepository: Repository<TeamEntity>,
+    @InjectRepository(TeamMemberEntity)
+    private readonly teamMembersRepository: Repository<TeamMemberEntity>,
   ) {}
 
   private async recordManagerAudit(input: {
@@ -285,6 +292,65 @@ export class TasksService {
           'Leads can only create tasks within their specialties',
         );
       }
+    }
+
+    if (dto.teamId && dto.assigneeId) {
+      throw new BadRequestException('Use assigneeId or teamId, not both');
+    }
+
+    if (dto.teamId && actor.role === 'worker') {
+      throw new ForbiddenException(
+        'Workers cannot assign tasks to complete teams',
+      );
+    }
+
+    if (dto.teamId) {
+      const team = await this.teamsRepository.findOne({ where: { id: dto.teamId } });
+      if (!team) {
+        throw new BadRequestException('Team not found');
+      }
+
+      const memberships = await this.teamMembersRepository.find({
+        where: { teamId: dto.teamId },
+      });
+      const memberIds = memberships.map((item) => item.userId);
+
+      if (memberIds.length === 0) {
+        throw new BadRequestException('The selected team has no members');
+      }
+
+      const activeMembers = await this.usersRepository.find({
+        where: {
+          id: In(memberIds),
+          isActive: true,
+        },
+      });
+
+      if (activeMembers.length === 0) {
+        throw new BadRequestException('The selected team has no active members');
+      }
+
+      const createdTasks: TaskEntity[] = [];
+      for (const member of activeMembers) {
+        const createdTask = await this.createTaskWithGeneratedCode({
+          projectId: dto.projectId,
+          activityType: dto.activityType,
+          title: dto.title,
+          description: dto.description,
+          assigneeId: member.id,
+          status: dto.status ?? 'todo',
+          priority: dto.priority ?? 'medium',
+          dueDate: dto.dueDate,
+          estimatedHours: String(dto.estimatedHours ?? 0),
+        });
+        createdTasks.push(createdTask);
+      }
+
+      return {
+        teamId: dto.teamId,
+        createdCount: createdTasks.length,
+        tasks: createdTasks,
+      };
     }
 
     const resolvedAssigneeId =
