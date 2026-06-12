@@ -99,11 +99,21 @@ export class ProjectsService {
     const leadSpecialties = await this.resolveLeadSpecialties(actor);
 
     if (actor.role === 'lead') {
-      if (leadSpecialties.length === 0) {
-        throw new ForbiddenException('Lead specialty is required');
-      }
+      qb.leftJoin(
+        TaskEntity,
+        'lead_task',
+        'lead_task.project_id = project.id AND lead_task.assignee_id = :actorId',
+        { actorId: actor.id },
+      ).distinct(true);
 
-      qb.andWhere('project.scope IN (:...scopes)', { scopes: leadSpecialties });
+      if (leadSpecialties.length === 0) {
+        qb.andWhere('lead_task.id IS NOT NULL');
+      } else {
+        qb.andWhere(
+          '(project.scope IN (:...scopes) OR lead_task.id IS NOT NULL)',
+          { scopes: leadSpecialties },
+        );
+      }
     }
 
     if (actor.role === 'worker') {

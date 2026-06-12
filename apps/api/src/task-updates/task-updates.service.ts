@@ -18,6 +18,15 @@ export class TaskUpdatesService {
     private readonly tasksRepository: Repository<TaskEntity>,
   ) {}
 
+  private async syncTaskStatusFromProgress(task: TaskEntity, progressPercent: number) {
+    if (progressPercent < 100 || task.status === 'done') {
+      return;
+    }
+
+    task.status = 'done';
+    await this.tasksRepository.save(task);
+  }
+
   async create(
     dto: CreateTaskUpdateDto,
     actor: { id: string; role: 'manager' | 'lead' | 'worker' },
@@ -51,7 +60,9 @@ export class TaskUpdatesService {
       existing.progressPercent = String(dto.progressPercent);
       existing.blockerReason = dto.blockerReason;
       existing.comments = dto.comments;
-      return this.taskUpdatesRepository.save(existing);
+      const saved = await this.taskUpdatesRepository.save(existing);
+      await this.syncTaskStatusFromProgress(task, dto.progressPercent);
+      return saved;
     }
 
     const created = this.taskUpdatesRepository.create({
@@ -64,7 +75,9 @@ export class TaskUpdatesService {
       comments: dto.comments,
     });
 
-    return this.taskUpdatesRepository.save(created);
+    const saved = await this.taskUpdatesRepository.save(created);
+    await this.syncTaskStatusFromProgress(task, dto.progressPercent);
+    return saved;
   }
 
   async findByTask(
