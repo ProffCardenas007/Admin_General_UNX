@@ -22,7 +22,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @Roles('manager', 'lead')
+  @Roles('manager', 'lead', 'worker')
   findAll(@Query('role') role?: string) {
     return this.usersService.findAll(role);
   }
