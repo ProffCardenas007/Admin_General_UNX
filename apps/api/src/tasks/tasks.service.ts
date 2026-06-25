@@ -228,10 +228,12 @@ export class TasksService {
   private async createTaskWithGeneratedCode(
     input: {
       projectId: string;
+      parentTaskId?: string;
       activityType: CreateTaskDto['activityType'];
       title: string;
       description?: string;
       assigneeId?: string;
+      createdBy?: string;
       status: 'todo' | 'doing' | 'blocked' | 'done';
       priority: 'low' | 'medium' | 'high' | 'urgent';
       dueDate?: string;
@@ -338,6 +340,7 @@ export class TasksService {
           title: dto.title,
           description: dto.description,
           assigneeId: member.id,
+          createdBy: actor.id,
           status: dto.status ?? 'todo',
           priority: dto.priority ?? 'medium',
           dueDate: dto.dueDate,
@@ -362,6 +365,7 @@ export class TasksService {
       title: dto.title,
       description: dto.description,
       assigneeId: resolvedAssigneeId,
+      createdBy: actor.id,
       status: dto.status ?? 'todo',
       priority: dto.priority ?? 'medium',
       dueDate: dto.dueDate,
@@ -510,6 +514,7 @@ export class TasksService {
       const consequentActivityType = nextActivityType ?? task.activityType;
       const consequentTask = await this.createTaskWithGeneratedCode({
         projectId: task.projectId,
+        parentTaskId: task.parentTaskId ?? task.id,
         activityType: consequentActivityType,
         title: nextTitle?.trim().length
           ? nextTitle
@@ -577,10 +582,22 @@ export class TasksService {
     return savedTask;
   }
 
-  async remove(taskId: string) {
+  async remove(
+    taskId: string,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+    },
+  ) {
     const task = await this.tasksRepository.findOne({ where: { id: taskId } });
     if (!task) {
       throw new NotFoundException('Task not found');
+    }
+
+    if (actor.role !== 'manager' && task.createdBy !== actor.id) {
+      throw new ForbiddenException(
+        'Users can only delete tasks created by themselves',
+      );
     }
 
     await this.tasksRepository.delete({ id: taskId });

@@ -10,6 +10,7 @@ import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 type TaskRow = {
   id: string;
   code: string;
+  parentTaskId?: string | null;
   activityType:
     | "revision"
     | "edicion"
@@ -21,6 +22,7 @@ type TaskRow = {
   description?: string;
   projectId: string;
   assigneeId?: string;
+  createdBy?: string | null;
   status: "todo" | "doing" | "blocked" | "done";
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
@@ -96,6 +98,7 @@ export default function TasksPage() {
   const [deletingTaskId, setDeletingTaskId] = useState("");
   const [loadingHistoryTaskId, setLoadingHistoryTaskId] = useState("");
   const [openedHistoryTaskId, setOpenedHistoryTaskId] = useState("");
+  const [openedTrackingTaskId, setOpenedTrackingTaskId] = useState("");
   const [openedDescriptionTaskId, setOpenedDescriptionTaskId] = useState("");
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
   const showCodeAndAssigneeColumns = role !== "worker";
@@ -108,6 +111,8 @@ export default function TasksPage() {
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [taskTypeFilter, setTaskTypeFilter] = useState<"all" | "principal">("all");
+  const [showDoneTasks, setShowDoneTasks] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
 
   const [taskDrafts, setTaskDrafts] = useState<
@@ -231,11 +236,26 @@ export default function TasksPage() {
       const byAssignee =
         assigneeFilter.length === 0 || (task.assigneeId ?? "") === assigneeFilter;
 
-      return bySearch && byProject && byAssignee;
+      const byTaskType =
+        !canManagePlanning ||
+        taskTypeFilter === "all" ||
+        !task.parentTaskId;
+
+      const byDoneStatus = showDoneTasks || task.status !== "done";
+
+      return bySearch && byProject && byAssignee && byTaskType && byDoneStatus;
     });
 
     return result.sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
-  }, [tasks, search, projectFilter, assigneeFilter]);
+  }, [
+    tasks,
+    search,
+    projectFilter,
+    assigneeFilter,
+    canManagePlanning,
+    taskTypeFilter,
+    showDoneTasks,
+  ]);
 
   const activeProjects = useMemo(
     () => projects.filter((project) => project.status === "active"),
@@ -246,6 +266,31 @@ export default function TasksPage() {
     () => Object.fromEntries(projects.map((project) => [project.id, project])),
     [projects],
   );
+
+  const taskById = useMemo(
+    () => Object.fromEntries(tasks.map((task) => [task.id, task])),
+    [tasks],
+  );
+
+  const consequentTasksByParent = useMemo(() => {
+    return tasks.reduce<Record<string, TaskRow[]>>((accumulator, task) => {
+      if (!task.parentTaskId) {
+        return accumulator;
+      }
+
+      if (!accumulator[task.parentTaskId]) {
+        accumulator[task.parentTaskId] = [];
+      }
+
+      accumulator[task.parentTaskId].push(task);
+      accumulator[task.parentTaskId].sort((left, right) => {
+        const leftDate = left.dueDate ?? "9999-12-31";
+        const rightDate = right.dueDate ?? "9999-12-31";
+        return leftDate.localeCompare(rightDate) || left.code.localeCompare(right.code);
+      });
+      return accumulator;
+    }, {});
+  }, [tasks]);
 
   const todayIso = useMemo(() => {
     const now = new Date();
@@ -528,7 +573,12 @@ export default function TasksPage() {
 
   const onDeleteTask = async (taskId: string) => {
     const task = tasks.find((item) => item.id === taskId);
-    if (!task || role !== "manager") {
+    if (!task) {
+      return;
+    }
+
+    const canDeleteTask = role === "manager" || task.createdBy === currentUserId;
+    if (!canDeleteTask) {
       return;
     }
 
@@ -558,12 +608,15 @@ export default function TasksPage() {
       if (openedHistoryTaskId === taskId) {
         setOpenedHistoryTaskId("");
       }
+      if (openedTrackingTaskId === taskId) {
+        setOpenedTrackingTaskId("");
+      }
       if (openedConsequenceTaskId === taskId) {
         setOpenedConsequenceTaskId("");
       }
       setInfo(`Tarea ${task.code} eliminada.`);
     } catch {
-      setError("No se pudo borrar la tarea. Esta accion es exclusiva de gerencia.");
+      setError("No se pudo borrar la tarea. Solo gerencia o quien la creo puede hacerlo.");
     } finally {
       setDeletingTaskId("");
     }
@@ -676,6 +729,12 @@ export default function TasksPage() {
             {role === "worker" ? (
               <>
                 <Link
+                  href="/calendar"
+                  className="ui-btn ui-btn-secondary"
+                >
+                  Ver calendario
+                </Link>
+                <Link
                   href="/notifications"
                   className="ui-btn ui-btn-primary"
                 >
@@ -695,6 +754,12 @@ export default function TasksPage() {
                   className="ui-btn ui-btn-secondary"
                 >
                   Volver al panel
+                </Link>
+                <Link
+                  href="/calendar"
+                  className="ui-btn ui-btn-secondary"
+                >
+                  Ver calendario
                 </Link>
                 <Link
                   href="/users"
@@ -878,7 +943,7 @@ export default function TasksPage() {
             </div>
           </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-3">
+        <div className={`mt-6 grid gap-3 ${canManagePlanning ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -909,6 +974,29 @@ export default function TasksPage() {
               </option>
             ))}
           </select>
+          {canManagePlanning ? (
+            <select
+              value={taskTypeFilter}
+              onChange={(event) =>
+                setTaskTypeFilter(event.target.value as "all" | "principal")
+              }
+              className="ui-control"
+            >
+              <option value="all">Todas las tareas</option>
+              <option value="principal">Solo tareas principales</option>
+            </select>
+          ) : null}
+        </div>
+
+        <div className="mt-3">
+          <label className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)]">
+            <input
+              type="checkbox"
+              checked={showDoneTasks}
+              onChange={(event) => setShowDoneTasks(event.target.checked)}
+            />
+            Mostrar tareas finalizadas
+          </label>
         </div>
 
         {error ? (
@@ -977,6 +1065,10 @@ export default function TasksPage() {
               <tbody>
                 {displayTasks.map((task) => {
                   const due = taskDueSemaforo(task);
+                  const canDeleteTask = role === "manager" || task.createdBy === currentUserId;
+                  const consequentTasks = consequentTasksByParent[task.id] ?? [];
+                  const parentTask = task.parentTaskId ? taskById[task.parentTaskId] : undefined;
+                  const isPrincipalTask = !task.parentTaskId;
                   return (
                     <Fragment key={task.id}>
                       <tr className="border-b border-[var(--line)]/60 align-top">
@@ -985,6 +1077,11 @@ export default function TasksPage() {
                           <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--ink-muted)]">
                             {projectLabel(task.projectId)}
                           </p>
+                          {!isPrincipalTask ? (
+                            <p className="mt-1 text-[11px] font-semibold text-[var(--accent)]">
+                              Seguimiento en principal: {parentTask ? `${parentTask.code} - ${parentTask.title}` : task.parentTaskId}
+                            </p>
+                          ) : null}
                           {canManagePlanning ? (
                             <label className="mt-2 block text-xs text-[var(--ink-muted)]">
                               Descripción
@@ -1137,6 +1234,20 @@ export default function TasksPage() {
                                   ? "Ocultar historial"
                                   : "Ver historial"}
                             </button>
+                            {canPlanConsequence && isPrincipalTask ? (
+                              <button
+                                onClick={() =>
+                                  setOpenedTrackingTaskId((current) =>
+                                    current === task.id ? "" : task.id,
+                                  )
+                                }
+                                className="ui-btn ui-btn-secondary ui-btn-sm"
+                              >
+                                {openedTrackingTaskId === task.id
+                                  ? "Ocultar seguimiento"
+                                  : `Seguimiento (${consequentTasks.length})`}
+                              </button>
+                            ) : null}
                             {canPlanConsequence ? (
                               <button
                                 onClick={() => {
@@ -1154,7 +1265,7 @@ export default function TasksPage() {
                                 Tarea consecuente
                               </button>
                             ) : null}
-                            {role === "manager" ? (
+                            {canDeleteTask ? (
                               <button
                                 onClick={() => void onDeleteTask(task.id)}
                                 disabled={deletingTaskId === task.id}
@@ -1202,6 +1313,42 @@ export default function TasksPage() {
                               Esta tarea no tiene updates todavía.
                             </p>
                           )}
+                          </td>
+                        </tr>
+                      ) : null}
+
+                      {isPrincipalTask && openedTrackingTaskId === task.id ? (
+                        <tr className="border-b border-[var(--line)]/60">
+                          <td colSpan={showCodeAndAssigneeColumns ? 7 : 6} className="bg-[var(--background)]/35 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                              Seguimiento de continuidad
+                            </p>
+                            {consequentTasks.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                {consequentTasks.map((childTask) => (
+                                  <div key={childTask.id} className="rounded-xl border border-[var(--line)] bg-white p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                                      <span className="font-semibold text-[var(--foreground)]">
+                                        {childTask.code} · {childTask.title}
+                                      </span>
+                                      <span className="rounded-full border border-cyan-200 bg-cyan-100 px-3 py-1 font-semibold text-cyan-800">
+                                        {statusLabels[childTask.status] ?? childTask.status}
+                                      </span>
+                                    </div>
+                                    <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                                      {activityTypeLabels[childTask.activityType] ?? childTask.activityType} · prioridad {priorityLabels[childTask.priority] ?? childTask.priority} · fecha fin {childTask.dueDate ?? "-"}
+                                    </p>
+                                    <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                                      Responsable: {assigneeLabel(childTask.assigneeId)}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-sm text-[var(--ink-muted)]">
+                                Esta tarea principal no tiene tareas consecuentes registradas.
+                              </p>
+                            )}
                           </td>
                         </tr>
                       ) : null}

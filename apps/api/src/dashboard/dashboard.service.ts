@@ -2,9 +2,11 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
@@ -12,6 +14,8 @@ import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
 export class DashboardService {
+  private readonly logger = new Logger(DashboardService.name);
+
   constructor(
     @InjectRepository(ProjectEntity)
     private readonly projectsRepository: Repository<ProjectEntity>,
@@ -20,6 +24,26 @@ export class DashboardService {
     @InjectRepository(TaskUpdateEntity)
     private readonly taskUpdatesRepository: Repository<TaskUpdateEntity>,
   ) {}
+
+  private rethrowSchemaMismatch(error: unknown, operation: string): never {
+    if (error instanceof QueryFailedError) {
+      const dbError = error as QueryFailedError & {
+        code?: string;
+        message?: string;
+      };
+
+      if (dbError.code === '42703') {
+        this.logger.error(
+          `Dashboard schema mismatch during ${operation}: ${dbError.message ?? 'missing column'}`,
+        );
+        throw new ServiceUnavailableException(
+          'Database schema is outdated. Run "npm run migrate:created-by:ownership" in apps/api and retry.',
+        );
+      }
+    }
+
+    throw error;
+  }
 
   async getSummary(
     filters: { from?: string; to?: string; projectId?: string },
@@ -30,12 +54,13 @@ export class DashboardService {
       specialties?: ProjectScope[] | null;
     },
   ) {
-    const from = this.normalizeDateFilter(filters.from, 'from');
-    const to = this.normalizeDateFilter(filters.to, 'to');
-    const projectId = this.normalizeProjectIdFilter(filters.projectId);
-    const leadSpecialties = normalizeLeadSpecialties(
-      actor.specialties ?? actor.specialty,
-    );
+    try {
+      const from = this.normalizeDateFilter(filters.from, 'from');
+      const to = this.normalizeDateFilter(filters.to, 'to');
+      const projectId = this.normalizeProjectIdFilter(filters.projectId);
+      const leadSpecialties = normalizeLeadSpecialties(
+        actor.specialties ?? actor.specialty,
+      );
 
     const activeProjectsQb = this.projectsRepository
       .createQueryBuilder('project')
@@ -122,16 +147,19 @@ export class DashboardService {
     }
     const hoursResult = await hoursQb.getRawOne<{ hoursWorked: string }>();
 
-    return {
-      activeProjects,
-      completionRate:
-        totalTasks === 0
-          ? 0
-          : Number(((doneTasks / totalTasks) * 100).toFixed(2)),
-      overdueTasks,
-      blockedTasks,
-      hoursWorked: Number(hoursResult?.hoursWorked ?? 0),
-    };
+      return {
+        activeProjects,
+        completionRate:
+          totalTasks === 0
+            ? 0
+            : Number(((doneTasks / totalTasks) * 100).toFixed(2)),
+        overdueTasks,
+        blockedTasks,
+        hoursWorked: Number(hoursResult?.hoursWorked ?? 0),
+      };
+    } catch (error) {
+      this.rethrowSchemaMismatch(error, 'getSummary');
+    }
   }
 
   async getWorkload(
@@ -143,10 +171,11 @@ export class DashboardService {
       specialties?: ProjectScope[] | null;
     },
   ) {
-    const projectId = this.normalizeProjectIdFilter(filters.projectId);
-    const leadSpecialties = normalizeLeadSpecialties(
-      actor.specialties ?? actor.specialty,
-    );
+    try {
+      const projectId = this.normalizeProjectIdFilter(filters.projectId);
+      const leadSpecialties = normalizeLeadSpecialties(
+        actor.specialties ?? actor.specialty,
+      );
 
     const qb = this.taskUpdatesRepository
       .createQueryBuilder('update')
@@ -179,11 +208,14 @@ export class DashboardService {
       qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
     }
 
-    return qb.getRawMany<{
-      userId: string;
-      hoursWorked: string;
-      updatesCount: string;
-    }>();
+      return qb.getRawMany<{
+        userId: string;
+        hoursWorked: string;
+        updatesCount: string;
+      }>();
+    } catch (error) {
+      this.rethrowSchemaMismatch(error, 'getWorkload');
+    }
   }
 
   async getTrends(
@@ -195,14 +227,15 @@ export class DashboardService {
       specialties?: ProjectScope[] | null;
     },
   ) {
-    const from = this.normalizeDateFilter(filters.from, 'from');
-    const to = this.normalizeDateFilter(filters.to, 'to');
-    const projectId = this.normalizeProjectIdFilter(filters.projectId);
-    const leadSpecialties = normalizeLeadSpecialties(
-      actor.specialties ?? actor.specialty,
-    );
-    const weekStartExpression =
-      "DATE_TRUNC('week', CASE WHEN update.update_date::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN to_date(update.update_date::text, 'YYYY-MM-DD') ELSE update.created_at::date END)";
+    try {
+      const from = this.normalizeDateFilter(filters.from, 'from');
+      const to = this.normalizeDateFilter(filters.to, 'to');
+      const projectId = this.normalizeProjectIdFilter(filters.projectId);
+      const leadSpecialties = normalizeLeadSpecialties(
+        actor.specialties ?? actor.specialty,
+      );
+      const weekStartExpression =
+        "DATE_TRUNC('week', CASE WHEN update.update_date::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN to_date(update.update_date::text, 'YYYY-MM-DD') ELSE update.created_at::date END)";
 
     const qb = this.taskUpdatesRepository
       .createQueryBuilder('update')
@@ -241,11 +274,14 @@ export class DashboardService {
       qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
     }
 
-    return qb.getRawMany<{
-      weekStart: string;
-      hoursWorked: string;
-      updatesCount: string;
-    }>();
+      return qb.getRawMany<{
+        weekStart: string;
+        hoursWorked: string;
+        updatesCount: string;
+      }>();
+    } catch (error) {
+      this.rethrowSchemaMismatch(error, 'getTrends');
+    }
   }
 
   private normalizeDateFilter(

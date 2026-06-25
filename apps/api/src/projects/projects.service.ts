@@ -200,6 +200,7 @@ export class ProjectsService {
       ...dto,
       code: normalizedCode,
       name: normalizedName,
+      createdBy: actor.id,
       scope: resolvedScope,
       status: dto.status ?? 'planned',
     });
@@ -316,12 +317,24 @@ export class ProjectsService {
     };
   }
 
-  async remove(projectId: string) {
+  async remove(
+    projectId: string,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+    },
+  ) {
     const project = await this.projectsRepository.findOne({
       where: { id: projectId },
     });
     if (!project) {
       throw new NotFoundException('Project not found');
+    }
+
+    if (actor.role === 'lead' && project.createdBy !== actor.id) {
+      throw new ForbiddenException(
+        'Leads can only delete projects created by themselves',
+      );
     }
 
     await this.projectsRepository.delete({ id: projectId });

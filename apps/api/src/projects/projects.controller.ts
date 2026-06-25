@@ -68,9 +68,18 @@ export class ProjectsController {
   }
 
   @Delete(':projectId')
-  @Roles('manager')
-  remove(@Param('projectId') projectId: string) {
-    return this.projectsService.remove(projectId);
+  @Roles('manager', 'lead')
+  remove(
+    @Param('projectId') projectId: string,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+      };
+    },
+  ) {
+    return this.projectsService.remove(projectId, req.user);
   }
 
   @Patch(':projectId')

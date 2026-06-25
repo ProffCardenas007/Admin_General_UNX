@@ -486,8 +486,23 @@ export default function DashboardPage() {
           }
         });
         setProjectProgressById(progressMap);
-      } catch {
-        setError("No se pudo cargar el panel. Vuelve a iniciar sesión.");
+      } catch (caughtError) {
+        if (axios.isAxiosError(caughtError)) {
+          const backendMessage =
+            typeof caughtError.response?.data?.message === "string"
+              ? caughtError.response.data.message
+              : undefined;
+
+          if (backendMessage) {
+            setError(`No se pudo cargar el panel: ${backendMessage}`);
+          } else if (caughtError.response?.status === 401) {
+            setError("Sesión no válida. Vuelve a iniciar sesión.");
+          } else {
+            setError("No se pudo cargar el panel. Verifica conexión con backend y base de datos.");
+          }
+        } else {
+          setError("No se pudo cargar el panel. Verifica conexión con backend y base de datos.");
+        }
       } finally {
         setLoading(false);
       }
@@ -654,6 +669,12 @@ export default function DashboardPage() {
                 className="ui-btn ui-btn-secondary"
               >
                 Ver tareas
+              </Link>
+              <Link
+                href="/calendar"
+                className="ui-btn ui-btn-secondary"
+              >
+                Ver calendario
               </Link>
               {role === "manager" ? (
                 <Link

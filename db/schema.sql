@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name VARCHAR(160) NOT NULL UNIQUE,
     client_name VARCHAR(160),
     owner_team_id UUID REFERENCES teams(id),
+    created_by UUID REFERENCES users(id),
     scope project_scope,
     status project_status NOT NULL DEFAULT 'planned',
     start_date DATE,
@@ -100,6 +101,8 @@ CREATE TABLE IF NOT EXISTS projects (
 
 ALTER TABLE IF EXISTS projects
     ADD COLUMN IF NOT EXISTS scope project_scope;
+ALTER TABLE IF EXISTS projects
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
 
 DO $$
 BEGIN
@@ -127,10 +130,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(60) NOT NULL,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
     activity_type task_activity_type NOT NULL DEFAULT 'creacion',
     title VARCHAR(220) NOT NULL,
     description TEXT,
     assignee_id UUID REFERENCES users(id),
+    created_by UUID REFERENCES users(id),
     status task_status NOT NULL DEFAULT 'todo',
     priority task_priority NOT NULL DEFAULT 'medium',
     due_date DATE,
@@ -142,6 +147,10 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ALTER TABLE IF EXISTS tasks
     ADD COLUMN IF NOT EXISTS activity_type task_activity_type NOT NULL DEFAULT 'creacion';
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS task_updates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

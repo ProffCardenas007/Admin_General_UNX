@@ -83,8 +83,17 @@ export class TasksController {
   }
 
   @Delete(':taskId')
-  @Roles('manager')
-  remove(@Param('taskId') taskId: string) {
-    return this.tasksService.remove(taskId);
+  @Roles('manager', 'lead', 'worker')
+  remove(
+    @Param('taskId') taskId: string,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+      };
+    },
+  ) {
+    return this.tasksService.remove(taskId, req.user);
   }
 }

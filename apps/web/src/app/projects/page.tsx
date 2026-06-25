@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
+import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type ProjectRow = {
@@ -12,6 +12,7 @@ type ProjectRow = {
   code: string;
   name: string;
   ownerTeamId?: string;
+  createdBy?: string | null;
   scope?: LeadSpecialty | null;
   status: "planned" | "active" | "on_hold" | "done" | "cancelled";
   startDate?: string;
@@ -131,6 +132,7 @@ export default function ProjectsPage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [currentUserId, setCurrentUserId] = useState("");
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,6 +162,7 @@ export default function ProjectsPage() {
 
     setEmail(getStoredEmail());
     setRole(savedRole);
+    setCurrentUserId(getStoredUserId());
 
     const loadProjects = async () => {
       try {
@@ -213,12 +216,13 @@ export default function ProjectsPage() {
   }, [router]);
 
   const onDeleteProject = async (projectId: string) => {
-    if (role !== "manager") {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) {
       return;
     }
 
-    const project = projects.find((item) => item.id === projectId);
-    if (!project) {
+    const canDeleteProject = role === "manager" || (role === "lead" && project.createdBy === currentUserId);
+    if (!canDeleteProject) {
       return;
     }
 
@@ -239,7 +243,7 @@ export default function ProjectsPage() {
       setProjects((current) => current.filter((item) => item.id !== projectId));
       setInfo(`Proyecto ${project.code} eliminado.`);
     } catch {
-      setError("No se pudo borrar el proyecto. Esta accion es exclusiva de gerencia.");
+      setError("No se pudo borrar el proyecto. Solo gerencia o el lider creador puede hacerlo.");
     } finally {
       setDeletingProjectId("");
     }
@@ -347,6 +351,12 @@ export default function ProjectsPage() {
               Volver al panel
             </Link>
             <Link
+              href="/calendar"
+              className="ui-btn ui-btn-secondary"
+            >
+              Ver calendario
+            </Link>
+            <Link
               href="/capture?mode=project"
               className="ui-btn ui-btn-primary"
             >
@@ -416,6 +426,7 @@ export default function ProjectsPage() {
                   const health = getProjectHealth(project);
                   const projectTasks = (tasksByProject[project.id] ?? []).filter((task) => task.status !== "done");
                   const isOpen = openedProjectId === project.id;
+                  const canDeleteProject = role === "manager" || (role === "lead" && project.createdBy === currentUserId);
                   const colSpan = canEditProjects ? 9 : 8;
                   const draft = projectDrafts[project.id];
 
@@ -552,7 +563,7 @@ export default function ProjectsPage() {
                               >
                                 {savingProjectId === project.id ? "Guardando..." : "Guardar"}
                               </button>
-                              {role === "manager" ? (
+                              {canDeleteProject ? (
                                 <button
                                   onClick={() => void onDeleteProject(project.id)}
                                   disabled={deletingProjectId === project.id}

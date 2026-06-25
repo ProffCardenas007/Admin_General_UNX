@@ -31,6 +31,9 @@ export class ProjectEntity {
   @Column({ name: 'owner_team_id', type: 'uuid', nullable: true })
   ownerTeamId?: string;
 
+  @Column({ name: 'created_by', type: 'uuid', nullable: true })
+  createdBy?: string | null;
+
   @Column({
     name: 'scope',
     type: 'enum',

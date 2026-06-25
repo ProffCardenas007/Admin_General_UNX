@@ -27,6 +27,9 @@ export class TaskEntity {
   @Column({ name: 'project_id', type: 'uuid' })
   projectId: string;
 
+  @Column({ name: 'parent_task_id', type: 'uuid', nullable: true })
+  parentTaskId?: string | null;
+
   @Column({
     name: 'activity_type',
     type: 'enum',
@@ -50,6 +53,9 @@ export class TaskEntity {
 
   @Column({ name: 'assignee_id', type: 'uuid', nullable: true })
   assigneeId?: string;
+
+  @Column({ name: 'created_by', type: 'uuid', nullable: true })
+  createdBy?: string | null;
 
   @Column({
     type: 'enum',
