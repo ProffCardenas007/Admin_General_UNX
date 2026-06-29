@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
 
@@ -106,21 +105,14 @@ export default function HistoryPage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
-              Sistema de proyectos
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">Historial gerencial</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesion activa como ${email}.` : "Sesion activa."} Aqui se registran movimientos ejecutados por gerencia en proyectos y tareas.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Link href="/dashboard" className="ui-btn ui-btn-secondary">
-              Volver al panel
-            </Link>
-          </div>
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
+            Sistema de proyectos
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">Historial gerencial</h1>
+          <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+            Movimientos ejecutados en proyectos y tareas, con detalle de cambios antes/después.
+          </p>
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-4">

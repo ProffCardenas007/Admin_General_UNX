@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import axios from "axios";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   API_URL,
@@ -88,7 +87,6 @@ const roleOptions = [
 
 export default function CapturePage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [specialties, setSpecialties] = useState<LeadSpecialty[]>([]);
   const [captureMode, setCaptureMode] = useState<"" | "project" | "task">("");
@@ -228,7 +226,6 @@ export default function CapturePage() {
 
     const savedSpecialties = normalizeLeadSpecialtiesInput(getStoredSpecialties());
     const savedSpecialty = savedSpecialties[0] ?? "";
-    setEmail(getStoredEmail());
     setRole(savedRole);
     setSpecialties(savedSpecialties);
     if (savedSpecialties.length > 0) {
@@ -448,34 +445,16 @@ export default function CapturePage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
-              Sistema de proyectos
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
-              Carga de datos
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesión activa como ${email}.` : "Sesión activa."} {role === "manager" ? "Aquí puedes crear proyectos, tareas y usuarios." : "Aquí puedes crear proyectos y tareas."}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/dashboard"
-              className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
-            >
-              Volver al panel
-            </Link>
-            {role === "manager" ? (
-              <Link
-                href="/users"
-                className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
-              >
-                Ver usuarios
-              </Link>
-            ) : null}
-          </div>
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
+            Sistema de proyectos
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
+            Carga de datos
+          </h1>
+          <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+            {role === "manager" ? "Crea proyectos, tareas, usuarios y registra actualizaciones." : "Crea proyectos, tareas y registra actualizaciones."}
+          </p>
         </div>
 
         {message ? (

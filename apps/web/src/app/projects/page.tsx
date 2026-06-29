@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
+import { API_URL, authHeaders, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type ProjectRow = {
@@ -129,7 +129,6 @@ const getProjectHealth = (project: ProjectRow) => {
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
@@ -160,7 +159,6 @@ export default function ProjectsPage() {
       return;
     }
 
-    setEmail(getStoredEmail());
     setRole(savedRole);
     setCurrentUserId(getStoredUserId());
 
@@ -333,36 +331,24 @@ export default function ProjectsPage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">Proyectos</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesion activa como ${email}.` : "Sesion activa."} Aqui se visualizan todos los proyectos.
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+              Cartera operativa con estado, avance y semáforo de salud.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/dashboard"
-              className="ui-btn ui-btn-secondary"
-            >
-              Volver al panel
-            </Link>
-            <Link
-              href="/calendar"
-              className="ui-btn ui-btn-secondary"
-            >
-              Ver calendario
-            </Link>
+          {canEditProjects ? (
             <Link
               href="/capture?mode=project"
               className="ui-btn ui-btn-primary"
             >
               Crear proyecto
             </Link>
-          </div>
+          ) : null}
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-2">

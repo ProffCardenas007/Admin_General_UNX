@@ -2,7 +2,6 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
@@ -698,19 +697,10 @@ export default function TasksPage() {
     void loadHistory(taskId);
   };
 
-  const onLogout = () => {
-    window.localStorage.removeItem("sistema_mvp_token");
-    window.localStorage.removeItem("sistema_mvp_email");
-    window.localStorage.removeItem("sistema_mvp_role");
-    window.localStorage.removeItem("sistema_mvp_specialty");
-    window.localStorage.removeItem("sistema_mvp_specialties");
-    router.replace("/");
-  };
-
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
@@ -718,63 +708,11 @@ export default function TasksPage() {
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
               {isWorker ? "Mis tareas" : "Tareas individuales"}
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesión activa como ${email}.` : "Sesión activa."}{" "}
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
               {isWorker
-                ? "Aquí ves y gestionas tus tareas asignadas."
-                : "Aquí ves y filtras cada tarea creada."}
+                ? "Gestiona y actualiza tus tareas asignadas."
+                : "Vista y filtrado detallado de todas las tareas."}
             </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {role === "worker" ? (
-              <>
-                <Link
-                  href="/calendar"
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Ver calendario
-                </Link>
-                <Link
-                  href="/notifications"
-                  className="ui-btn ui-btn-primary"
-                >
-                  Ver notificaciones
-                </Link>
-                <button
-                  onClick={onLogout}
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Cerrar sesión
-                </button>
-              </>
-            ) : (
-              <>
-                <Link
-                  href="/dashboard"
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Volver al panel
-                </Link>
-                <Link
-                  href="/calendar"
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Ver calendario
-                </Link>
-                <Link
-                  href="/users"
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Ver usuarios
-                </Link>
-                <Link
-                  href="/capture"
-                  className="ui-btn ui-btn-primary"
-                >
-                  Cargar datos
-                </Link>
-              </>
-            )}
           </div>
         </div>
 

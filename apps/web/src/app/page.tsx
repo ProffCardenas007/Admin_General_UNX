@@ -59,44 +59,40 @@ export default function Home() {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
+    <div className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center gap-6 px-4 py-12 md:px-6">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
-              Sistema de proyectos
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
-              Control Academico UNX
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              Inicia sesion y observa avance global, carga por persona y tendencia
-              semanal de horas en un solo panel.
-            </p>
-          </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-2 font-mono text-xs">
-            API: {API_URL}
-          </div>
-        </div>
+        <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
+          Sistema de proyectos
+        </p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
+          Control Académico UNX
+        </h1>
+        <p className="mt-1.5 text-sm text-[var(--ink-muted)]">
+          Inicia sesión para acceder al panel.
+        </p>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-[1.2fr_1.2fr_auto]">
+        <div className="mt-6 flex flex-col gap-3">
           <input
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
-              placeholder="Correo"
+            className="ui-control w-full"
+            placeholder="Correo electrónico"
+            type="email"
+            autoComplete="email"
           />
           <input
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             type="password"
-            className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
-              placeholder="Contraseña"
+            className="ui-control w-full"
+            placeholder="Contraseña"
+            autoComplete="current-password"
+            onKeyDown={(event) => { if (event.key === "Enter") void onLogin(); }}
           />
           <button
             onClick={onLogin}
             disabled={loading}
-            className="rounded-xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            className="ui-btn ui-btn-primary w-full justify-center"
           >
             {loading ? "Entrando..." : "Conectar"}
           </button>

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
+import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
 import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type UserRow = {
@@ -80,7 +80,6 @@ const taskStatusLabels: Record<TaskStatsRow["status"], string> = {
 
 export default function UsersPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -143,7 +142,6 @@ export default function UsersPage() {
       return;
     }
 
-    setEmail(getStoredEmail());
     setRole(savedRole);
 
     const loadUsers = async () => {
@@ -589,32 +587,24 @@ export default function UsersPage() {
   return (
     <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10 lg:px-10">
       <section className="glass-panel fade-up p-6 md:p-8 lg:p-10">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">Usuarios</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesion activa como ${email}.` : "Sesion activa."} Aqui puedes ver los usuarios creados y filtrar por rol.
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+              Gestión de equipo: roles, especialidades, equipos y estadísticas de actividad.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
+          {role === "manager" ? (
             <Link
-              href="/dashboard"
-              className="ui-btn ui-btn-secondary"
+              href="/capture"
+              className="ui-btn ui-btn-primary"
             >
-              Volver al panel
+              Crear usuario
             </Link>
-            {role === "manager" ? (
-              <Link
-                href="/capture"
-                className="ui-btn ui-btn-primary"
-              >
-                Crear usuario
-              </Link>
-            ) : null}
-          </div>
+          ) : null}
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
