@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   ArrayUnique,
   IsBoolean,
+  IsEmail,
   IsIn,
   IsArray,
   IsOptional,
@@ -13,6 +14,10 @@ import { Transform } from 'class-transformer';
 import { LEAD_SPECIALTY_INPUTS } from '../../common/specialties';
 
 export class UpdateUserDto {
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(120)

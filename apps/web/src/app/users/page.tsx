@@ -27,6 +27,7 @@ type TeamRow = {
 
 type UserDraft = {
   fullName: string;
+  email: string;
   role: UserRow["role"];
   specialties: LeadSpecialty[];
   teamIds: string[];
@@ -117,6 +118,7 @@ export default function UsersPage() {
 
   const buildUserDraft = (user: UserRow): UserDraft => ({
     fullName: user.fullName,
+    email: user.email,
     role: user.role,
     specialties: toDraftSpecialties(user),
     teamIds: user.teamIds ?? [],
@@ -373,6 +375,9 @@ export default function UsersPage() {
     }
 
     const sensitiveChanges: string[] = [];
+    if (draft.email !== user.email) {
+      sensitiveChanges.push("cambio de correo");
+    }
     if (draft.role !== user.role) {
       sensitiveChanges.push("cambio de rol");
     }
@@ -397,6 +402,7 @@ export default function UsersPage() {
     setSavingUserId(userId);
 
     const payload = {
+      email: draft.email,
       fullName: draft.fullName,
       role: draft.role,
       specialties: draft.role === "lead" ? draft.specialties : null,
@@ -896,7 +902,27 @@ export default function UsersPage() {
                         <span className="font-semibold text-[var(--foreground)]">{user.fullName}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">{user.email}</td>
+                    <td className="px-4 py-3">
+                      {isManager ? (
+                        <input
+                          name={`user-email-${user.id}`}
+                          type="email"
+                          value={userDrafts[user.id]?.email ?? user.email}
+                          onChange={(event) =>
+                            setUserDrafts((current) => ({
+                              ...current,
+                              [user.id]: {
+                                ...(current[user.id] ?? buildUserDraft(user)),
+                                email: event.target.value,
+                              },
+                            }))
+                          }
+                          className="w-full min-w-[220px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                        />
+                      ) : (
+                        <span className="text-sm text-[var(--foreground)]">{user.email}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {isManager ? (
                         <div className="space-y-2">

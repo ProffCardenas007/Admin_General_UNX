@@ -178,6 +178,17 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
+    if (typeof dto.email !== 'undefined') {
+      const normalizedEmail = dto.email.trim().toLowerCase();
+      const existing = await this.usersRepository.findOne({
+        where: { email: normalizedEmail },
+      });
+      if (existing && existing.id !== userId) {
+        throw new ConflictException('Email already registered');
+      }
+      user.email = normalizedEmail;
+    }
+
     if (typeof dto.fullName !== 'undefined') {
       user.fullName = dto.fullName;
     }
