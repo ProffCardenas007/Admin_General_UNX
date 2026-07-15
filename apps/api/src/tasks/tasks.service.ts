@@ -180,6 +180,8 @@ export class TasksService {
         return 'GRA';
       case 'plataforma':
         return 'PLA';
+      case 'administrativo':
+        return 'ADM';
     }
   }
 

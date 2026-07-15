@@ -44,7 +44,7 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_activity_type') THEN
-        CREATE TYPE task_activity_type AS ENUM ('revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma');
+        CREATE TYPE task_activity_type AS ENUM ('revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma', 'administrativo');
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'import_status') THEN

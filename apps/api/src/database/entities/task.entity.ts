@@ -14,7 +14,8 @@ export type TaskActivityType =
   | 'creacion'
   | 'presentaciones'
   | 'grabacion'
-  | 'plataforma';
+  | 'plataforma'
+  | 'administrativo';
 
 @Entity({ name: 'tasks' })
 export class TaskEntity {
@@ -46,6 +47,7 @@ export class TaskEntity {
       'presentaciones',
       'grabacion',
       'plataforma',
+      'administrativo',
     ],
     enumName: 'task_activity_type',
   })

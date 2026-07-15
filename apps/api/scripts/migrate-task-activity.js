@@ -7,13 +7,29 @@ async function run() {
 
   try {
     await client.query(
-      "CREATE TYPE task_activity_type AS ENUM ('revision','edicion','creacion','presentaciones','grabacion','plataforma')",
+      "CREATE TYPE task_activity_type AS ENUM ('revision','edicion','creacion','presentaciones','grabacion','plataforma','administrativo')",
     );
   } catch (error) {
     if (!error || error.code !== '42710') {
       throw error;
     }
   }
+
+  await client.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_type t
+        JOIN pg_enum e ON t.oid = e.enumtypid
+        WHERE t.typname = 'task_activity_type'
+          AND e.enumlabel = 'administrativo'
+      ) THEN
+        ALTER TYPE task_activity_type ADD VALUE 'administrativo';
+      END IF;
+    END
+    $$;
+  `);
 
   await client.query(
     "ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS activity_type task_activity_type NOT NULL DEFAULT 'creacion'",

@@ -31,7 +31,7 @@ type TaskRow = {
   id: string;
   createdBy?: string | null;
   projectId: string;
-  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
+  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma" | "administrativo";
   title: string;
   description?: string;
   assigneeId?: string;
@@ -94,6 +94,7 @@ const activityTypeOptions = [
   { value: "presentaciones", label: "presentaciones" },
   { value: "grabacion", label: "grabacion" },
   { value: "plataforma", label: "plataforma" },
+  { value: "administrativo", label: "administrativo" },
 ] as const;
 
 const taskStatusOptions = [

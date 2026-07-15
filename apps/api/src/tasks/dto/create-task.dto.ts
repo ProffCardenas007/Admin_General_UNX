@@ -24,6 +24,7 @@ export class CreateTaskDto {
     'presentaciones',
     'grabacion',
     'plataforma',
+    'administrativo',
   ])
   activityType:
     | 'revision'
@@ -31,7 +32,8 @@ export class CreateTaskDto {
     | 'creacion'
     | 'presentaciones'
     | 'grabacion'
-    | 'plataforma';
+    | 'plataforma'
+    | 'administrativo';
 
   @IsString()
   @MaxLength(220)

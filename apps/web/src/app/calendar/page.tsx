@@ -28,7 +28,8 @@ type TaskRow = {
     | "creacion"
     | "presentaciones"
     | "grabacion"
-    | "plataforma";
+    | "plataforma"
+    | "administrativo";
   title: string;
   description?: string;
   createdBy?: string | null;
@@ -93,6 +94,7 @@ const activityTypeLabels: Record<TaskRow["activityType"], string> = {
   presentaciones: "presentaciones",
   grabacion: "grabacion",
   plataforma: "plataforma",
+  administrativo: "administrativo",
 };
 
 const roleLabels: Record<UserRow["role"], string> = {

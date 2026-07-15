@@ -24,7 +24,7 @@ type TaskRow = {
   id: string;
   code: string;
   projectId: string;
-  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
+  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma" | "administrativo";
   title: string;
   assigneeId?: string;
   status: "todo" | "doing" | "blocked" | "done";
@@ -74,6 +74,7 @@ const activityTypeLabels: Record<TaskRow["activityType"], string> = {
   presentaciones: "presentaciones",
   grabacion: "grabacion",
   plataforma: "plataforma",
+  administrativo: "administrativo",
 };
 
 const roleLabels: Record<UserRow["role"], string> = {

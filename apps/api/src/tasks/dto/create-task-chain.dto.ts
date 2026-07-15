@@ -21,6 +21,7 @@ class CreateTaskChainStepDto {
     'presentaciones',
     'grabacion',
     'plataforma',
+    'administrativo',
   ])
   activityType:
     | 'revision'
@@ -28,7 +29,8 @@ class CreateTaskChainStepDto {
     | 'creacion'
     | 'presentaciones'
     | 'grabacion'
-    | 'plataforma';
+    | 'plataforma'
+    | 'administrativo';
 
   @IsString()
   @IsNotEmpty()

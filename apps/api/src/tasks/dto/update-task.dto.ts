@@ -46,6 +46,7 @@ export class UpdateTaskDto {
     'presentaciones',
     'grabacion',
     'plataforma',
+    'administrativo',
   ])
   nextActivityType?:
     | 'revision'
@@ -53,7 +54,8 @@ export class UpdateTaskDto {
     | 'creacion'
     | 'presentaciones'
     | 'grabacion'
-    | 'plataforma';
+    | 'plataforma'
+    | 'administrativo';
 
   @IsOptional()
   @IsString()

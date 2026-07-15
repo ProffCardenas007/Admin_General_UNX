@@ -38,7 +38,7 @@ type UserDraft = {
 type TaskStatsRow = {
   id: string;
   projectId: string;
-  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
+  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma" | "administrativo";
   title: string;
   assigneeId?: string;
   status: "todo" | "doing" | "blocked" | "done";
@@ -70,6 +70,7 @@ const activityTypeLabels: Record<TaskStatsRow["activityType"], string> = {
   presentaciones: "presentaciones",
   grabacion: "grabacion",
   plataforma: "plataforma",
+  administrativo: "administrativo",
 };
 
 const taskStatusLabels: Record<TaskStatsRow["status"], string> = {
@@ -292,6 +293,7 @@ export default function UsersPage() {
         presentaciones: 0,
         grabacion: 0,
         plataforma: 0,
+        administrativo: 0,
       },
     );
 

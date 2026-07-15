@@ -55,7 +55,8 @@ type TaskActivityType =
   | "creacion"
   | "presentaciones"
   | "grabacion"
-  | "plataforma";
+  | "plataforma"
+  | "administrativo";
 
 type TaskChainStepDraft = {
   stepKey: string;
@@ -105,6 +106,7 @@ const activityTypeOptions = [
   { value: "presentaciones", label: "presentaciones" },
   { value: "grabacion", label: "grabacion" },
   { value: "plataforma", label: "plataforma" },
+  { value: "administrativo", label: "administrativo" },
 ] as const;
 
 const priorityOptions = [

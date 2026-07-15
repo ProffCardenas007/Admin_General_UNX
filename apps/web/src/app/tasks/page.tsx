@@ -16,7 +16,8 @@ type TaskRow = {
     | "creacion"
     | "presentaciones"
     | "grabacion"
-    | "plataforma";
+    | "plataforma"
+    | "administrativo";
   title: string;
   description?: string;
   projectId: string;
@@ -74,6 +75,7 @@ const activityTypeLabels: Record<string, string> = {
   presentaciones: "presentaciones",
   grabacion: "grabacion",
   plataforma: "plataforma",
+  administrativo: "administrativo",
 };
 
 const roleLabels: Record<string, string> = {
@@ -1464,6 +1466,7 @@ export default function TasksPage() {
                 <option value="presentaciones">presentaciones</option>
                 <option value="grabacion">grabacion</option>
                 <option value="plataforma">plataforma</option>
+                <option value="administrativo">administrativo</option>
               </select>
               <input
                 type="date"
