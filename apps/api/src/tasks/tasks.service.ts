@@ -523,6 +523,7 @@ export class TasksService {
           ? handoffMessage
           : `Actividad creada al finalizar ${task.code}.`,
         assigneeId: handoffToUserId,
+        createdBy: actor.id,
         status: 'todo',
         priority: task.priority,
         dueDate: nextDueDate ?? task.dueDate,
