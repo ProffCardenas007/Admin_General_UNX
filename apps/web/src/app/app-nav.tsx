@@ -67,6 +67,13 @@ const IconHistory = () => (
   </svg>
 );
 
+const IconQuincena = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+    <rect x="1.5" y="2" width="13" height="12.5" rx="2" />
+    <path d="M5 1.5V4M11 1.5V4M1.5 6.5h13M4.5 9h2M9.5 9h2M4.5 12h2" strokeLinecap="round" />
+  </svg>
+);
+
 const IconLogout = () => (
   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
     <path d="M10.5 5l3 3-3 3M13.5 8H5.5M7.5 2.5H3.5A1.5 1.5 0 002 4v8a1.5 1.5 0 001.5 1.5h4" strokeLinecap="round" strokeLinejoin="round" />
@@ -102,6 +109,7 @@ const MAIN_NAV: NavItem[] = [
 
 const MANAGER_NAV: NavItem[] = [
   { label: "Usuarios",  href: "/users",   icon: <IconUsers /> },
+  { label: "Reporte", href: "/quincenas", icon: <IconQuincena /> },
   { label: "Historial", href: "/history", icon: <IconHistory /> },
 ];
 
@@ -179,15 +187,17 @@ export default function AppNav() {
 
         <div className="app-sidebar-divider" />
 
-        {/* Cargar datos — acción primaria */}
-        <Link
-          href="/capture"
-          className={`app-sidebar-item app-sidebar-item--cta${isActive("/capture") ? " app-sidebar-item--active" : ""}`}
-          title={collapsed ? "Cargar datos" : undefined}
-        >
-          <span className="app-sidebar-icon"><IconCapture /></span>
-          <span className="app-sidebar-label">Cargar datos</span>
-        </Link>
+        {/* Cargar datos — oculto para colaboradores */}
+        {!isWorker && (
+          <Link
+            href="/capture"
+            className={`app-sidebar-item app-sidebar-item--cta${isActive("/capture") ? " app-sidebar-item--active" : ""}`}
+            title={collapsed ? "Cargar datos" : undefined}
+          >
+            <span className="app-sidebar-icon"><IconCapture /></span>
+            <span className="app-sidebar-label">Cargar datos</span>
+          </Link>
+        )}
 
         {/* Sección gerencia */}
         {isManager && (

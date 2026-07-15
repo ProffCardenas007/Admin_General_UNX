@@ -177,13 +177,13 @@ export class DashboardService {
         actor.specialties ?? actor.specialty,
       );
 
-    const qb = this.taskUpdatesRepository
-      .createQueryBuilder('update')
-      .select('update.user_id', 'userId')
-      .addSelect('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
-      .addSelect('COUNT(update.id)', 'updatesCount')
-      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
-      .groupBy('update.user_id')
+    const qb = this.tasksRepository
+      .createQueryBuilder('task')
+      .select('task.assignee_id', 'userId')
+      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'hoursWorked')
+      .addSelect('COUNT(task.id)', 'tasksCount')
+      .where('task.assignee_id IS NOT NULL')
+      .groupBy('task.assignee_id')
       .orderBy('"hoursWorked"', 'DESC');
 
     if (actor.role === 'lead') {
@@ -205,13 +205,13 @@ export class DashboardService {
       qb.andWhere('task.project_id = :projectId', { projectId });
     }
     if (actor.role === 'worker') {
-      qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+      qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
     }
 
       return qb.getRawMany<{
         userId: string;
         hoursWorked: string;
-        updatesCount: string;
+        tasksCount: string;
       }>();
     } catch (error) {
       this.rethrowSchemaMismatch(error, 'getWorkload');
@@ -234,15 +234,14 @@ export class DashboardService {
       const leadSpecialties = normalizeLeadSpecialties(
         actor.specialties ?? actor.specialty,
       );
-      const weekStartExpression =
-        "DATE_TRUNC('week', CASE WHEN update.update_date::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN to_date(update.update_date::text, 'YYYY-MM-DD') ELSE update.created_at::date END)";
+      const weekStartExpression = "DATE_TRUNC('week', task.created_at::date)";
 
-    const qb = this.taskUpdatesRepository
-      .createQueryBuilder('update')
+    const qb = this.tasksRepository
+      .createQueryBuilder('task')
       .select(weekStartExpression, 'weekStart')
-      .addSelect('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
-      .addSelect('COUNT(update.id)', 'updatesCount')
-      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
+      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'hoursWorked')
+      .addSelect('COUNT(task.id)', 'tasksCount')
+      .where('task.assignee_id IS NOT NULL')
       .groupBy(weekStartExpression)
       .orderBy('"weekStart"', 'ASC');
 
@@ -265,19 +264,19 @@ export class DashboardService {
       qb.andWhere('task.project_id = :projectId', { projectId });
     }
     if (from) {
-      qb.andWhere('update.update_date >= :from', { from });
+      qb.andWhere('task.created_at::date >= :from', { from });
     }
     if (to) {
-      qb.andWhere('update.update_date <= :to', { to });
+      qb.andWhere('task.created_at::date <= :to', { to });
     }
     if (actor.role === 'worker') {
-      qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+      qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
     }
 
       return qb.getRawMany<{
         weekStart: string;
         hoursWorked: string;
-        updatesCount: string;
+        tasksCount: string;
       }>();
     } catch (error) {
       this.rethrowSchemaMismatch(error, 'getTrends');

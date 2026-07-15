@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import {
@@ -48,6 +48,41 @@ type TaskOption = {
   title: string;
 };
 
+type TaskStatus = "todo" | "doing" | "blocked" | "done";
+type TaskActivityType =
+  | "revision"
+  | "edicion"
+  | "creacion"
+  | "presentaciones"
+  | "grabacion"
+  | "plataforma";
+
+type TaskChainStepDraft = {
+  stepKey: string;
+  activityType: TaskActivityType;
+  title: string;
+  description: string;
+  assigneeId: string;
+  status: TaskStatus;
+  priority: "low" | "medium" | "high" | "urgent";
+  dueDate: string;
+  estimatedHours: string;
+};
+
+type CreatedTaskChainStep = {
+  id: string;
+  code: string;
+  title: string;
+  description?: string;
+  activityType: TaskActivityType;
+  assigneeId?: string;
+  status: TaskStatus;
+  priority?: "low" | "medium" | "high" | "urgent";
+  dueDate?: string;
+  estimatedHours?: string;
+  chainOrder?: number | null;
+};
+
 const statusOptions = [
   { value: "planned", label: "planificado" },
   { value: "active", label: "activo" },
@@ -85,11 +120,23 @@ const roleOptions = [
   { value: "worker", label: "colaborador" },
 ] as const;
 
+const taskStatusVisuals: Record<TaskStatus, { label: string; icon: string; tone: string }> = {
+  todo: { label: "pendiente", icon: "⏳", tone: "text-amber-600" },
+  doing: { label: "en curso", icon: "🔄", tone: "text-sky-600" },
+  blocked: { label: "bloqueada", icon: "🔒", tone: "text-zinc-500" },
+  done: { label: "completada", icon: "✅", tone: "text-emerald-600" },
+};
+
 export default function CapturePage() {
   const router = useRouter();
+  const getTodayDate = () => {
+    const now = new Date();
+    const timezoneOffsetMs = now.getTimezoneOffset() * 60_000;
+    return new Date(now.getTime() - timezoneOffsetMs).toISOString().slice(0, 10);
+  };
   const [role, setRole] = useState("");
   const [specialties, setSpecialties] = useState<LeadSpecialty[]>([]);
-  const [captureMode, setCaptureMode] = useState<"" | "project" | "task">("");
+  const [captureMode, setCaptureMode] = useState<"" | "project" | "task" | "task-chain">("");
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [teams, setTeams] = useState<TeamOption[]>([]);
@@ -130,6 +177,37 @@ export default function CapturePage() {
 
   const selectedTaskProject = projects.find((project) => project.id === taskForm.projectId);
 
+  const [taskChainForm, setTaskChainForm] = useState({
+    projectId: "",
+    steps: [
+      {
+        stepKey: crypto.randomUUID(),
+        activityType: "creacion" as TaskActivityType,
+        title: "",
+        description: "",
+        assigneeId: "",
+        status: "todo" as TaskStatus,
+        priority: "medium" as const,
+        dueDate: "",
+        estimatedHours: "",
+      },
+      {
+        stepKey: crypto.randomUUID(),
+        activityType: "revision" as TaskActivityType,
+        title: "",
+        description: "",
+        assigneeId: "",
+        status: "blocked" as TaskStatus,
+        priority: "medium" as const,
+        dueDate: "",
+        estimatedHours: "",
+      },
+    ] as TaskChainStepDraft[],
+  });
+  const [createdChainId, setCreatedChainId] = useState("");
+  const [createdChainSteps, setCreatedChainSteps] = useState<CreatedTaskChainStep[]>([]);
+  const selectedChainProject = projects.find((project) => project.id === taskChainForm.projectId);
+
   const [userForm, setUserForm] = useState({
     fullName: "",
     email: "",
@@ -142,7 +220,7 @@ export default function CapturePage() {
   const [updateForm, setUpdateForm] = useState({
     taskId: "",
     userId: "",
-    updateDate: new Date().toISOString().slice(0, 10),
+    updateDate: getTodayDate(),
     workedHours: "",
     progressPercent: "",
     blockerReason: "",
@@ -193,10 +271,31 @@ export default function CapturePage() {
             ? current
             : { ...current, projectId: projectResponse.data[0].id };
         });
+
+        setTaskChainForm((current) => {
+          const hasSelectedProject = projectResponse.data.some(
+            (project: ProjectOption) => project.id === current.projectId,
+          );
+
+          return hasSelectedProject
+            ? current
+            : { ...current, projectId: projectResponse.data[0].id };
+        });
       }
 
       if (userResponse.data?.length > 0) {
         setTaskForm((current) => ({ ...current, assigneeId: userResponse.data[0].id }));
+        setTaskChainForm((current) => ({
+          ...current,
+          steps: current.steps.map((step, index) =>
+            step.assigneeId
+              ? step
+              : {
+                  ...step,
+                  assigneeId: userResponse.data[Math.min(index, userResponse.data.length - 1)].id,
+                },
+          ),
+        }));
         setUpdateForm((current) => ({ ...current, userId: userResponse.data[0].id }));
       }
 
@@ -234,11 +333,12 @@ export default function CapturePage() {
     }
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     const requestedProjectId = new URLSearchParams(window.location.search).get("projectId");
-    if (requestedMode === "project" || requestedMode === "task") {
+    if (requestedMode === "project" || requestedMode === "task" || requestedMode === "task-chain") {
       setCaptureMode(requestedMode);
     }
     if (requestedProjectId) {
       setTaskForm((current) => ({ ...current, projectId: requestedProjectId }));
+      setTaskChainForm((current) => ({ ...current, projectId: requestedProjectId }));
     }
 
     void loadLookups();
@@ -369,6 +469,199 @@ export default function CapturePage() {
     }
   };
 
+  const addTaskChainStep = () => {
+    setTaskChainForm((current) => ({
+      ...current,
+      steps: [
+        ...current.steps,
+        {
+          stepKey: crypto.randomUUID(),
+          activityType: "revision",
+          title: "",
+          description: "",
+          assigneeId: users[0]?.id ?? "",
+          status: "blocked",
+          priority: "medium",
+          dueDate: "",
+          estimatedHours: "",
+        },
+      ].map((step, index) => ({
+        ...step,
+        status: index === 0 ? "todo" : "blocked",
+      })),
+    }));
+  };
+
+  const removeTaskChainStep = (stepKey: string) => {
+    setTaskChainForm((current) => {
+      if (current.steps.length <= 2) {
+        return current;
+      }
+
+      return {
+        ...current,
+        steps: current.steps
+          .filter((step) => step.stepKey !== stepKey)
+          .map((step, index) => ({
+            ...step,
+            status: index === 0 ? "todo" : "blocked",
+          })),
+      };
+    });
+  };
+
+  const moveTaskChainStep = (stepKey: string, direction: "up" | "down") => {
+    setTaskChainForm((current) => {
+      const index = current.steps.findIndex((step) => step.stepKey === stepKey);
+      if (index < 0) {
+        return current;
+      }
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.steps.length) {
+        return current;
+      }
+
+      const reordered = [...current.steps];
+      const [moved] = reordered.splice(index, 1);
+      reordered.splice(targetIndex, 0, moved);
+      return {
+        ...current,
+        steps: reordered.map((step, currentIndex) => ({
+          ...step,
+          status: currentIndex === 0 ? "todo" : "blocked",
+        })),
+      };
+    });
+  };
+
+  const updateTaskChainStep = (
+    stepKey: string,
+    field:
+      | "activityType"
+      | "title"
+      | "description"
+      | "assigneeId"
+      | "priority"
+      | "dueDate"
+      | "estimatedHours",
+    value: string,
+  ) => {
+    setTaskChainForm((current) => ({
+      ...current,
+      steps: current.steps.map((step) => {
+        if (step.stepKey !== stepKey) {
+          return step;
+        }
+
+        if (field === "activityType") {
+          return {
+            ...step,
+            activityType: value as TaskActivityType,
+          };
+        }
+
+        if (field === "priority") {
+          return {
+            ...step,
+            priority: value as "low" | "medium" | "high" | "urgent",
+          };
+        }
+
+        return {
+          ...step,
+          [field]: value,
+        };
+      }),
+    }));
+  };
+
+  const submitTaskChain = async () => {
+    setMessage("");
+    setCreatedChainId("");
+    setCreatedChainSteps([]);
+
+    if (!taskChainForm.projectId) {
+      setMessage("Selecciona un proyecto para la cadena.");
+      return;
+    }
+
+    if (taskChainForm.steps.length < 2) {
+      setMessage("La tarea completa requiere al menos 2 pasos. Para 1 paso usa Crear tarea.");
+      return;
+    }
+
+    if (taskChainForm.steps.some((step) => !step.assigneeId)) {
+      setMessage("Todos los pasos de la cadena deben tener responsable asignado.");
+      return;
+    }
+
+    if (taskChainForm.steps.some((step) => !step.title.trim() || !step.description.trim())) {
+      setMessage("Todos los pasos deben tener titulo y descripcion.");
+      return;
+    }
+
+    if (taskChainForm.steps.some((step) => step.estimatedHours.trim().length > 0 && Number(step.estimatedHours) < 0)) {
+      setMessage("Las horas estimadas no pueden ser negativas.");
+      return;
+    }
+
+    try {
+      const payload = {
+        projectId: taskChainForm.projectId,
+        steps: taskChainForm.steps.map((step) => ({
+          activityType: step.activityType,
+          title: step.title.trim(),
+          description: step.description.trim(),
+          assigneeId: step.assigneeId,
+          status: step.status,
+          priority: step.priority,
+          dueDate: step.dueDate || undefined,
+          estimatedHours: step.estimatedHours ? Number(step.estimatedHours) : undefined,
+        })),
+      };
+
+      const response = await axios.post(`${API_URL}/tasks/chains`, payload, {
+        headers: authHeaders(),
+      });
+
+      const created = (response.data?.tasks ?? []) as CreatedTaskChainStep[];
+      const sortedCreated = [...created].sort(
+        (left, right) => (left.chainOrder ?? 0) - (right.chainOrder ?? 0),
+      );
+
+      setCreatedChainId(response.data?.chainId ?? "");
+      setCreatedChainSteps(sortedCreated);
+      setMessage(`Flujo creado con ${sortedCreated.length} tareas encadenadas.`);
+      setTaskChainForm((current) => ({
+        ...current,
+        steps: current.steps.map((step) => ({
+          ...step,
+          activityType: step.activityType,
+        })),
+      }));
+      await loadLookups();
+    } catch (caughtError) {
+      if (axios.isAxiosError(caughtError)) {
+        const rawMessage = caughtError.response?.data?.message;
+        const backendMessage =
+          typeof rawMessage === "string"
+            ? rawMessage
+            : Array.isArray(rawMessage)
+              ? rawMessage.join(". ")
+              : "";
+
+        if (backendMessage) {
+          setMessage(`No se pudo crear la cadena: ${backendMessage}`);
+        } else {
+          setMessage("No se pudo crear la cadena de tareas. Verifica proyecto, pasos y responsables.");
+        }
+      } else {
+        setMessage("No se pudo crear la cadena de tareas. Verifica proyecto, pasos y responsables.");
+      }
+    }
+  };
+
   const submitUser = async () => {
     setMessage("");
     try {
@@ -494,6 +787,16 @@ export default function CapturePage() {
           >
             Crear tarea
           </button>
+          <button
+            onClick={() => setCaptureMode("task-chain")}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              captureMode === "task-chain"
+                ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                : "border border-[var(--line)] bg-white hover:bg-[var(--background)]"
+            }`}
+          >
+            Crear tarea completa
+          </button>
         </div>
       </section>
 
@@ -537,8 +840,28 @@ export default function CapturePage() {
               {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             <div className="grid gap-3 md:grid-cols-2">
-              <input type="date" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={projectForm.startDate} onChange={(event) => setProjectForm({ ...projectForm, startDate: event.target.value })} />
-              <input type="date" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={projectForm.endDate} onChange={(event) => setProjectForm({ ...projectForm, endDate: event.target.value })} />
+              <input
+                type="date"
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={projectForm.startDate}
+                onFocus={() => {
+                  if (!projectForm.startDate) {
+                    setProjectForm((current) => ({ ...current, startDate: getTodayDate() }));
+                  }
+                }}
+                onChange={(event) => setProjectForm({ ...projectForm, startDate: event.target.value })}
+              />
+              <input
+                type="date"
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={projectForm.endDate}
+                onFocus={() => {
+                  if (!projectForm.endDate) {
+                    setProjectForm((current) => ({ ...current, endDate: getTodayDate() }));
+                  }
+                }}
+                onChange={(event) => setProjectForm({ ...projectForm, endDate: event.target.value })}
+              />
             </div>
             <button onClick={submitProject} className="w-full rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110">Crear proyecto</button>
           </div>
@@ -613,10 +936,221 @@ export default function CapturePage() {
               </select>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <input type="date" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.dueDate} onChange={(event) => setTaskForm({ ...taskForm, dueDate: event.target.value })} />
+              <input
+                type="date"
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={taskForm.dueDate}
+                onFocus={() => {
+                  if (!taskForm.dueDate) {
+                    setTaskForm((current) => ({ ...current, dueDate: getTodayDate() }));
+                  }
+                }}
+                onChange={(event) => setTaskForm({ ...taskForm, dueDate: event.target.value })}
+              />
               <input type="number" min="0" step="0.5" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Horas estimadas" value={taskForm.estimatedHours} onChange={(event) => setTaskForm({ ...taskForm, estimatedHours: event.target.value })} />
             </div>
             <button onClick={submitTask} className="w-full rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110">Crear tarea</button>
+          </div>
+        </article>
+        ) : null}
+
+        {captureMode === "task-chain" ? (
+        <article className="kpi-card fade-up p-5 md:col-span-2 xl:col-span-3">
+          <h2 className="text-lg font-semibold">Crear tarea completa</h2>
+          <p className="mt-1 text-sm text-[var(--ink-muted)]">
+            Define una cadena secuencial de tareas. El siguiente paso se activa automaticamente cuando el anterior se finaliza.
+          </p>
+
+          <div className="mt-5 space-y-4">
+            <select
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+              value={taskChainForm.projectId}
+              onChange={(event) => setTaskChainForm((current) => ({ ...current, projectId: event.target.value }))}
+            >
+              <option value="">Nombre del proyecto</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
+                placeholder="Academia"
+                value={selectedChainProject?.code ?? ""}
+                readOnly
+              />
+              <input
+                className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
+                placeholder="Especialidad"
+                value={projectTaskSpecialtyLabel(selectedChainProject)}
+                readOnly
+              />
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-[var(--line)]/70 bg-white/80 p-4">
+              <p className="text-sm font-semibold">Cadena de tareas</p>
+              {taskChainForm.steps.map((step, index) => (
+                <div key={step.stepKey} className="rounded-xl border border-[var(--line)]/70 bg-[var(--background)]/40 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                      Paso {index + 1}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => moveTaskChainStep(step.stepKey, "up")}
+                        className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
+                        disabled={index === 0}
+                      >
+                        Subir
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveTaskChainStep(step.stepKey, "down")}
+                        className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
+                        disabled={index === taskChainForm.steps.length - 1}
+                      >
+                        Bajar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeTaskChainStep(step.stepKey)}
+                        className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-2 py-1 text-xs font-semibold text-[var(--danger)]"
+                        disabled={taskChainForm.steps.length <= 2}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <select
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      value={step.activityType}
+                      onChange={(event) => updateTaskChainStep(step.stepKey, "activityType", event.target.value)}
+                    >
+                      {activityTypeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      placeholder="Titulo"
+                      value={step.title}
+                      onChange={(event) => updateTaskChainStep(step.stepKey, "title", event.target.value)}
+                    />
+                  </div>
+                  <textarea
+                    className="mt-3 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                    placeholder="Descripcion"
+                    value={step.description}
+                    onChange={(event) => updateTaskChainStep(step.stepKey, "description", event.target.value)}
+                    rows={3}
+                  />
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <select
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      value={step.assigneeId}
+                      onChange={(event) => updateTaskChainStep(step.stepKey, "assigneeId", event.target.value)}
+                    >
+                      <option value="">Responsable</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.fullName} - {roleOptions.find((item) => item.value === user.role)?.label ?? user.role}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={step.status}
+                      onChange={() => undefined}
+                      disabled
+                    >
+                      {taskStatusOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <select
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      value={step.priority}
+                      onChange={(event) => updateTaskChainStep(step.stepKey, "priority", event.target.value)}
+                    >
+                      {priorityOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="date"
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      value={step.dueDate}
+                      onFocus={() => {
+                        if (!step.dueDate) {
+                          updateTaskChainStep(step.stepKey, "dueDate", getTodayDate());
+                        }
+                      }}
+                      onChange={(event) => updateTaskChainStep(step.stepKey, "dueDate", event.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      placeholder="Horas estimadas"
+                      value={step.estimatedHours}
+                      onChange={(event) => updateTaskChainStep(step.stepKey, "estimatedHours", event.target.value)}
+                    />
+                  </div>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={addTaskChainStep}
+                className="rounded-xl border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold transition hover:bg-[var(--background)]"
+              >
+                + Agregar tarea
+              </button>
+            </div>
+
+            <button
+              onClick={submitTaskChain}
+              className="w-full rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+            >
+              Crear tarea completa
+            </button>
+
+            {createdChainId ? (
+              <div className="rounded-2xl border border-[var(--line)] bg-white p-4">
+                <p className="text-sm font-semibold">Seguimiento de la cadena</p>
+                <p className="mt-1 text-xs text-[var(--ink-muted)]">Flujo {createdChainId.slice(0, 8)}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                  {createdChainSteps.map((step, index) => {
+                    const visual = taskStatusVisuals[step.status] ?? taskStatusVisuals.todo;
+                    const assignee = users.find((item) => item.id === step.assigneeId);
+                    return (
+                      <Fragment key={step.id}>
+                        <span className={`rounded-full border border-[var(--line)] bg-[var(--background)] px-3 py-1 ${visual.tone}`}>
+                          {visual.icon} {activityTypeOptions.find((item) => item.value === step.activityType)?.label ?? step.activityType}
+                          {assignee ? ` · ${assignee.fullName}` : ""}
+                          {` (${visual.label})`}
+                        </span>
+                        {index < createdChainSteps.length - 1 ? <span className="text-[var(--ink-muted)]">→</span> : null}
+                      </Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         </article>
         ) : null}

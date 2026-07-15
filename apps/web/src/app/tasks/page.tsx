@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
@@ -84,6 +84,7 @@ const roleLabels: Record<string, string> = {
 
 export default function TasksPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
@@ -100,6 +101,7 @@ export default function TasksPage() {
   const [openedTrackingTaskId, setOpenedTrackingTaskId] = useState("");
   const [openedDescriptionTaskId, setOpenedDescriptionTaskId] = useState("");
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
+  const [centerNoticeMessage, setCenterNoticeMessage] = useState("");
   const showCodeAndAssigneeColumns = role !== "worker";
   const isWorker = role === "worker";
   const canManagePlanning = role === "manager" || role === "lead";
@@ -123,6 +125,7 @@ export default function TasksPage() {
         assigneeId: string;
         description: string;
         dueDate: string;
+        estimatedHours: string;
         handoffToUserId: string;
         handoffTitle: string;
         handoffMessage: string;
@@ -174,6 +177,7 @@ export default function TasksPage() {
               assigneeId: task.assigneeId ?? "",
               description: task.description ?? "",
               dueDate: task.dueDate ?? "",
+              estimatedHours: task.estimatedHours ?? "",
               handoffToUserId: "",
               handoffTitle: "",
               handoffMessage: "",
@@ -222,6 +226,31 @@ export default function TasksPage() {
 
     void loadData(role);
   }, [role, currentUserId]);
+
+  useEffect(() => {
+    const projectIdFromQuery = searchParams.get("projectId") ?? "";
+    const showDoneFromQuery = searchParams.get("showDone") === "1";
+
+    if (projectIdFromQuery.length > 0) {
+      setProjectFilter(projectIdFromQuery);
+    }
+
+    if (showDoneFromQuery) {
+      setShowDoneTasks(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!centerNoticeMessage) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCenterNoticeMessage("");
+    }, 1800);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [centerNoticeMessage]);
 
   const filteredTasks = useMemo(() => {
     const result = tasks.filter((task) => {
@@ -498,12 +527,19 @@ export default function TasksPage() {
     setSavingTaskId(taskId);
 
     try {
+      const willCreateConsequentTask =
+        draft.status === "done" && draft.handoffToUserId.trim().length > 0;
+
       const payload = {
         status: draft.status,
         priority: draft.priority,
         assigneeId: draft.assigneeId || undefined,
         description: canManagePlanning ? draft.description || undefined : undefined,
         dueDate: canManagePlanning ? draft.dueDate || undefined : undefined,
+        estimatedHours:
+          canManagePlanning && draft.estimatedHours.trim().length > 0
+            ? Number(draft.estimatedHours)
+            : undefined,
         handoffToUserId:
           draft.status === "done" && draft.handoffToUserId
             ? draft.handoffToUserId
@@ -548,6 +584,7 @@ export default function TasksPage() {
             assigneeId: task.assigneeId ?? "",
             description: task.description ?? "",
             dueDate: task.dueDate ?? "",
+            estimatedHours: task.estimatedHours ?? "",
             handoffToUserId: "",
             handoffTitle: "",
             handoffMessage: "",
@@ -562,6 +599,18 @@ export default function TasksPage() {
           nextEstimatedHours: task.estimatedHours ?? "",
         },
       }));
+
+      if (willCreateConsequentTask) {
+        setOpenedConsequenceTaskId("");
+        setOpenedTrackingTaskId("");
+
+        if (role) {
+          await loadData(role);
+        }
+
+        setCenterNoticeMessage("Tarea consecuente creada correctamente.");
+      }
+
       setInfo(`Tarea ${task.code} actualizada.`);
     } catch {
       setError("No se pudo actualizar la tarea. Revisa permisos o estado de la sesión.");
@@ -1006,6 +1055,9 @@ export default function TasksPage() {
                   const canDeleteTask = role === "manager" || task.createdBy === currentUserId;
                   const consequentTasks = consequentTasksByParent[task.id] ?? [];
                   const parentTask = task.parentTaskId ? taskById[task.parentTaskId] : undefined;
+                  const parentActivityLabel = parentTask
+                    ? activityTypeLabels[parentTask.activityType] ?? parentTask.activityType
+                    : "actividad";
                   const isPrincipalTask = !task.parentTaskId;
                   return (
                     <Fragment key={task.id}>
@@ -1017,7 +1069,7 @@ export default function TasksPage() {
                           </p>
                           {!isPrincipalTask ? (
                             <p className="mt-1 text-[11px] font-semibold text-[var(--accent)]">
-                              Seguimiento en principal: {parentTask ? `${parentTask.code} - ${parentTask.title}` : task.parentTaskId}
+                              Seguimiento de {parentActivityLabel} de {parentTask ? parentTask.title : "tarea principal"}
                             </p>
                           ) : null}
                           {canManagePlanning ? (
@@ -1132,6 +1184,9 @@ export default function TasksPage() {
                             <span className={`h-2.5 w-2.5 rounded-full ${due.dotClass}`} />
                             {due.label}
                           </span>
+                          <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                            Horas estimadas actuales: {task.estimatedHours ?? "0"}
+                          </p>
                           {canManagePlanning ? (
                             <label className="mt-2 block text-xs text-[var(--ink-muted)]">
                               Fecha fin
@@ -1144,6 +1199,27 @@ export default function TasksPage() {
                                     [task.id]: {
                                       ...current[task.id],
                                       dueDate: event.target.value,
+                                    },
+                                  }))
+                                }
+                                className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              />
+                            </label>
+                          ) : null}
+                          {canManagePlanning ? (
+                            <label className="mt-2 block text-xs text-[var(--ink-muted)]">
+                              Horas estimadas
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.25"
+                                value={taskDrafts[task.id]?.estimatedHours ?? task.estimatedHours ?? ""}
+                                onChange={(event) =>
+                                  setTaskDrafts((current) => ({
+                                    ...current,
+                                    [task.id]: {
+                                      ...current[task.id],
+                                      estimatedHours: event.target.value,
                                     },
                                   }))
                                 }
@@ -1298,6 +1374,22 @@ export default function TasksPage() {
           </div>
         )}
       </section>
+
+      {centerNoticeMessage ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/35 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-5 text-center shadow-2xl">
+            <p className="text-sm uppercase tracking-[0.12em] text-emerald-700">Confirmacion</p>
+            <p className="mt-2 text-lg font-semibold text-[var(--foreground)]">{centerNoticeMessage}</p>
+            <button
+              type="button"
+              onClick={() => setCenterNoticeMessage("")}
+              className="ui-btn ui-btn-primary ui-btn-sm mt-4"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {canPlanConsequence && consequenceTask && consequenceDraft ? (
         <div

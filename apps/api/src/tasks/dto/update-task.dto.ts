@@ -26,6 +26,11 @@ export class UpdateTaskDto {
   dueDate?: string;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  estimatedHours?: number;
+
+  @IsOptional()
   @IsString()
   handoffToUserId?: string;
 

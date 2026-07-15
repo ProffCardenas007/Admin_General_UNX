@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
+import { CreateTaskChainDto } from './dto/create-task-chain.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -62,6 +63,23 @@ export class TasksController {
     },
   ) {
     return this.tasksService.create(dto, req.user);
+  }
+
+  @Post('chains')
+  @Roles('manager', 'lead')
+  createChain(
+    @Body() dto: CreateTaskChainDto,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
+  ) {
+    return this.tasksService.createChain(dto, req.user);
   }
 
   @Patch(':taskId')

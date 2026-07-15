@@ -128,6 +128,8 @@ $$;
 
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_id UUID,
+    chain_order INT,
     code VARCHAR(60) NOT NULL,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
@@ -139,6 +141,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     status task_status NOT NULL DEFAULT 'todo',
     priority task_priority NOT NULL DEFAULT 'medium',
     due_date DATE,
+    activated_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
     estimated_hours NUMERIC(8, 2) DEFAULT 0 CHECK (estimated_hours >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -151,6 +155,14 @@ ALTER TABLE IF EXISTS tasks
     ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
 ALTER TABLE IF EXISTS tasks
     ADD COLUMN IF NOT EXISTS parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS chain_id UUID;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS chain_order INT;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS task_updates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -224,6 +236,7 @@ CREATE TABLE IF NOT EXISTS kpi_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_chain_order ON tasks(chain_id, chain_order);
 CREATE INDEX IF NOT EXISTS idx_task_updates_task_date ON task_updates(task_id, update_date DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);

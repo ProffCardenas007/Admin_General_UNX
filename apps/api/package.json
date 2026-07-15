@@ -13,6 +13,7 @@
     "migrate:projects:uniqueness": "node scripts/migrate-project-uniqueness.js",
     "migrate:created-by:ownership": "node scripts/migrate-created-by-ownership.js",
     "migrate:task-parent-links": "node scripts/migrate-task-parent-links.js",
+    "migrate:task-chains": "node scripts/migrate-task-chains.js",
     "upsert:manager": "node scripts/upsert-manager.js",
     "free-port": "node scripts/free-port.js 4000",
     "start:dev": "npm run free-port && ts-node-dev --respawn --transpile-only src/main.ts",

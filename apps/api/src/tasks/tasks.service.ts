@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, QueryFailedError, Repository } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
@@ -17,6 +18,7 @@ import { AuditLogEntity } from '../database/entities/audit-log.entity';
 import { TeamEntity } from '../database/entities/team.entity';
 import { TeamMemberEntity } from '../database/entities/team-member.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
+import { CreateTaskChainDto } from './dto/create-task-chain.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 
@@ -155,6 +157,11 @@ export class TasksService {
       qb.andWhere('task.priority = :priority', { priority: filters.priority });
     }
 
+    // Keep future chain steps hidden from every role until activation.
+    qb.andWhere('(task.chain_id IS NULL OR task.status <> :hiddenChainStatus)', {
+      hiddenChainStatus: 'blocked',
+    });
+
     qb.orderBy('task.created_at', 'DESC');
     return qb.getMany();
   }
@@ -229,6 +236,8 @@ export class TasksService {
     input: {
       projectId: string;
       parentTaskId?: string;
+      chainId?: string;
+      chainOrder?: number;
       activityType: CreateTaskDto['activityType'];
       title: string;
       description?: string;
@@ -238,6 +247,7 @@ export class TasksService {
       priority: 'low' | 'medium' | 'high' | 'urgent';
       dueDate?: string;
       estimatedHours: string;
+      activatedAt?: Date;
     },
     maxAttempts = 5,
   ) {
@@ -265,6 +275,104 @@ export class TasksService {
     throw new ConflictException(
       'No se pudo generar un codigo unico para la tarea. Intenta nuevamente.',
     );
+  }
+
+  async createChain(
+    dto: CreateTaskChainDto,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    if (dto.steps.length < 2) {
+      throw new BadRequestException(
+        'A task chain requires at least 2 steps. Use regular task creation for a single task.',
+      );
+    }
+
+    const leadSpecialties = await this.resolveLeadSpecialties(actor);
+    const project = await this.projectsRepository.findOne({
+      where: { id: dto.projectId },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
+
+      if (!project.scope || !leadSpecialties.includes(project.scope)) {
+        throw new ForbiddenException(
+          'Leads can only create tasks within their specialties',
+        );
+      }
+    }
+
+    const assigneeIds = dto.steps.map((step) => step.assigneeId);
+    if (assigneeIds.some((id) => !id?.trim())) {
+      throw new BadRequestException('Every task step must have an assignee');
+    }
+
+    const activeAssignees = await this.usersRepository.find({
+      where: {
+        id: In(assigneeIds),
+        isActive: true,
+      },
+    });
+
+    const activeAssigneeSet = new Set(activeAssignees.map((item) => item.id));
+    const missingAssignee = assigneeIds.find((item) => !activeAssigneeSet.has(item));
+    if (missingAssignee) {
+      throw new BadRequestException('One or more assignees are invalid or inactive');
+    }
+
+    const chainId = randomUUID();
+    const chainTasks: TaskEntity[] = [];
+
+    for (let index = 0; index < dto.steps.length; index += 1) {
+      const step = dto.steps[index];
+      const isFirst = index === 0;
+      const createdTask = await this.createTaskWithGeneratedCode({
+        projectId: dto.projectId,
+        chainId,
+        chainOrder: index + 1,
+        activityType: step.activityType,
+        title: step.title.trim(),
+        description: step.description.trim(),
+        assigneeId: step.assigneeId,
+        createdBy: actor.id,
+        status: isFirst ? 'todo' : 'blocked',
+        priority: step.priority ?? dto.priority ?? 'medium',
+        dueDate: step.dueDate ?? dto.dueDate,
+        estimatedHours: String(step.estimatedHours ?? 0),
+        activatedAt: isFirst ? new Date() : undefined,
+      });
+
+      chainTasks.push(createdTask);
+    }
+
+    const firstTask = chainTasks[0];
+    if (firstTask.assigneeId) {
+      const firstNotification = this.notificationsRepository.create({
+        userId: firstTask.assigneeId,
+        taskId: firstTask.id,
+        title: 'Nueva tarea de flujo asignada',
+        message: `Se te asigno ${firstTask.title}. Es el primer paso de un flujo de ${chainTasks.length} tareas.`,
+        isRead: false,
+      });
+      await this.notificationsRepository.save(firstNotification);
+    }
+
+    return {
+      chainId,
+      projectId: dto.projectId,
+      totalSteps: chainTasks.length,
+      tasks: chainTasks,
+    };
   }
 
   async create(
@@ -424,10 +532,14 @@ export class TasksService {
 
     if (
       actor.role === 'worker' &&
-      (dto.description !== undefined || dto.dueDate !== undefined)
+      (
+        dto.description !== undefined ||
+        dto.dueDate !== undefined ||
+        dto.estimatedHours !== undefined
+      )
     ) {
       throw new ForbiddenException(
-        'Workers cannot edit task description or due date',
+        'Workers cannot edit task description, due date, or estimated hours',
       );
     }
 
@@ -450,7 +562,16 @@ export class TasksService {
       dueDate: task.dueDate ?? null,
     };
 
+    if (dto.status === 'done' && task.status === 'blocked') {
+      throw new ForbiddenException(
+        'Blocked tasks cannot be completed before previous steps are done',
+      );
+    }
+
     Object.assign(task, taskFields);
+    if (taskFields.status === 'done' && before.status !== 'done') {
+      task.completedAt = new Date();
+    }
     const savedTask = await this.tasksRepository.save(task);
 
     if (actor.role === 'manager') {
@@ -577,6 +698,52 @@ export class TasksService {
         await this.taskUpdatesRepository.save(existingContinuityUpdate);
       } else {
         await this.taskUpdatesRepository.save(continuityUpdate);
+      }
+    }
+
+    if (before.status !== 'done' && savedTask.status === 'done' && savedTask.chainId) {
+      const nextTask = await this.tasksRepository.findOne({
+        where: {
+          chainId: savedTask.chainId,
+          chainOrder: (savedTask.chainOrder ?? 0) + 1,
+        },
+      });
+
+      if (nextTask && nextTask.status === 'blocked') {
+        nextTask.status = 'todo';
+        nextTask.activatedAt = new Date();
+        await this.tasksRepository.save(nextTask);
+
+        if (nextTask.assigneeId) {
+          const nextNotification = this.notificationsRepository.create({
+            userId: nextTask.assigneeId,
+            taskId: nextTask.id,
+            title: 'Siguiente paso activado',
+            message: `Ya puedes iniciar ${nextTask.title}. El paso anterior del flujo fue completado.`,
+            isRead: false,
+          });
+          await this.notificationsRepository.save(nextNotification);
+        }
+      }
+
+      if (!nextTask) {
+        const chainCreatorTask = await this.tasksRepository.findOne({
+          where: {
+            chainId: savedTask.chainId,
+            chainOrder: 1,
+          },
+        });
+
+        if (chainCreatorTask?.createdBy) {
+          const completionNotification = this.notificationsRepository.create({
+            userId: chainCreatorTask.createdBy,
+            taskId: savedTask.id,
+            title: 'Flujo completado',
+            message: `La cadena ${savedTask.chainId.slice(0, 8)} se completo exitosamente.`,
+            isRead: false,
+          });
+          await this.notificationsRepository.save(completionNotification);
+        }
       }
     }
 

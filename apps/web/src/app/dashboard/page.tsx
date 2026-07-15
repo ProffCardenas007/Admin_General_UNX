@@ -18,17 +18,18 @@ type Summary = {
 type WorkloadRow = {
   userId: string;
   hoursWorked: string;
-  updatesCount: string;
+  tasksCount: string;
 };
 
 type TrendRow = {
   weekStart: string;
   hoursWorked: string;
-  updatesCount: string;
+  tasksCount: string;
 };
 
 type TaskRow = {
   id: string;
+  createdBy?: string | null;
   projectId: string;
   activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
   title: string;
@@ -131,6 +132,7 @@ const roleLabels: Record<UserOption["role"], string> = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const getTodayDate = () => new Date().toISOString().slice(0, 10);
   const [role, setRole] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -148,9 +150,13 @@ export default function DashboardPage() {
   const [projectStatusFilter, setProjectStatusFilter] = useState<"" | ProjectRow["status"]>("");
   const [projectSpecialtyFilter, setProjectSpecialtyFilter] = useState<"" | LeadSpecialty>("");
   const [projectRiskFilter, setProjectRiskFilter] = useState<"all" | RiskLevel>("all");
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
   const [taskProjectFilter, setTaskProjectFilter] = useState("");
   const [taskUserFilter, setTaskUserFilter] = useState("");
   const [taskSearchFilter, setTaskSearchFilter] = useState("");
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+  const [trendWeekFrom, setTrendWeekFrom] = useState("");
+  const [trendWeekTo, setTrendWeekTo] = useState("");
   const [selectedDashboardUserId, setSelectedDashboardUserId] = useState("");
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
@@ -174,12 +180,62 @@ export default function DashboardPage() {
     return Math.max(...workload.map((item) => Number(item.hoursWorked || 0)), 1);
   }, [workload]);
 
+  const weekInputToDateKey = (weekValue: string) => {
+    const match = /^(\d{4})-W(\d{2})$/.exec(weekValue);
+    if (!match) {
+      return "";
+    }
+
+    const year = Number(match[1]);
+    const week = Number(match[2]);
+
+    const jan4 = new Date(Date.UTC(year, 0, 4));
+    const jan4Day = jan4.getUTCDay() || 7;
+    const mondayWeek1 = new Date(jan4);
+    mondayWeek1.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+
+    const target = new Date(mondayWeek1);
+    target.setUTCDate(mondayWeek1.getUTCDate() + (week - 1) * 7);
+
+    const yyyy = target.getUTCFullYear();
+    const mm = String(target.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(target.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const normalizeDateKey = (dateValue: string) => {
+    const date = new Date(dateValue);
+    const yyyy = date.getUTCFullYear();
+    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(date.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const trendWeekRangeInvalid =
+    trendWeekFrom.length > 0 && trendWeekTo.length > 0 && trendWeekFrom > trendWeekTo;
+
+  const filteredTrends = useMemo(() => {
+    if (trendWeekRangeInvalid) {
+      return [];
+    }
+
+    const fromDateKey = trendWeekFrom ? weekInputToDateKey(trendWeekFrom) : "";
+    const toDateKey = trendWeekTo ? weekInputToDateKey(trendWeekTo) : "";
+
+    return trends.filter((item) => {
+      const itemDateKey = normalizeDateKey(item.weekStart);
+      const byFrom = fromDateKey.length === 0 || itemDateKey >= fromDateKey;
+      const byTo = toDateKey.length === 0 || itemDateKey <= toDateKey;
+      return byFrom && byTo;
+    });
+  }, [trendWeekFrom, trendWeekRangeInvalid, trendWeekTo, trends]);
+
   const trendsMax = useMemo(() => {
-    if (trends.length === 0) {
+    if (filteredTrends.length === 0) {
       return 1;
     }
-    return Math.max(...trends.map((item) => Number(item.hoursWorked || 0)), 1);
-  }, [trends]);
+    return Math.max(...filteredTrends.map((item) => Number(item.hoursWorked || 0)), 1);
+  }, [filteredTrends]);
 
   const getRiskLevel = (project: ProjectRow, progress?: ProjectProgress): RiskLevel => {
     if (project.status === "cancelled") {
@@ -374,6 +430,35 @@ export default function DashboardPage() {
     };
   }, [selectedDashboardUserTasks]);
 
+  const selectedUserAssignedHoursBySpecialty = useMemo(() => {
+    if (!selectedDashboardUserId) {
+      return [] as Array<{ specialty: string; hours: number; tasks: number }>;
+    }
+
+    const grouped = new Map<string, { specialty: string; hours: number; tasks: number }>();
+
+    selectedDashboardUserTasks.forEach((task) => {
+      const scope = projectsById[task.projectId]?.scope;
+      const specialty = scope ? specialtyLabels[scope] : "Sin especialidad";
+      const estimated = Number(task.estimatedHours ?? 0);
+
+      const current = grouped.get(specialty) ?? { specialty, hours: 0, tasks: 0 };
+      current.hours += Number.isFinite(estimated) ? estimated : 0;
+      current.tasks += 1;
+      grouped.set(specialty, current);
+    });
+
+    return [...grouped.values()].sort((a, b) => b.hours - a.hours);
+  }, [projectsById, selectedDashboardUserId, selectedDashboardUserTasks]);
+
+  const selectedSpecialtyHoursMax = useMemo(() => {
+    if (selectedUserAssignedHoursBySpecialty.length === 0) {
+      return 1;
+    }
+
+    return Math.max(...selectedUserAssignedHoursBySpecialty.map((row) => row.hours), 1);
+  }, [selectedUserAssignedHoursBySpecialty]);
+
   const selectedTaskProject = useMemo(
     () => projects.find((project) => project.id === taskForm.projectId),
     [projects, taskForm.projectId],
@@ -390,6 +475,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const savedToken = getStoredToken();
     const savedRole = getStoredRole();
+    const savedUserId = getStoredUserId();
 
     if (!savedToken) {
       router.replace("/");
@@ -397,7 +483,7 @@ export default function DashboardPage() {
     }
 
     setRole(savedRole);
-    setCurrentUserId(getStoredUserId());
+    setCurrentUserId(savedUserId);
 
     const loadDashboard = async () => {
       try {
@@ -418,7 +504,12 @@ export default function DashboardPage() {
           ]);
 
           const deduped = new Map<string, TaskRow>();
-          [...(myTasksResponse.data as TaskRow[]), ...(assignedTasksResponse.data as TaskRow[])].forEach((task) => {
+          const myTasks = myTasksResponse.data as TaskRow[];
+          const createdByLead = (assignedTasksResponse.data as TaskRow[]).filter(
+            (task) => task.createdBy === savedUserId,
+          );
+
+          [...myTasks, ...createdByLead].forEach((task) => {
             deduped.set(task.id, task);
           });
           loadedTasks = [...deduped.values()];
@@ -692,140 +783,159 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <input
-              name="dashboard-project-search"
-              value={projectSearch}
-              onChange={(event) => setProjectSearch(event.target.value)}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-              placeholder="Buscar por academia o nombre"
-            />
-
-            <select
-              name="dashboard-project-status-filter"
-              value={projectStatusFilter}
-              onChange={(event) => setProjectStatusFilter(event.target.value as "" | ProjectRow["status"])}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--line)] bg-white px-4 py-3">
+            <p className="text-sm text-[var(--ink-muted)]">
+              {projectsExpanded
+                ? `Mostrando ${filteredProjectRows.length} proyecto(s) en el listado.`
+                : "Lista de proyectos"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setProjectsExpanded((current) => !current)}
+              className="ui-btn ui-btn-secondary ui-btn-sm"
             >
-              <option value="">Todos los estados</option>
-              <option value="planned">planificado</option>
-              <option value="active">activo</option>
-              <option value="on_hold">en pausa</option>
-              <option value="done">finalizado</option>
-              <option value="cancelled">cancelado</option>
-            </select>
-
-            <select
-              name="dashboard-project-specialty-filter"
-              value={projectSpecialtyFilter}
-              onChange={(event) => setProjectSpecialtyFilter(event.target.value as "" | LeadSpecialty)}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-            >
-              <option value="">Todas las especialidades</option>
-              {LEAD_SPECIALTIES.map((specialty) => (
-                <option key={specialty} value={specialty}>
-                  {specialtyLabels[specialty]}
-                </option>
-              ))}
-            </select>
-
-            <select
-              name="dashboard-project-risk-filter"
-              value={projectRiskFilter}
-              onChange={(event) => setProjectRiskFilter(event.target.value as "all" | RiskLevel)}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-            >
-              <option value="all">Todos los riesgos</option>
-              <option value="green">estable</option>
-              <option value="amber">en seguimiento</option>
-              <option value="red">en riesgo</option>
-            </select>
+              {projectsExpanded ? "Ocultar proyectos" : "Desplegar proyectos"}
+            </button>
           </div>
 
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
-                  <th className="px-3 py-3 font-semibold">Academia</th>
-                  <th className="px-3 py-3 font-semibold">Nombre</th>
-                  <th className="px-3 py-3 font-semibold">Especialidad</th>
-                  <th className="px-3 py-3 font-semibold">Estado</th>
-                  <th className="px-3 py-3 font-semibold">Avance</th>
-                  <th className="px-3 py-3 font-semibold">Vencidas</th>
-                  <th className="px-3 py-3 font-semibold">Semaforo</th>
-                  <th className="px-3 py-3 font-semibold">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredProjectRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-3 py-4 text-center text-[var(--ink-muted)]">
-                      No hay proyectos para los filtros seleccionados.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredProjectRows.map((project) => (
-                    <tr key={project.id} className="border-b border-[var(--line)]/50 align-top">
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{project.name}</p>
-                        <p className="mt-1 text-xs text-[var(--ink-muted)]">
-                          Fin: {project.endDate ?? "sin fecha"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs">{project.code}</td>
-                      <td className="px-3 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
-                      <td className="px-3 py-3">{projectStatusLabels[project.status] ?? project.status}</td>
-                      <td className="px-3 py-3">{project.completionRate.toFixed(1)}%</td>
-                      <td className="px-3 py-3">{project.overdueTasks}</td>
-                      <td className="px-3 py-3">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            project.risk === "green"
-                              ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
-                              : project.risk === "amber"
-                                ? "border border-amber-300 bg-amber-50 text-amber-700"
-                                : "border border-red-300 bg-red-50 text-red-700"
-                          }`}
-                        >
-                          {riskLabelMap[project.risk]}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Link
-                            href="/projects"
-                            className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
-                          >
-                            Ver
-                          </Link>
-                          <Link
-                            href="/tasks"
-                            className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
-                          >
-                            Tareas
-                          </Link>
-                          {role === "manager" || role === "lead" ? (
-                            <button
-                              onClick={() => openTaskModal(project.id)}
-                              className="rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-2 py-1 text-xs font-semibold text-[var(--accent)]"
-                            >
-                              Crear tarea
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
+          {projectsExpanded ? (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <input
+                  name="dashboard-project-search"
+                  value={projectSearch}
+                  onChange={(event) => setProjectSearch(event.target.value)}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                  placeholder="Buscar por academia o nombre"
+                />
+
+                <select
+                  name="dashboard-project-status-filter"
+                  value={projectStatusFilter}
+                  onChange={(event) => setProjectStatusFilter(event.target.value as "" | ProjectRow["status"])}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                >
+                  <option value="">Todos los estados</option>
+                  <option value="planned">planificado</option>
+                  <option value="active">activo</option>
+                  <option value="on_hold">en pausa</option>
+                  <option value="done">finalizado</option>
+                  <option value="cancelled">cancelado</option>
+                </select>
+
+                <select
+                  name="dashboard-project-specialty-filter"
+                  value={projectSpecialtyFilter}
+                  onChange={(event) => setProjectSpecialtyFilter(event.target.value as "" | LeadSpecialty)}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                >
+                  <option value="">Todas las especialidades</option>
+                  {LEAD_SPECIALTIES.map((specialty) => (
+                    <option key={specialty} value={specialty}>
+                      {specialtyLabels[specialty]}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  name="dashboard-project-risk-filter"
+                  value={projectRiskFilter}
+                  onChange={(event) => setProjectRiskFilter(event.target.value as "all" | RiskLevel)}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                >
+                  <option value="all">Todos los riesgos</option>
+                  <option value="green">estable</option>
+                  <option value="amber">en seguimiento</option>
+                  <option value="red">en riesgo</option>
+                </select>
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
+                      <th className="px-3 py-3 font-semibold">Academia</th>
+                      <th className="px-3 py-3 font-semibold">Nombre</th>
+                      <th className="px-3 py-3 font-semibold">Especialidad</th>
+                      <th className="px-3 py-3 font-semibold">Estado</th>
+                      <th className="px-3 py-3 font-semibold">Avance</th>
+                      <th className="px-3 py-3 font-semibold">Vencidas</th>
+                      <th className="px-3 py-3 font-semibold">Semaforo</th>
+                      <th className="px-3 py-3 font-semibold">Acciones</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredProjectRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-3 py-4 text-center text-[var(--ink-muted)]">
+                          No hay proyectos para los filtros seleccionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredProjectRows.map((project) => (
+                        <tr key={project.id} className="border-b border-[var(--line)]/50 align-top">
+                          <td className="px-3 py-3">
+                            <p className="font-semibold">{project.name}</p>
+                            <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                              Fin: {project.endDate ?? "sin fecha"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 font-mono text-xs">{project.code}</td>
+                          <td className="px-3 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
+                          <td className="px-3 py-3">{projectStatusLabels[project.status] ?? project.status}</td>
+                          <td className="px-3 py-3">{project.completionRate.toFixed(1)}%</td>
+                          <td className="px-3 py-3">{project.overdueTasks}</td>
+                          <td className="px-3 py-3">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                project.risk === "green"
+                                  ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
+                                  : project.risk === "amber"
+                                    ? "border border-amber-300 bg-amber-50 text-amber-700"
+                                    : "border border-red-300 bg-red-50 text-red-700"
+                              }`}
+                            >
+                              {riskLabelMap[project.risk]}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Link
+                                href="/projects"
+                                className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
+                              >
+                                Ver
+                              </Link>
+                              <Link
+                                href={`/tasks?projectId=${project.id}&showDone=1`}
+                                className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
+                              >
+                                Tareas
+                              </Link>
+                              {role === "manager" || role === "lead" ? (
+                                <button
+                                  onClick={() => openTaskModal(project.id)}
+                                  className="rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-2 py-1 text-xs font-semibold text-[var(--accent)]"
+                                >
+                                  Crear tarea
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
-            {projectKpis.inRisk > 0
-              ? `Atencion: hay ${projectKpis.inRisk} proyecto(s) en seguimiento o en riesgo.`
-              : "Todos los proyectos de la cartera estan estables hoy."}
-          </div>
+              <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
+                {projectKpis.inRisk > 0
+                  ? `Atencion: hay ${projectKpis.inRisk} proyecto(s) en seguimiento o en riesgo.`
+                  : "Todos los proyectos de la cartera estan estables hoy."}
+              </div>
+            </>
+          ) : null}
         </article>
 
         <article id="tareas" className="kpi-card fade-up p-5 scroll-mt-6" style={{ animationDelay: "300ms" }}>
@@ -849,136 +959,155 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <select
-              name="dashboard-task-project-filter"
-              value={taskProjectFilter}
-              onChange={(event) => setTaskProjectFilter(event.target.value)}
-              className="ui-control"
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--line)] bg-white px-4 py-3">
+            <p className="text-sm text-[var(--ink-muted)]">
+              {tasksExpanded
+                ? `Mostrando ${filteredTaskRows.length} tarea(s) en el listado.`
+                : "Lista de tareas"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setTasksExpanded((current) => !current)}
+              className="ui-btn ui-btn-secondary ui-btn-sm"
             >
-              <option value="">Todos los proyectos</option>
-              {taskProjectOptions.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-
-            <input
-              name="dashboard-task-search"
-              value={taskSearchFilter}
-              onChange={(event) => setTaskSearchFilter(event.target.value)}
-              className="ui-control"
-              placeholder="Buscar tarea"
-            />
-
-            <select
-              name="dashboard-task-user-filter"
-              value={taskUserFilter}
-              onChange={(event) => setTaskUserFilter(event.target.value)}
-              className="ui-control"
-            >
-              <option value="">Todos los usuarios</option>
-              {taskUserOptions.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.fullName}
-                </option>
-              ))}
-            </select>
+              {tasksExpanded ? "Ocultar tareas" : "Desplegar tareas"}
+            </button>
           </div>
 
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
-                  <th className="px-3 py-3 font-semibold">Proyecto</th>
-                  <th className="px-3 py-3 font-semibold">Tarea</th>
-                  <th className="px-3 py-3 font-semibold">Usuario</th>
-                  <th className="px-3 py-3 font-semibold">Estado</th>
-                  <th className="px-3 py-3 font-semibold">Prioridad</th>
-                  <th className="px-3 py-3 font-semibold">Vence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTaskRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-4 text-center">
-                      <span className="ui-empty inline-block px-4 py-2 text-sm">
-                        No hay tareas para los filtros seleccionados.
-                      </span>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTaskRows.map((task) => (
-                    <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
-                        <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
-                          {projectsById[task.projectId]?.code ?? "-"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{task.title}</p>
-                        <p className="mt-1 text-xs text-[var(--ink-muted)]">{task.activityType}</p>
-                      </td>
-                      <td className="px-3 py-3">
-                        {task.assigneeId
-                          ? (usersById[task.assigneeId]?.fullName ?? task.assigneeId.slice(0, 8))
-                          : "Sin asignar"}
-                      </td>
-                      <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
-                      <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
-                      <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
+          {tasksExpanded ? (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <select
+                  name="dashboard-task-project-filter"
+                  value={taskProjectFilter}
+                  onChange={(event) => setTaskProjectFilter(event.target.value)}
+                  className="ui-control"
+                >
+                  <option value="">Todos los proyectos</option>
+                  {taskProjectOptions.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  name="dashboard-task-search"
+                  value={taskSearchFilter}
+                  onChange={(event) => setTaskSearchFilter(event.target.value)}
+                  className="ui-control"
+                  placeholder="Buscar tarea"
+                />
+
+                <select
+                  name="dashboard-task-user-filter"
+                  value={taskUserFilter}
+                  onChange={(event) => setTaskUserFilter(event.target.value)}
+                  className="ui-control"
+                >
+                  <option value="">Todos los usuarios</option>
+                  {taskUserOptions.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
+                      <th className="px-3 py-3 font-semibold">Proyecto</th>
+                      <th className="px-3 py-3 font-semibold">Tarea</th>
+                      <th className="px-3 py-3 font-semibold">Usuario</th>
+                      <th className="px-3 py-3 font-semibold">Estado</th>
+                      <th className="px-3 py-3 font-semibold">Prioridad</th>
+                      <th className="px-3 py-3 font-semibold">Vence</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredTaskRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-4 text-center">
+                          <span className="ui-empty inline-block px-4 py-2 text-sm">
+                            No hay tareas para los filtros seleccionados.
+                          </span>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredTaskRows.map((task) => (
+                        <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
+                          <td className="px-3 py-3">
+                            <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
+                            <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
+                              {projectsById[task.projectId]?.code ?? "-"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3">
+                            <p className="font-semibold">{task.title}</p>
+                            <p className="mt-1 text-xs text-[var(--ink-muted)]">{task.activityType}</p>
+                          </td>
+                          <td className="px-3 py-3">
+                            {task.assigneeId
+                              ? (usersById[task.assigneeId]?.fullName ?? task.assigneeId.slice(0, 8))
+                              : "Sin asignar"}
+                          </td>
+                          <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
+                          <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
+                          <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link
-              href="/tasks?status=blocked"
-              className="rounded-full border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700"
-            >
-              Ver bloqueadas
-            </Link>
-            <Link
-              href="/tasks?due=soon"
-              className="rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700"
-            >
-              Vencen pronto
-            </Link>
-            <Link
-              href="/tasks?due=overdue"
-              className="rounded-full border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-xs font-semibold text-[var(--danger)]"
-            >
-              Vencidas
-            </Link>
-            <Link
-              href="/tasks?scope=my"
-              className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold"
-            >
-              Mis tareas
-            </Link>
-            <Link
-              href="/tasks?priority=urgent"
-              className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold"
-            >
-              Prioridad urgente
-            </Link>
-          </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  href="/tasks?status=blocked"
+                  className="rounded-full border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700"
+                >
+                  Ver bloqueadas
+                </Link>
+                <Link
+                  href="/tasks?due=soon"
+                  className="rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700"
+                >
+                  Vencen pronto
+                </Link>
+                <Link
+                  href="/tasks?due=overdue"
+                  className="rounded-full border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-xs font-semibold text-[var(--danger)]"
+                >
+                  Vencidas
+                </Link>
+                <Link
+                  href="/tasks?scope=my"
+                  className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold"
+                >
+                  Mis tareas
+                </Link>
+                <Link
+                  href="/tasks?priority=urgent"
+                  className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold"
+                >
+                  Prioridad urgente
+                </Link>
+              </div>
 
-          <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
-            {role === "worker"
-              ? `Tienes ${taskKpis.myTasks} tarea(s) pendiente(s) asignadas a tu usuario.`
-              : `Hay ${taskKpis.urgent} tarea(s) urgentes activas y ${taskKpis.todo} en por hacer.`}
-          </div>
+              <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
+                {role === "worker"
+                  ? `Tienes ${taskKpis.myTasks} tarea(s) pendiente(s) asignadas a tu usuario.`
+                  : `Hay ${taskKpis.urgent} tarea(s) urgentes activas y ${taskKpis.todo} en por hacer.`}
+              </div>
+            </>
+          ) : null}
 
           <div className="mt-5 space-y-4">
             <div>
               <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Carga por colaborador
+                Horas asignadas por colaborador
               </p>
               {workload.length === 0 ? (
                 <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
@@ -986,12 +1115,18 @@ export default function DashboardPage() {
                 workload.map((row) => {
                   const hours = Number(row.hoursWorked || 0);
                   const pct = Math.min((hours / workloadMax) * 100, 100);
+                  const workloadUser = usersById[row.userId];
+                  const workloadLabel = workloadUser?.fullName
+                    ? workloadUser.fullName
+                    : row.userId === currentUserId
+                      ? "Mi usuario"
+                      : row.userId.slice(0, 8);
                   return (
                     <div key={row.userId} className="mb-3">
                       <div className="mb-1 flex items-center justify-between gap-3">
-                        <p className="font-mono text-xs">{row.userId.slice(0, 8)}</p>
+                        <p className="text-xs font-semibold">{workloadLabel}</p>
                         <p className="text-sm text-[var(--ink-muted)]">
-                          {hours.toFixed(2)} h ({row.updatesCount} actualizaciones)
+                          {hours.toFixed(2)} h ({row.tasksCount} tareas)
                         </p>
                       </div>
                       <div className="bar-track">
@@ -1005,12 +1140,47 @@ export default function DashboardPage() {
 
             <div>
               <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Tendencia semanal
+                Tendencia semanal de horas asignadas
               </p>
-              {trends.length === 0 ? (
+              <div className="mb-3 grid gap-2 md:grid-cols-[minmax(130px,170px),minmax(130px,170px),auto]">
+                <label className="text-xs text-[var(--ink-muted)]">
+                  Semana desde
+                  <input
+                    type="week"
+                    value={trendWeekFrom}
+                    onChange={(event) => setTrendWeekFrom(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                  />
+                </label>
+                <label className="text-xs text-[var(--ink-muted)]">
+                  Semana hasta
+                  <input
+                    type="week"
+                    value={trendWeekTo}
+                    onChange={(event) => setTrendWeekTo(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                  />
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrendWeekFrom("");
+                      setTrendWeekTo("");
+                    }}
+                    className="ui-btn ui-btn-secondary ui-btn-sm"
+                  >
+                    Limpiar filtro
+                  </button>
+                </div>
+              </div>
+              {trendWeekRangeInvalid ? (
+                <p className="text-sm text-[var(--danger)]">El rango de semanas es inválido.</p>
+              ) : null}
+              {filteredTrends.length === 0 ? (
                 <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
               ) : (
-                trends.map((row) => {
+                filteredTrends.map((row) => {
                   const hours = Number(row.hoursWorked || 0);
                   const pct = Math.min((hours / trendsMax) * 100, 100);
                   const date = new Date(row.weekStart);
@@ -1025,7 +1195,7 @@ export default function DashboardPage() {
                           })}
                         </p>
                         <p className="text-sm text-[var(--ink-muted)]">
-                          {hours.toFixed(2)} h ({row.updatesCount} actualizaciones)
+                          {hours.toFixed(2)} h ({row.tasksCount} tareas)
                         </p>
                       </div>
                       <div className="bar-track">
@@ -1100,42 +1270,47 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
-              <table className="min-w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
-                    <th className="px-3 py-3 font-semibold">Proyecto</th>
-                    <th className="px-3 py-3 font-semibold">Tarea</th>
-                    <th className="px-3 py-3 font-semibold">Estado</th>
-                    <th className="px-3 py-3 font-semibold">Prioridad</th>
-                    <th className="px-3 py-3 font-semibold">Vence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!selectedDashboardUser || selectedDashboardUserTasks.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-4 text-center text-[var(--ink-muted)]">
-                        Este usuario no tiene tareas asignadas.
-                      </td>
-                    </tr>
-                  ) : (
-                    selectedDashboardUserTasks.map((task) => (
-                      <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
-                        <td className="px-3 py-3">
-                          <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
-                          <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
-                            {projectsById[task.projectId]?.code ?? "-"}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3">{task.title}</td>
-                        <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
-                        <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
-                        <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div className="mt-4 grid gap-4">
+              <article className="rounded-2xl border border-[var(--line)] bg-white p-4">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  Horas asignadas por especialidad
+                </p>
+                <p className="mt-1 text-sm text-[var(--ink-muted)]">
+                  {selectedDashboardUser
+                    ? `${selectedDashboardUser.fullName} · distribucion por academia`
+                    : "Selecciona un usuario para ver su distribucion"}
+                </p>
+
+                {!selectedDashboardUser || selectedUserAssignedHoursBySpecialty.length === 0 ? (
+                  <p className="mt-4 text-sm text-[var(--ink-muted)]">
+                    Sin horas asignadas por especialidad para mostrar.
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {selectedUserAssignedHoursBySpecialty.map((row) => {
+                      const pct = Math.min((row.hours / selectedSpecialtyHoursMax) * 100, 100);
+                      return (
+                        <div key={row.specialty}>
+                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                            <p className="font-semibold">{row.specialty}</p>
+                            <p className="text-[var(--ink-muted)]">{row.hours.toFixed(2)} h ({row.tasks} tareas)</p>
+                          </div>
+                          <div className="bar-track">
+                            <div className="bar-fill" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
+              Para ver resumen quincenal por proyecto y porcentajes por persona, abre el apartado de reporte.
+              <div className="mt-3">
+                <Link href="/quincenas" className="ui-btn ui-btn-secondary ui-btn-sm">Abrir reporte</Link>
+              </div>
             </div>
           </>
         ) : (
@@ -1306,6 +1481,11 @@ export default function DashboardPage() {
                   type="date"
                   className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                   value={taskForm.dueDate}
+                  onFocus={() => {
+                    if (!taskForm.dueDate) {
+                      setTaskForm((current) => ({ ...current, dueDate: getTodayDate() }));
+                    }
+                  }}
                   onChange={(event) => setTaskForm({ ...taskForm, dueDate: event.target.value })}
                 />
                 <input
