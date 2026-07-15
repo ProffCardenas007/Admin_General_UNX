@@ -2,14 +2,14 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
-import type { LeadSpecialty } from "../../lib/specialties";
+import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type TaskRow = {
   id: string;
   code: string;
+  parentTaskId?: string | null;
   activityType:
     | "revision"
     | "edicion"
@@ -21,6 +21,7 @@ type TaskRow = {
   description?: string;
   projectId: string;
   assigneeId?: string;
+  createdBy?: string | null;
   status: "todo" | "doing" | "blocked" | "done";
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
@@ -96,10 +97,13 @@ export default function TasksPage() {
   const [deletingTaskId, setDeletingTaskId] = useState("");
   const [loadingHistoryTaskId, setLoadingHistoryTaskId] = useState("");
   const [openedHistoryTaskId, setOpenedHistoryTaskId] = useState("");
+  const [openedTrackingTaskId, setOpenedTrackingTaskId] = useState("");
   const [openedDescriptionTaskId, setOpenedDescriptionTaskId] = useState("");
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
+  const [centerNoticeMessage, setCenterNoticeMessage] = useState("");
   const showCodeAndAssigneeColumns = role !== "worker";
   const isWorker = role === "worker";
+  const canManagePlanning = role === "manager" || role === "lead";
   const [historyByTask, setHistoryByTask] = useState<Record<string, TaskUpdateRow[]>>({});
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
@@ -107,6 +111,8 @@ export default function TasksPage() {
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [taskTypeFilter, setTaskTypeFilter] = useState<"all" | "principal">("all");
+  const [showDoneTasks, setShowDoneTasks] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
 
   const [taskDrafts, setTaskDrafts] = useState<
@@ -116,6 +122,9 @@ export default function TasksPage() {
         status: TaskRow["status"];
         priority: TaskRow["priority"];
         assigneeId: string;
+        description: string;
+        dueDate: string;
+        estimatedHours: string;
         handoffToUserId: string;
         handoffTitle: string;
         handoffMessage: string;
@@ -165,6 +174,9 @@ export default function TasksPage() {
               status: task.status,
               priority: task.priority,
               assigneeId: task.assigneeId ?? "",
+              description: task.description ?? "",
+              dueDate: task.dueDate ?? "",
+              estimatedHours: task.estimatedHours ?? "",
               handoffToUserId: "",
               handoffTitle: "",
               handoffMessage: "",
@@ -214,6 +226,32 @@ export default function TasksPage() {
     void loadData(role);
   }, [role, currentUserId]);
 
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const projectIdFromQuery = query.get("projectId") ?? "";
+    const showDoneFromQuery = query.get("showDone") === "1";
+
+    if (projectIdFromQuery.length > 0) {
+      setProjectFilter(projectIdFromQuery);
+    }
+
+    if (showDoneFromQuery) {
+      setShowDoneTasks(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!centerNoticeMessage) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCenterNoticeMessage("");
+    }, 1800);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [centerNoticeMessage]);
+
   const filteredTasks = useMemo(() => {
     const result = tasks.filter((task) => {
       const bySearch =
@@ -226,16 +264,61 @@ export default function TasksPage() {
       const byAssignee =
         assigneeFilter.length === 0 || (task.assigneeId ?? "") === assigneeFilter;
 
-      return bySearch && byProject && byAssignee;
+      const byTaskType =
+        !canManagePlanning ||
+        taskTypeFilter === "all" ||
+        !task.parentTaskId;
+
+      const byDoneStatus = showDoneTasks || task.status !== "done";
+
+      return bySearch && byProject && byAssignee && byTaskType && byDoneStatus;
     });
 
     return result.sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
-  }, [tasks, search, projectFilter, assigneeFilter]);
+  }, [
+    tasks,
+    search,
+    projectFilter,
+    assigneeFilter,
+    canManagePlanning,
+    taskTypeFilter,
+    showDoneTasks,
+  ]);
 
   const activeProjects = useMemo(
     () => projects.filter((project) => project.status === "active"),
     [projects],
   );
+
+  const projectById = useMemo(
+    () => Object.fromEntries(projects.map((project) => [project.id, project])),
+    [projects],
+  );
+
+  const taskById = useMemo(
+    () => Object.fromEntries(tasks.map((task) => [task.id, task])),
+    [tasks],
+  );
+
+  const consequentTasksByParent = useMemo(() => {
+    return tasks.reduce<Record<string, TaskRow[]>>((accumulator, task) => {
+      if (!task.parentTaskId) {
+        return accumulator;
+      }
+
+      if (!accumulator[task.parentTaskId]) {
+        accumulator[task.parentTaskId] = [];
+      }
+
+      accumulator[task.parentTaskId].push(task);
+      accumulator[task.parentTaskId].sort((left, right) => {
+        const leftDate = left.dueDate ?? "9999-12-31";
+        const rightDate = right.dueDate ?? "9999-12-31";
+        return leftDate.localeCompare(rightDate) || left.code.localeCompare(right.code);
+      });
+      return accumulator;
+    }, {});
+  }, [tasks]);
 
   const todayIso = useMemo(() => {
     const now = new Date();
@@ -421,6 +504,16 @@ export default function TasksPage() {
       : assigneeId.slice(0, 8);
   };
 
+  const projectLabel = (projectId: string) => {
+    const project = projectById[projectId];
+    if (!project) {
+      return "Proyecto no encontrado";
+    }
+
+    const specialty = project.scope ? specialtyLabels[project.scope] : "Sin especialidad";
+    return `${project.code} · ${project.name} · ${specialty}`;
+  };
+
   const onSaveTaskQuickEdit = async (taskId: string) => {
     const task = tasks.find((item) => item.id === taskId);
     const draft = taskDrafts[taskId];
@@ -434,10 +527,19 @@ export default function TasksPage() {
     setSavingTaskId(taskId);
 
     try {
+      const willCreateConsequentTask =
+        draft.status === "done" && draft.handoffToUserId.trim().length > 0;
+
       const payload = {
         status: draft.status,
         priority: draft.priority,
         assigneeId: draft.assigneeId || undefined,
+        description: canManagePlanning ? draft.description || undefined : undefined,
+        dueDate: canManagePlanning ? draft.dueDate || undefined : undefined,
+        estimatedHours:
+          canManagePlanning && draft.estimatedHours.trim().length > 0
+            ? Number(draft.estimatedHours)
+            : undefined,
         handoffToUserId:
           draft.status === "done" && draft.handoffToUserId
             ? draft.handoffToUserId
@@ -480,6 +582,9 @@ export default function TasksPage() {
             status: task.status,
             priority: task.priority,
             assigneeId: task.assigneeId ?? "",
+            description: task.description ?? "",
+            dueDate: task.dueDate ?? "",
+            estimatedHours: task.estimatedHours ?? "",
             handoffToUserId: "",
             handoffTitle: "",
             handoffMessage: "",
@@ -494,6 +599,18 @@ export default function TasksPage() {
           nextEstimatedHours: task.estimatedHours ?? "",
         },
       }));
+
+      if (willCreateConsequentTask) {
+        setOpenedConsequenceTaskId("");
+        setOpenedTrackingTaskId("");
+
+        if (role) {
+          await loadData(role);
+        }
+
+        setCenterNoticeMessage("Tarea consecuente creada correctamente.");
+      }
+
       setInfo(`Tarea ${task.code} actualizada.`);
     } catch {
       setError("No se pudo actualizar la tarea. Revisa permisos o estado de la sesión.");
@@ -504,7 +621,12 @@ export default function TasksPage() {
 
   const onDeleteTask = async (taskId: string) => {
     const task = tasks.find((item) => item.id === taskId);
-    if (!task || role !== "manager") {
+    if (!task) {
+      return;
+    }
+
+    const canDeleteTask = role === "manager" || task.createdBy === currentUserId;
+    if (!canDeleteTask) {
       return;
     }
 
@@ -534,12 +656,15 @@ export default function TasksPage() {
       if (openedHistoryTaskId === taskId) {
         setOpenedHistoryTaskId("");
       }
+      if (openedTrackingTaskId === taskId) {
+        setOpenedTrackingTaskId("");
+      }
       if (openedConsequenceTaskId === taskId) {
         setOpenedConsequenceTaskId("");
       }
       setInfo(`Tarea ${task.code} eliminada.`);
     } catch {
-      setError("No se pudo borrar la tarea. Esta accion es exclusiva de gerencia.");
+      setError("No se pudo borrar la tarea. Solo gerencia o quien la creo puede hacerlo.");
     } finally {
       setDeletingTaskId("");
     }
@@ -621,18 +746,10 @@ export default function TasksPage() {
     void loadHistory(taskId);
   };
 
-  const onLogout = () => {
-    window.localStorage.removeItem("sistema_mvp_token");
-    window.localStorage.removeItem("sistema_mvp_email");
-    window.localStorage.removeItem("sistema_mvp_role");
-    window.localStorage.removeItem("sistema_mvp_specialty");
-    router.replace("/");
-  };
-
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
@@ -640,51 +757,11 @@ export default function TasksPage() {
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
               {isWorker ? "Mis tareas" : "Tareas individuales"}
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesión activa como ${email}.` : "Sesión activa."}{" "}
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
               {isWorker
-                ? "Aquí ves y gestionas tus tareas asignadas."
-                : "Aquí ves y filtras cada tarea creada."}
+                ? "Gestiona y actualiza tus tareas asignadas."
+                : "Vista y filtrado detallado de todas las tareas."}
             </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {role === "worker" ? (
-              <>
-                <Link
-                  href="/notifications"
-                  className="ui-btn ui-btn-primary"
-                >
-                  Ver notificaciones
-                </Link>
-                <button
-                  onClick={onLogout}
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Cerrar sesión
-                </button>
-              </>
-            ) : (
-              <>
-                <Link
-                  href="/dashboard"
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Volver al panel
-                </Link>
-                <Link
-                  href="/users"
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Ver usuarios
-                </Link>
-                <Link
-                  href="/capture"
-                  className="ui-btn ui-btn-primary"
-                >
-                  Cargar datos
-                </Link>
-              </>
-            )}
           </div>
         </div>
 
@@ -853,7 +930,7 @@ export default function TasksPage() {
             </div>
           </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-3">
+        <div className={`mt-6 grid gap-3 ${canManagePlanning ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -884,6 +961,29 @@ export default function TasksPage() {
               </option>
             ))}
           </select>
+          {canManagePlanning ? (
+            <select
+              value={taskTypeFilter}
+              onChange={(event) =>
+                setTaskTypeFilter(event.target.value as "all" | "principal")
+              }
+              className="ui-control"
+            >
+              <option value="all">Todas las tareas</option>
+              <option value="principal">Solo tareas principales</option>
+            </select>
+          ) : null}
+        </div>
+
+        <div className="mt-3">
+          <label className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)]">
+            <input
+              type="checkbox"
+              checked={showDoneTasks}
+              onChange={(event) => setShowDoneTasks(event.target.checked)}
+            />
+            Mostrar tareas finalizadas
+          </label>
         </div>
 
         {error ? (
@@ -936,28 +1036,61 @@ export default function TasksPage() {
         ) : displayTasks.length === 0 ? (
           <p className="ui-empty m-4 px-4 py-3 text-sm">No hay tareas con esos filtros.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="ui-table min-w-full">
+          <div className="max-w-full overflow-x-auto">
+            <table className="ui-table min-w-full w-full">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
                   <th className="px-4 py-3 font-semibold">Título</th>
-                  <th className="px-4 py-3 font-semibold">Actividad</th>
+                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Actividad</th>
                   {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Asignado</th> : null}
                   <th className="px-4 py-3 font-semibold">Estado</th>
-                  <th className="px-4 py-3 font-semibold">Prioridad</th>
+                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Prioridad</th>
                   <th className="px-4 py-3 font-semibold">Semáforo</th>
-                  <th className="px-4 py-3 font-semibold">Horas est.</th>
                   <th className="px-4 py-3 font-semibold">Acción</th>
                 </tr>
               </thead>
               <tbody>
                 {displayTasks.map((task) => {
                   const due = taskDueSemaforo(task);
+                  const canDeleteTask = role === "manager" || task.createdBy === currentUserId;
+                  const consequentTasks = consequentTasksByParent[task.id] ?? [];
+                  const parentTask = task.parentTaskId ? taskById[task.parentTaskId] : undefined;
+                  const parentActivityLabel = parentTask
+                    ? activityTypeLabels[parentTask.activityType] ?? parentTask.activityType
+                    : "actividad";
+                  const isPrincipalTask = !task.parentTaskId;
                   return (
                     <Fragment key={task.id}>
                       <tr className="border-b border-[var(--line)]/60 align-top">
-                        <td className="px-4 py-3">
-                          <p className="font-semibold">{task.title}</p>
+                        <td className="px-4 py-3 break-words">
+                          <p className="font-semibold break-words">{task.title}</p>
+                          <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                            {projectLabel(task.projectId)}
+                          </p>
+                          {!isPrincipalTask ? (
+                            <p className="mt-1 text-[11px] font-semibold text-[var(--accent)]">
+                              Seguimiento de {parentActivityLabel} de {parentTask ? parentTask.title : "tarea principal"}
+                            </p>
+                          ) : null}
+                          {canManagePlanning ? (
+                            <label className="mt-2 block text-xs text-[var(--ink-muted)]">
+                              Descripción
+                              <textarea
+                                value={taskDrafts[task.id]?.description ?? task.description ?? ""}
+                                onChange={(event) =>
+                                  setTaskDrafts((current) => ({
+                                    ...current,
+                                    [task.id]: {
+                                      ...current[task.id],
+                                      description: event.target.value,
+                                    },
+                                  }))
+                                }
+                                rows={2}
+                                className="mt-1 block w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[220px]"
+                              />
+                            </label>
+                          ) : null}
                           {task.description ? (
                             <>
                               <button
@@ -978,9 +1111,9 @@ export default function TasksPage() {
                             </>
                           ) : null}
                         </td>
-                        <td className="px-4 py-3">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
+                        <td className="px-4 py-3 hidden xl:table-cell">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
                         {showCodeAndAssigneeColumns ? (
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-normal break-words">
                             <select
                               value={taskDrafts[task.id]?.assigneeId ?? ""}
                               onChange={(event) =>
@@ -992,7 +1125,7 @@ export default function TasksPage() {
                                   },
                                 }))
                               }
-                              className="w-full min-w-[200px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[200px]"
                             >
                               <option value="">Sin asignar</option>
                               {users.map((user) => (
@@ -1026,7 +1159,7 @@ export default function TasksPage() {
                             <option value="done">{statusLabels.done}</option>
                           </select>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 hidden xl:table-cell">
                           <select
                             value={taskDrafts[task.id]?.priority ?? task.priority}
                             onChange={(event) =>
@@ -1051,10 +1184,52 @@ export default function TasksPage() {
                             <span className={`h-2.5 w-2.5 rounded-full ${due.dotClass}`} />
                             {due.label}
                           </span>
+                          <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                            Horas estimadas actuales: {task.estimatedHours ?? "0"}
+                          </p>
+                          {canManagePlanning ? (
+                            <label className="mt-2 block text-xs text-[var(--ink-muted)]">
+                              Fecha fin
+                              <input
+                                type="date"
+                                value={taskDrafts[task.id]?.dueDate ?? task.dueDate ?? ""}
+                                onChange={(event) =>
+                                  setTaskDrafts((current) => ({
+                                    ...current,
+                                    [task.id]: {
+                                      ...current[task.id],
+                                      dueDate: event.target.value,
+                                    },
+                                  }))
+                                }
+                                className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              />
+                            </label>
+                          ) : null}
+                          {canManagePlanning ? (
+                            <label className="mt-2 block text-xs text-[var(--ink-muted)]">
+                              Horas estimadas
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.25"
+                                value={taskDrafts[task.id]?.estimatedHours ?? task.estimatedHours ?? ""}
+                                onChange={(event) =>
+                                  setTaskDrafts((current) => ({
+                                    ...current,
+                                    [task.id]: {
+                                      ...current[task.id],
+                                      estimatedHours: event.target.value,
+                                    },
+                                  }))
+                                }
+                                className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                              />
+                            </label>
+                          ) : null}
                         </td>
-                        <td className="px-4 py-3">{task.estimatedHours}</td>
-                        <td className="px-4 py-3 min-w-[270px]">
-                          <div className="flex flex-col gap-2">
+                        <td className="px-4 py-3 md:min-w-[220px]">
+                          <div className="grid gap-2 lg:grid-cols-2">
                             <button
                               onClick={() => void onSaveTaskQuickEdit(task.id)}
                               disabled={savingTaskId === task.id}
@@ -1073,6 +1248,20 @@ export default function TasksPage() {
                                   ? "Ocultar historial"
                                   : "Ver historial"}
                             </button>
+                            {canPlanConsequence && isPrincipalTask ? (
+                              <button
+                                onClick={() =>
+                                  setOpenedTrackingTaskId((current) =>
+                                    current === task.id ? "" : task.id,
+                                  )
+                                }
+                                className="ui-btn ui-btn-secondary ui-btn-sm"
+                              >
+                                {openedTrackingTaskId === task.id
+                                  ? "Ocultar seguimiento"
+                                  : `Seguimiento (${consequentTasks.length})`}
+                              </button>
+                            ) : null}
                             {canPlanConsequence ? (
                               <button
                                 onClick={() => {
@@ -1090,7 +1279,7 @@ export default function TasksPage() {
                                 Tarea consecuente
                               </button>
                             ) : null}
-                            {role === "manager" ? (
+                            {canDeleteTask ? (
                               <button
                                 onClick={() => void onDeleteTask(task.id)}
                                 disabled={deletingTaskId === task.id}
@@ -1105,7 +1294,7 @@ export default function TasksPage() {
 
                       {openedHistoryTaskId === task.id ? (
                         <tr className="border-b border-[var(--line)]/60">
-                          <td colSpan={showCodeAndAssigneeColumns ? 8 : 7} className="bg-[var(--background)]/35 px-4 py-3">
+                          <td colSpan={showCodeAndAssigneeColumns ? 7 : 6} className="bg-[var(--background)]/35 px-4 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
                             Historial de updates
                           </p>
@@ -1141,6 +1330,42 @@ export default function TasksPage() {
                           </td>
                         </tr>
                       ) : null}
+
+                      {isPrincipalTask && openedTrackingTaskId === task.id ? (
+                        <tr className="border-b border-[var(--line)]/60">
+                          <td colSpan={showCodeAndAssigneeColumns ? 7 : 6} className="bg-[var(--background)]/35 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                              Seguimiento de continuidad
+                            </p>
+                            {consequentTasks.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                {consequentTasks.map((childTask) => (
+                                  <div key={childTask.id} className="rounded-xl border border-[var(--line)] bg-white p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                                      <span className="font-semibold text-[var(--foreground)]">
+                                        {childTask.code} · {childTask.title}
+                                      </span>
+                                      <span className="rounded-full border border-cyan-200 bg-cyan-100 px-3 py-1 font-semibold text-cyan-800">
+                                        {statusLabels[childTask.status] ?? childTask.status}
+                                      </span>
+                                    </div>
+                                    <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                                      {activityTypeLabels[childTask.activityType] ?? childTask.activityType} · prioridad {priorityLabels[childTask.priority] ?? childTask.priority} · fecha fin {childTask.dueDate ?? "-"}
+                                    </p>
+                                    <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                                      Responsable: {assigneeLabel(childTask.assigneeId)}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-sm text-[var(--ink-muted)]">
+                                Esta tarea principal no tiene tareas consecuentes registradas.
+                              </p>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
                     </Fragment>
                   );
                 })}
@@ -1149,6 +1374,22 @@ export default function TasksPage() {
           </div>
         )}
       </section>
+
+      {centerNoticeMessage ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/35 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-5 text-center shadow-2xl">
+            <p className="text-sm uppercase tracking-[0.12em] text-emerald-700">Confirmacion</p>
+            <p className="mt-2 text-lg font-semibold text-[var(--foreground)]">{centerNoticeMessage}</p>
+            <button
+              type="button"
+              onClick={() => setCenterNoticeMessage("")}
+              className="ui-btn ui-btn-primary ui-btn-sm mt-4"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {canPlanConsequence && consequenceTask && consequenceDraft ? (
         <div

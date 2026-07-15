@@ -1,227 +1,434 @@
 import {
-	BadRequestException,
-	ConflictException,
-	ForbiddenException,
-	Injectable,
-	NotFoundException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { UserEntity } from '../database/entities/user.entity';
+import { AuditLogEntity } from '../database/entities/audit-log.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
-import { ProjectScope, isLeadSpecialty } from '../common/specialties';
+import { UpdateProjectDto } from './dto/update-project.dto';
+import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
 export class ProjectsService {
-	constructor(
-		@InjectRepository(ProjectEntity)
-		private readonly projectsRepository: Repository<ProjectEntity>,
-		@InjectRepository(TaskEntity)
-		private readonly tasksRepository: Repository<TaskEntity>,
-		@InjectRepository(UserEntity)
-		private readonly usersRepository: Repository<UserEntity>,
-	) {}
+  private readonly logger = new Logger(ProjectsService.name);
 
-	private async resolveLeadSpecialty(actor: {
-		id: string;
-		role: 'manager' | 'lead' | 'worker';
-		specialty?: ProjectScope | null;
-	}) {
-		if (actor.role !== 'lead') {
-			return null;
-		}
+  constructor(
+    @InjectRepository(ProjectEntity)
+    private readonly projectsRepository: Repository<ProjectEntity>,
+    @InjectRepository(TaskEntity)
+    private readonly tasksRepository: Repository<TaskEntity>,
+    @InjectRepository(UserEntity)
+    private readonly usersRepository: Repository<UserEntity>,
+    @InjectRepository(AuditLogEntity)
+    private readonly auditLogsRepository: Repository<AuditLogEntity>,
+  ) {}
 
-		if (isLeadSpecialty(actor.specialty)) {
-			return actor.specialty;
-		}
+  private async recordManagerAudit(input: {
+    actorId: string;
+    action: string;
+    entityType: string;
+    entityId: string;
+    entityLabel: string;
+    changes: Record<string, { before: unknown; after: unknown }>;
+  }) {
+    const actor = await this.usersRepository.findOne({
+      where: { id: input.actorId },
+    });
 
-		const user = await this.usersRepository.findOne({ where: { id: actor.id } });
-		return isLeadSpecialty(user?.specialty) ? user.specialty : null;
-	}
+    const log = this.auditLogsRepository.create({
+      actorId: input.actorId,
+      actorRole: 'manager',
+      actorEmail: actor?.email,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      entityLabel: input.entityLabel.slice(0, 220),
+      changesJson: input.changes,
+    });
 
-	async findAll(
-		filters: { status?: string; search?: string },
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
-	) {
-		const qb = this.projectsRepository.createQueryBuilder('project');
-		const leadSpecialty = await this.resolveLeadSpecialty(actor);
+    try {
+      await this.auditLogsRepository.save(log);
+    } catch (error) {
+      this.logger.warn(
+        `Audit log skipped for project action ${input.action} on ${input.entityId}`,
+      );
+    }
+  }
 
-		if (actor.role === 'lead') {
-			if (!leadSpecialty) {
-				throw new ForbiddenException('Lead specialty is required');
-			}
+  private async resolveLeadSpecialties(actor: {
+    id: string;
+    role: 'manager' | 'lead' | 'worker';
+    specialty?: ProjectScope | null;
+    specialties?: ProjectScope[] | null;
+  }) {
+    if (actor.role !== 'lead') {
+      return [];
+    }
 
-			qb.andWhere('project.scope = :scope', { scope: leadSpecialty });
-		}
+    const actorSpecialties = normalizeLeadSpecialties(
+      actor.specialties ?? actor.specialty,
+    );
+    if (actorSpecialties.length > 0) {
+      return actorSpecialties;
+    }
 
-		if (actor.role === 'worker') {
-			qb.innerJoin(
-				TaskEntity,
-				'task',
-				'task.project_id = project.id AND task.assignee_id = :actorId',
-				{ actorId: actor.id },
-			).distinct(true);
-		}
+    const user = await this.usersRepository.findOne({
+      where: { id: actor.id },
+    });
+    return normalizeLeadSpecialties(user?.specialties ?? user?.specialty);
+  }
 
-		if (filters.status) {
-			qb.andWhere('project.status = :status', { status: filters.status });
-		}
-		if (filters.search) {
-			qb.andWhere('(project.name ILIKE :search OR project.code ILIKE :search)', {
-				search: `%${filters.search}%`,
-			});
-		}
-		qb.orderBy('project.created_at', 'DESC');
-		return qb.getMany();
-	}
+  async findAll(
+    filters: { status?: string; search?: string },
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const qb = this.projectsRepository.createQueryBuilder('project');
+    const leadSpecialties = await this.resolveLeadSpecialties(actor);
 
-	create(
-		dto: CreateProjectDto,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
-	) {
-		return this.createInternal(dto, actor);
-	}
+    if (actor.role === 'lead') {
+      qb.leftJoin(
+        TaskEntity,
+        'lead_task',
+        'lead_task.project_id = project.id AND lead_task.assignee_id = :actorId',
+        { actorId: actor.id },
+      ).distinct(true);
 
-	private async createInternal(
-		dto: CreateProjectDto,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
-	) {
-		const normalizedCode = dto.code.trim();
-		const normalizedName = dto.name.trim();
+      if (leadSpecialties.length === 0) {
+        qb.andWhere('lead_task.id IS NOT NULL');
+      } else {
+        qb.andWhere(
+          '(project.scope IN (:...scopes) OR lead_task.id IS NOT NULL)',
+          { scopes: leadSpecialties },
+        );
+      }
+    }
 
-		const existingByName = await this.projectsRepository
-			.createQueryBuilder('project')
-			.where('LOWER(project.name) = LOWER(:name)', { name: normalizedName })
-			.getOne();
+    if (actor.role === 'worker') {
+      qb.innerJoin(
+        TaskEntity,
+        'task',
+        'task.project_id = project.id AND task.assignee_id = :actorId',
+        { actorId: actor.id },
+      ).distinct(true);
+    }
 
-		if (existingByName) {
-			throw new ConflictException('Project name already exists');
-		}
+    if (filters.status) {
+      qb.andWhere('project.status = :status', { status: filters.status });
+    }
+    if (filters.search) {
+      qb.andWhere(
+        '(project.name ILIKE :search OR project.code ILIKE :search)',
+        {
+          search: `%${filters.search}%`,
+        },
+      );
+    }
+    qb.orderBy('project.created_at', 'DESC');
+    return qb.getMany();
+  }
 
-		let resolvedScope = dto.scope ?? null;
-		const leadSpecialty = await this.resolveLeadSpecialty(actor);
+  create(
+    dto: CreateProjectDto,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    return this.createInternal(dto, actor);
+  }
 
-		if (actor.role === 'lead') {
-			if (!leadSpecialty) {
-				throw new BadRequestException('Lead specialty is required');
-			}
+  private async createInternal(
+    dto: CreateProjectDto,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const normalizedCode = dto.code.trim();
+    const normalizedName = dto.name.trim();
 
-			// Keep lead project scope aligned with their assigned specialty.
-			resolvedScope = leadSpecialty;
-		} else if (!resolvedScope) {
-			throw new BadRequestException('Project scope is required');
-		}
+    const existingByName = await this.projectsRepository
+      .createQueryBuilder('project')
+      .where('LOWER(project.name) = LOWER(:name)', { name: normalizedName })
+      .getOne();
 
-		const project = this.projectsRepository.create({
-			...dto,
-			code: normalizedCode,
-			name: normalizedName,
-			scope: resolvedScope,
-			status: dto.status ?? 'planned',
-		});
+    if (existingByName) {
+      throw new ConflictException('Project name already exists');
+    }
 
-		try {
-			return await this.projectsRepository.save(project);
-		} catch (error) {
-			if (error instanceof QueryFailedError) {
-				const dbError = error as QueryFailedError & {
-					code?: string;
-					constraint?: string;
-					detail?: string;
-				};
+    const resolvedScope = dto.scope ?? null;
+    const leadSpecialties = await this.resolveLeadSpecialties(actor);
 
-				if (dbError.code === '23505') {
-					if (dbError.constraint?.includes('projects_name')) {
-						throw new ConflictException('Project name already exists');
-					}
+    if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new BadRequestException('Lead specialty is required');
+      }
 
-					if (dbError.constraint?.includes('projects_code')) {
-						throw new ConflictException('Project code already exists');
-					}
+      if (!resolvedScope) {
+        throw new BadRequestException(
+          'Project scope is required for lead users',
+        );
+      }
 
-					throw new ConflictException('Duplicate project data');
-				}
+      if (!leadSpecialties.includes(resolvedScope)) {
+        throw new ForbiddenException(
+          'Leads can only create projects in their specialties',
+        );
+      }
+    } else if (!resolvedScope) {
+      throw new BadRequestException('Project scope is required');
+    }
 
-				if (dbError.code === '23503') {
-					if (dbError.constraint?.includes('owner_team_id')) {
-						throw new BadRequestException('Owner team does not exist');
-					}
+    const project = this.projectsRepository.create({
+      ...dto,
+      code: normalizedCode,
+      name: normalizedName,
+      createdBy: actor.id,
+      scope: resolvedScope,
+      status: dto.status ?? 'planned',
+    });
 
-					throw new BadRequestException('Related record not found');
-				}
+    try {
+      return await this.projectsRepository.save(project);
+    } catch (error) {
+      if (error instanceof QueryFailedError) {
+        const dbError = error as QueryFailedError & {
+          code?: string;
+          constraint?: string;
+          detail?: string;
+        };
 
-				if (dbError.code === '22P02') {
-					throw new BadRequestException('Invalid project data format');
-				}
+        if (dbError.code === '23505') {
+          if (dbError.constraint?.includes('projects_name')) {
+            throw new ConflictException('Project name already exists');
+          }
 
-				if (dbError.code === '23514') {
-					throw new BadRequestException('Project data violates database constraints');
-				}
-			}
+          if (dbError.constraint?.includes('projects_code')) {
+            throw new ConflictException('Project code already exists');
+          }
 
-			throw error;
-		}
-	}
+          throw new ConflictException('Duplicate project data');
+        }
 
-	async getProgress(
-		projectId: string,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker'; specialty?: ProjectScope | null },
-	) {
-		const leadSpecialty = await this.resolveLeadSpecialty(actor);
-		const project = await this.projectsRepository.findOne({ where: { id: projectId } });
-		if (!project) {
-			throw new NotFoundException('Project not found');
-		}
+        if (dbError.code === '23503') {
+          if (dbError.constraint?.includes('owner_team_id')) {
+            throw new BadRequestException('Owner team does not exist');
+          }
 
-		const tasksQb = this.tasksRepository
-			.createQueryBuilder('task')
-			.where('task.project_id = :projectId', { projectId });
+          throw new BadRequestException('Related record not found');
+        }
 
-		if (actor.role === 'worker') {
-			tasksQb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
-		}
+        if (dbError.code === '22P02') {
+          throw new BadRequestException('Invalid project data format');
+        }
 
-		const tasks = await tasksQb.getMany();
+        if (dbError.code === '23514') {
+          throw new BadRequestException(
+            'Project data violates database constraints',
+          );
+        }
+      }
 
-		if (actor.role === 'lead') {
-			if (!leadSpecialty) {
-				throw new ForbiddenException('Lead specialty is required');
-			}
+      throw error;
+    }
+  }
 
-			if (project.scope !== leadSpecialty) {
-				throw new ForbiddenException('Leads can only view progress for their specialty');
-			}
-		}
+  async getProgress(
+    projectId: string,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const leadSpecialties = await this.resolveLeadSpecialties(actor);
+    const project = await this.projectsRepository.findOne({
+      where: { id: projectId },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
 
-		if (actor.role === 'worker' && tasks.length === 0) {
-			throw new ForbiddenException('Workers can only view progress of their assigned projects');
-		}
+    const tasksQb = this.tasksRepository
+      .createQueryBuilder('task')
+      .where('task.project_id = :projectId', { projectId });
 
-		const totalTasks = tasks.length;
-		const doneTasks = tasks.filter((task) => task.status === 'done').length;
-		const overdueTasks = tasks.filter(
-			(task) => task.status !== 'done' && task.dueDate && new Date(task.dueDate) < new Date(),
-		).length;
+    if (actor.role === 'worker') {
+      tasksQb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
+    }
 
-		return {
-			projectId: project.id,
-			projectCode: project.code,
-			totalTasks,
-			doneTasks,
-			completionRate: totalTasks === 0 ? 0 : Number(((doneTasks / totalTasks) * 100).toFixed(2)),
-			overdueTasks,
-		};
-	}
+    const tasks = await tasksQb.getMany();
 
-	async remove(projectId: string) {
-		const project = await this.projectsRepository.findOne({ where: { id: projectId } });
-		if (!project) {
-			throw new NotFoundException('Project not found');
-		}
+    if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
 
-		await this.projectsRepository.delete({ id: projectId });
-		return { deleted: true, projectId };
-	}
+      if (!project.scope || !leadSpecialties.includes(project.scope)) {
+        throw new ForbiddenException(
+          'Leads can only view progress for their specialties',
+        );
+      }
+    }
+
+    if (actor.role === 'worker' && tasks.length === 0) {
+      throw new ForbiddenException(
+        'Workers can only view progress of their assigned projects',
+      );
+    }
+
+    const totalTasks = tasks.length;
+    const doneTasks = tasks.filter((task) => task.status === 'done').length;
+    const overdueTasks = tasks.filter(
+      (task) =>
+        task.status !== 'done' &&
+        task.dueDate &&
+        new Date(task.dueDate) < new Date(),
+    ).length;
+
+    return {
+      projectId: project.id,
+      projectCode: project.code,
+      totalTasks,
+      doneTasks,
+      completionRate:
+        totalTasks === 0
+          ? 0
+          : Number(((doneTasks / totalTasks) * 100).toFixed(2)),
+      overdueTasks,
+    };
+  }
+
+  async remove(
+    projectId: string,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+    },
+  ) {
+    const project = await this.projectsRepository.findOne({
+      where: { id: projectId },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (actor.role === 'lead' && project.createdBy !== actor.id) {
+      throw new ForbiddenException(
+        'Leads can only delete projects created by themselves',
+      );
+    }
+
+    await this.projectsRepository.delete({ id: projectId });
+    return { deleted: true, projectId };
+  }
+
+  async update(
+    projectId: string,
+    dto: UpdateProjectDto,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const leadSpecialties = await this.resolveLeadSpecialties(actor);
+    const project = await this.projectsRepository.findOne({
+      where: { id: projectId },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
+
+      if (!project.scope || !leadSpecialties.includes(project.scope)) {
+        throw new ForbiddenException(
+          'Leads can only update projects within their specialties',
+        );
+      }
+    }
+
+    const before = {
+      name: project.name,
+      status: project.status,
+      startDate: project.startDate ?? null,
+      endDate: project.endDate ?? null,
+    };
+
+    if (dto.name !== undefined) {
+      project.name = dto.name.trim();
+    }
+
+    if (dto.status !== undefined) {
+      project.status = dto.status;
+    }
+
+    if (dto.startDate !== undefined) {
+      project.startDate = dto.startDate;
+    }
+
+    if (dto.endDate !== undefined) {
+      project.endDate = dto.endDate;
+    }
+
+    const savedProject = await this.projectsRepository.save(project);
+
+    if (actor.role === 'manager') {
+      const changes: Record<string, { before: unknown; after: unknown }> = {};
+
+      if (dto.name !== undefined && before.name !== savedProject.name) {
+        changes.name = { before: before.name, after: savedProject.name };
+      }
+
+      if (dto.status !== undefined && before.status !== savedProject.status) {
+        changes.status = { before: before.status, after: savedProject.status };
+      }
+
+      const resolvedStartDate = savedProject.startDate ?? null;
+      if (dto.startDate !== undefined && before.startDate !== resolvedStartDate) {
+        changes.startDate = { before: before.startDate, after: resolvedStartDate };
+      }
+
+      const resolvedEndDate = savedProject.endDate ?? null;
+      if (dto.endDate !== undefined && before.endDate !== resolvedEndDate) {
+        changes.endDate = { before: before.endDate, after: resolvedEndDate };
+      }
+
+      if (Object.keys(changes).length > 0) {
+        await this.recordManagerAudit({
+          actorId: actor.id,
+          action: 'project_updated',
+          entityType: 'project',
+          entityId: savedProject.id,
+          entityLabel: `${savedProject.code} - ${savedProject.name}`,
+          changes,
+        });
+      }
+    }
+
+    return savedProject;
+  }
 }

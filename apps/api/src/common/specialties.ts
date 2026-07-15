@@ -14,7 +14,9 @@ export type LeadSpecialtyInput = (typeof LEAD_SPECIALTY_INPUTS)[number];
 export const PROJECT_SCOPES = LEAD_SPECIALTIES;
 export type ProjectScope = LeadSpecialty;
 
-export function normalizeLeadSpecialty(value?: string | null): LeadSpecialty | undefined {
+export function normalizeLeadSpecialty(
+  value?: string | null,
+): LeadSpecialty | undefined {
   if (!value) {
     return undefined;
   }
@@ -29,4 +31,24 @@ export function normalizeLeadSpecialty(value?: string | null): LeadSpecialty | u
 
 export function isLeadSpecialty(value?: string | null): value is LeadSpecialty {
   return !!normalizeLeadSpecialty(value);
+}
+
+export function normalizeLeadSpecialties(
+  values?: Array<string | null | undefined> | string | null,
+): LeadSpecialty[] {
+  if (typeof values === 'undefined' || values === null) {
+    return [];
+  }
+
+  const rawValues = Array.isArray(values) ? values : [values];
+  const normalized: LeadSpecialty[] = [];
+
+  for (const item of rawValues) {
+    const specialty = normalizeLeadSpecialty(item);
+    if (specialty && !normalized.includes(specialty)) {
+      normalized.push(specialty);
+    }
+  }
+
+  return normalized;
 }

@@ -31,14 +31,24 @@ describe('ReportsService', () => {
     };
 
     projectsRepository = {
-      find: jest.fn().mockResolvedValue([{ id: 'project-1', code: 'PRJ-1', name: 'Proj 1' }]),
+      find: jest
+        .fn()
+        .mockResolvedValue([
+          { id: 'project-1', code: 'PRJ-1', name: 'Proj 1' },
+        ]),
     };
 
     usersRepository = {
-      find: jest.fn().mockResolvedValue([{ id: 'worker-1', email: 'worker@acme.com' }]),
+      find: jest
+        .fn()
+        .mockResolvedValue([{ id: 'worker-1', email: 'worker@acme.com' }]),
     };
 
-    service = new ReportsService(tasksRepository, projectsRepository, usersRepository);
+    service = new ReportsService(
+      tasksRepository,
+      projectsRepository,
+      usersRepository,
+    );
   });
 
   it('adds assignee scope filter for worker', async () => {
@@ -52,15 +62,23 @@ describe('ReportsService', () => {
   it('does not add worker assignee filter for manager', async () => {
     await service.buildTasksCsv({}, { id: 'manager-1', role: 'manager' });
 
-    expect(qb.andWhere).not.toHaveBeenCalledWith('task.assignee_id = :actorId', {
-      actorId: 'manager-1',
-    });
+    expect(qb.andWhere).not.toHaveBeenCalledWith(
+      'task.assignee_id = :actorId',
+      {
+        actorId: 'manager-1',
+      },
+    );
   });
 
   it('returns CSV including header and scoped rows', async () => {
-    const csv = await service.buildTasksCsv({}, { id: 'worker-1', role: 'worker' });
+    const csv = await service.buildTasksCsv(
+      {},
+      { id: 'worker-1', role: 'worker' },
+    );
 
     expect(csv).toContain('task_id,task_code,task_title');
-    expect(csv).toContain('task-1,TASK-1,Task worker,PRJ-1,Proj 1,worker@acme.com');
+    expect(csv).toContain(
+      'task-1,TASK-1,Task worker,PRJ-1,Proj 1,worker@acme.com',
+    );
   });
 });

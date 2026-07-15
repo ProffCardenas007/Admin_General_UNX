@@ -14,6 +14,23 @@ function normalizeStoredSpecialty(value: string) {
   return SPECIALTY_ALIAS[normalized] ?? "";
 }
 
+function normalizeStoredSpecialties(values: Array<string | null | undefined>) {
+  const normalized: string[] = [];
+
+  values.forEach((value) => {
+    if (!value) {
+      return;
+    }
+
+    const specialty = normalizeStoredSpecialty(value);
+    if (specialty && !normalized.includes(specialty)) {
+      normalized.push(specialty);
+    }
+  });
+
+  return normalized;
+}
+
 export function getStoredToken() {
   return window.localStorage.getItem("sistema_mvp_token") ?? "";
 }
@@ -49,10 +66,29 @@ export function getStoredRole() {
 }
 
 export function getStoredSpecialty() {
+  return getStoredSpecialties()[0] ?? "";
+}
+
+export function getStoredSpecialties() {
+  const rawSpecialties = window.localStorage.getItem("sistema_mvp_specialties");
+  if (rawSpecialties) {
+    try {
+      const parsed = JSON.parse(rawSpecialties) as Array<string | null | undefined>;
+      if (Array.isArray(parsed)) {
+        const normalizedParsed = normalizeStoredSpecialties(parsed);
+        if (normalizedParsed.length > 0) {
+          return normalizedParsed;
+        }
+      }
+    } catch {
+      // Ignore malformed storage and fallback to legacy fields.
+    }
+  }
+
   const directSpecialty = window.localStorage.getItem("sistema_mvp_specialty") ?? "";
   const normalizedDirectSpecialty = normalizeStoredSpecialty(directSpecialty);
   if (normalizedDirectSpecialty) {
-    return normalizedDirectSpecialty;
+    return [normalizedDirectSpecialty];
   }
 
   const token = getStoredToken();
@@ -68,10 +104,17 @@ export function getStoredSpecialty() {
 
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-    const parsed = JSON.parse(window.atob(padded)) as { specialty?: string };
-    return normalizeStoredSpecialty(parsed.specialty ?? "");
+    const parsed = JSON.parse(window.atob(padded)) as {
+      specialty?: string;
+      specialties?: string[];
+    };
+    const normalizedTokenSpecialties = normalizeStoredSpecialties([
+      ...(Array.isArray(parsed.specialties) ? parsed.specialties : []),
+      parsed.specialty,
+    ]);
+    return normalizedTokenSpecialties;
   } catch {
-    return "";
+    return [];
   }
 }
 

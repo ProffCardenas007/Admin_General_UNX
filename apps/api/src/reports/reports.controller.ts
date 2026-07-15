@@ -18,10 +18,16 @@ export class ReportsController {
     @Query('status') status: string | undefined,
     @Res() res: Response,
   ) {
-    const csv = await this.reportsService.buildTasksCsv({ projectId, status }, req.user);
+    const csv = await this.reportsService.buildTasksCsv(
+      { projectId, status },
+      req.user,
+    );
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="tasks-report.csv"');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="tasks-report.csv"',
+    );
     return res.send(csv);
   }
 }

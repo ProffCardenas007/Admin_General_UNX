@@ -85,9 +85,12 @@ describe('DashboardService', () => {
       expect.stringContaining('task_scope.assignee_id = :actorId'),
       { actorId: 'worker-1' },
     );
-    expect(tasksQb.andWhere).toHaveBeenCalledWith('task.assignee_id = :actorId', {
-      actorId: 'worker-1',
-    });
+    expect(tasksQb.andWhere).toHaveBeenCalledWith(
+      'task.assignee_id = :actorId',
+      {
+        actorId: 'worker-1',
+      },
+    );
     expect(hoursQb.andWhere).toHaveBeenCalledWith('update.user_id = :actorId', {
       actorId: 'worker-1',
     });
@@ -103,11 +106,17 @@ describe('DashboardService', () => {
     await service.getWorkload({}, actor);
     await service.getTrends({}, actor);
 
-    expect(workloadQb.andWhere).toHaveBeenCalledWith('update.user_id = :actorId', {
-      actorId: 'worker-77',
-    });
-    expect(trendsQb.andWhere).toHaveBeenCalledWith('update.user_id = :actorId', {
-      actorId: 'worker-77',
-    });
+    expect(workloadQb.andWhere).toHaveBeenCalledWith(
+      'update.user_id = :actorId',
+      {
+        actorId: 'worker-77',
+      },
+    );
+    expect(trendsQb.andWhere).toHaveBeenCalledWith(
+      'update.user_id = :actorId',
+      {
+        actorId: 'worker-77',
+      },
+    );
   });
 });

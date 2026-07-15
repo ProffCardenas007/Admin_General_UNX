@@ -1,5 +1,8 @@
 import {
+  ArrayMaxSize,
+  ArrayUnique,
   IsEmail,
+  IsArray,
   IsIn,
   IsOptional,
   IsString,
@@ -21,16 +24,40 @@ export class CreateUserDto {
   role: 'manager' | 'lead' | 'worker';
 
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   @IsIn(LEAD_SPECIALTY_INPUTS)
   specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number];
 
-	@IsString()
-	@MinLength(6)
-	@MaxLength(120)
-	password: string;
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (!Array.isArray(value)) {
+      return value;
+    }
+
+    return value.map((item) =>
+      typeof item === 'string' ? item.trim().toLowerCase() : item,
+    );
+  })
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(2)
+  @IsIn(LEAD_SPECIALTY_INPUTS, { each: true })
+  specialties?: Array<(typeof LEAD_SPECIALTY_INPUTS)[number]>;
+
+  @IsString()
+  @MinLength(6)
+  @MaxLength(120)
+  password: string;
 
   @IsOptional()
   @IsString()
   teamId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  teamIds?: string[];
 }

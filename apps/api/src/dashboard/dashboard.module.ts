@@ -7,7 +7,9 @@ import { TaskEntity } from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ProjectEntity, TaskEntity, TaskUpdateEntity])],
+  imports: [
+    TypeOrmModule.forFeature([ProjectEntity, TaskEntity, TaskUpdateEntity]),
+  ],
   controllers: [DashboardController],
   providers: [DashboardService],
 })

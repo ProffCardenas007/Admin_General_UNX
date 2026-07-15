@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
+import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
 import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type UserRow = {
@@ -13,8 +13,26 @@ type UserRow = {
   email: string;
   role: "manager" | "lead" | "worker";
   specialty?: LeadSpecialty | null;
+  specialties?: LeadSpecialty[] | null;
+  teamIds?: string[];
   isActive: boolean;
   createdAt: string;
+};
+
+type TeamRow = {
+  id: string;
+  name: string;
+  memberCount?: number;
+};
+
+type UserDraft = {
+  fullName: string;
+  email: string;
+  role: UserRow["role"];
+  specialties: LeadSpecialty[];
+  teamIds: string[];
+  isActive: boolean;
+  password: string;
 };
 
 type TaskStatsRow = {
@@ -63,7 +81,6 @@ const taskStatusLabels: Record<TaskStatsRow["status"], string> = {
 
 export default function UsersPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -71,6 +88,7 @@ export default function UsersPage() {
   const [savingUserId, setSavingUserId] = useState("");
   const [deletingUserId, setDeletingUserId] = useState("");
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [teams, setTeams] = useState<TeamRow[]>([]);
   const [tasksForStats, setTasksForStats] = useState<TaskStatsRow[]>([]);
   const [selectedStatsUserId, setSelectedStatsUserId] = useState("");
   const [statsPeriod, setStatsPeriod] = useState<"all" | "7d" | "30d" | "custom">("30d");
@@ -79,9 +97,34 @@ export default function UsersPage() {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [selectedUserUpdates, setSelectedUserUpdates] = useState<TaskUpdateRow[]>([]);
-  const [userDrafts, setUserDrafts] = useState<
-    Record<string, { fullName: string; role: UserRow["role"]; specialty: LeadSpecialty | ""; isActive: boolean; password: string }>
-  >({});
+  const [newTeamName, setNewTeamName] = useState("");
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [deletingTeamId, setDeletingTeamId] = useState("");
+  const [userDrafts, setUserDrafts] = useState<Record<string, UserDraft>>({});
+
+  const toDraftSpecialties = (user: UserRow) => {
+    const normalized = Array.isArray(user.specialties)
+      ? user.specialties.filter((specialty): specialty is LeadSpecialty =>
+          (LEAD_SPECIALTIES as readonly string[]).includes(specialty),
+        )
+      : [];
+
+    if (normalized.length > 0) {
+      return normalized;
+    }
+
+    return user.specialty ? [user.specialty] : [];
+  };
+
+  const buildUserDraft = (user: UserRow): UserDraft => ({
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+    specialties: toDraftSpecialties(user),
+    teamIds: user.teamIds ?? [],
+    isActive: user.isActive,
+    password: "",
+  });
 
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -101,22 +144,23 @@ export default function UsersPage() {
       return;
     }
 
-    setEmail(getStoredEmail());
     setRole(savedRole);
 
     const loadUsers = async () => {
       try {
         const headers = authHeaders();
-        const response = await axios.get(`${API_URL}/users`, {
-          headers,
-        });
+        const [usersResponse, taskResponse, teamsResponse] = await Promise.all([
+          axios.get(`${API_URL}/users`, { headers }),
+          axios.get(`${API_URL}/tasks`, { headers }),
+          axios.get(`${API_URL}/teams`, { headers }),
+        ]);
 
-        const taskResponse = await axios.get(`${API_URL}/tasks`, { headers });
         const loadedTasks = taskResponse.data as TaskStatsRow[];
-
-        const loadedUsers = response.data as UserRow[];
+        const loadedUsers = usersResponse.data as UserRow[];
+        const loadedTeams = teamsResponse.data as TeamRow[];
         setTasksForStats(loadedTasks);
         setUsers(loadedUsers);
+        setTeams(loadedTeams);
         setSelectedStatsUserId((current) => {
           if (current && loadedUsers.some((user) => user.id === current)) {
             return current;
@@ -129,13 +173,7 @@ export default function UsersPage() {
           Object.fromEntries(
             loadedUsers.map((user) => [
               user.id,
-              {
-                fullName: user.fullName,
-                role: user.role,
-                specialty: user.specialty ?? "",
-                isActive: user.isActive,
-                password: "",
-              },
+              buildUserDraft(user),
             ]),
           ),
         );
@@ -330,13 +368,16 @@ export default function UsersPage() {
       return;
     }
 
-    if (draft.role === "lead" && !draft.specialty) {
-      setError("Para asignar rol de lider debes seleccionar una especialidad.");
+    if (draft.role === "lead" && draft.specialties.length === 0) {
+      setError("Para asignar rol de lider debes seleccionar al menos una especialidad.");
       setInfo("");
       return;
     }
 
     const sensitiveChanges: string[] = [];
+    if (draft.email !== user.email) {
+      sensitiveChanges.push("cambio de correo");
+    }
     if (draft.role !== user.role) {
       sensitiveChanges.push("cambio de rol");
     }
@@ -361,9 +402,11 @@ export default function UsersPage() {
     setSavingUserId(userId);
 
     const payload = {
+      email: draft.email,
       fullName: draft.fullName,
       role: draft.role,
-      specialty: draft.role === "lead" ? draft.specialty || undefined : null,
+      specialties: draft.role === "lead" ? draft.specialties : null,
+      teamIds: draft.teamIds,
       isActive: draft.isActive,
       password: draft.password.trim().length > 0 ? draft.password : undefined,
     };
@@ -378,16 +421,13 @@ export default function UsersPage() {
       setUserDrafts((current) => ({
         ...current,
         [userId]: {
-          ...(current[userId] ?? {
-            fullName: updated.fullName,
-            role: updated.role,
-            specialty: updated.specialty ?? "",
-            isActive: updated.isActive,
-            password: "",
-          }),
+          ...(current[userId] ?? buildUserDraft(updated)),
+          teamIds: updated.teamIds ?? current[userId]?.teamIds ?? [],
           password: "",
         },
       }));
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
       setInfo(`Usuario ${updated.email} actualizado.`);
     } catch (caughtError) {
       if (axios.isAxiosError(caughtError)) {
@@ -455,6 +495,8 @@ export default function UsersPage() {
         const remaining = users.filter((item) => item.id !== userId && item.role !== "manager");
         return remaining[0]?.id ?? "";
       });
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
       setInfo(`Usuario ${user.email} eliminado.`);
     } catch (caughtError) {
       if (axios.isAxiosError(caughtError)) {
@@ -479,45 +521,108 @@ export default function UsersPage() {
     }
   };
 
+  const onCreateTeam = async () => {
+    const trimmedName = newTeamName.trim();
+    if (!trimmedName) {
+      setError("Escribe un nombre de equipo.");
+      setInfo("");
+      return;
+    }
+
+    setError("");
+    setInfo("");
+    setCreatingTeam(true);
+    try {
+      await axios.post(
+        `${API_URL}/teams`,
+        { name: trimmedName },
+        { headers: authHeaders() },
+      );
+
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
+      setNewTeamName("");
+      setInfo(`Equipo ${trimmedName} creado.`);
+    } catch {
+      setError("No se pudo crear el equipo.");
+    } finally {
+      setCreatingTeam(false);
+    }
+  };
+
+  const onDeleteTeam = async (teamId: string) => {
+    const team = teams.find((item) => item.id === teamId);
+    if (!team) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Vas a eliminar el equipo ${team.name}. Sus membresias tambien se eliminaran. Continuar?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingTeamId(teamId);
+    setError("");
+    setInfo("");
+
+    try {
+      await axios.delete(`${API_URL}/teams/${teamId}`, { headers: authHeaders() });
+      const teamsResponse = await axios.get(`${API_URL}/teams`, { headers: authHeaders() });
+      setTeams(teamsResponse.data as TeamRow[]);
+      setUserDrafts((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([userKey, draft]) => [
+            userKey,
+            {
+              ...draft,
+              teamIds: draft.teamIds.filter((item) => item !== teamId),
+            },
+          ]),
+        ),
+      );
+      setInfo(`Equipo ${team.name} eliminado.`);
+    } catch {
+      setError("No se pudo eliminar el equipo.");
+    } finally {
+      setDeletingTeamId("");
+    }
+  };
+
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-      <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10 lg:px-10">
+      <section className="glass-panel fade-up p-6 md:p-8 lg:p-10">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">Usuarios</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesion activa como ${email}.` : "Sesion activa."} Aqui puedes ver los usuarios creados y filtrar por rol.
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+              Gestión de equipo: roles, especialidades, equipos y estadísticas de actividad.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
+          {role === "manager" ? (
             <Link
-              href="/dashboard"
-              className="ui-btn ui-btn-secondary"
+              href="/capture"
+              className="ui-btn ui-btn-primary"
             >
-              Volver al panel
+              Crear usuario
             </Link>
-            {role === "manager" ? (
-              <Link
-                href="/capture"
-                className="ui-btn ui-btn-primary"
-              >
-                Crear usuario
-              </Link>
-            ) : null}
-          </div>
+          ) : null}
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-3">
+        <div className="mt-6 grid gap-3 md:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <input
+            name="users-search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className="ui-control"
             placeholder="Buscar por nombre o correo"
           />
           <select
+            name="users-role-filter"
             value={roleFilter}
             onChange={(event) => setRoleFilter(event.target.value)}
             className="ui-control"
@@ -528,6 +633,7 @@ export default function UsersPage() {
             <option value="worker">colaborador</option>
           </select>
           <select
+            name="users-status-filter"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
             className="ui-control"
@@ -550,20 +656,75 @@ export default function UsersPage() {
         ) : null}
       </section>
 
+      {isManager ? (
+        <section className="kpi-card fade-up p-6 md:p-8">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Equipos</h2>
+              <p className="mt-1 text-sm text-[var(--ink-muted)]">
+                Crea equipos y luego asigna miembros desde la tabla de usuarios.
+              </p>
+            </div>
+            <div className="flex w-full gap-2 xl:w-auto">
+              <input
+                name="users-new-team-name"
+                value={newTeamName}
+                onChange={(event) => setNewTeamName(event.target.value)}
+                className="ui-control w-full xl:w-80"
+                placeholder="Nombre del equipo"
+              />
+              <button
+                onClick={() => void onCreateTeam()}
+                disabled={creatingTeam}
+                className="ui-btn ui-btn-primary disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {creatingTeam ? "Creando..." : "Crear"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {teams.length === 0 ? (
+              <p className="text-sm text-[var(--ink-muted)]">No hay equipos creados.</p>
+            ) : (
+              teams.map((team) => (
+                <div
+                  key={team.id}
+                  className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-white px-3 py-2"
+                >
+                  <span className="text-sm font-semibold">{team.name}</span>
+                  <span className="text-xs text-[var(--ink-muted)]">
+                    {team.memberCount ?? 0} miembros
+                  </span>
+                  <button
+                    onClick={() => void onDeleteTeam(team.id)}
+                    disabled={deletingTeamId === team.id}
+                    className="ui-btn ui-btn-danger ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {deletingTeamId === team.id ? "..." : "Eliminar"}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      ) : null}
+
       {role === "manager" ? (
-      <section className="kpi-card fade-up p-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <section className="kpi-card fade-up p-6 md:p-8">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <h2 className="text-lg font-semibold">Estadisticas por usuario</h2>
             <p className="mt-1 text-sm text-[var(--ink-muted)]">
               Selecciona un lider o colaborador para ver actividades asignadas y su resumen operativo.
             </p>
           </div>
-          <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
+          <div className="grid w-full gap-3 md:grid-cols-2 xl:w-auto xl:grid-cols-[minmax(0,20rem)_minmax(0,10rem)]">
             <select
+              name="users-stats-user"
               value={selectedStatsUserId}
               onChange={(event) => setSelectedStatsUserId(event.target.value)}
-              className="ui-control w-full md:w-[340px]"
+              className="ui-control w-full"
             >
               <option value="">Selecciona un usuario</option>
               {users
@@ -575,9 +736,10 @@ export default function UsersPage() {
                 ))}
             </select>
             <select
+              name="users-stats-period"
               value={statsPeriod}
               onChange={(event) => setStatsPeriod(event.target.value as "all" | "7d" | "30d" | "custom")}
-              className="ui-control w-full md:w-[160px]"
+              className="ui-control w-full"
             >
               <option value="all">Todo</option>
               <option value="7d">Ultimos 7 dias</option>
@@ -588,14 +750,16 @@ export default function UsersPage() {
         </div>
 
         {statsPeriod === "custom" ? (
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:max-w-2xl">
             <input
+              name="users-stats-from"
               type="date"
               className="ui-control"
               value={statsFrom}
               onChange={(event) => setStatsFrom(event.target.value)}
             />
             <input
+              name="users-stats-to"
               type="date"
               className="ui-control"
               value={statsTo}
@@ -708,6 +872,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3 font-semibold">Nombre</th>
                   <th className="px-4 py-3 font-semibold">Correo</th>
                   <th className="px-4 py-3 font-semibold">Rol</th>
+                  <th className="px-4 py-3 font-semibold">Equipos</th>
                   <th className="px-4 py-3 font-semibold">Estado</th>
                   <th className="px-4 py-3 font-semibold">Contrasena</th>
                   <th className="px-4 py-3 font-semibold">Creado</th>
@@ -720,18 +885,13 @@ export default function UsersPage() {
                     <td className="px-4 py-3">
                       {isManager ? (
                         <input
+                          name={`user-fullname-${user.id}`}
                           value={userDrafts[user.id]?.fullName ?? user.fullName}
                           onChange={(event) =>
                             setUserDrafts((current) => ({
                               ...current,
                               [user.id]: {
-                                ...(current[user.id] ?? {
-                                  fullName: user.fullName,
-                                  role: user.role,
-                                  specialty: user.specialty ?? "",
-                                  isActive: user.isActive,
-                                  password: "",
-                                }),
+                                ...(current[user.id] ?? buildUserDraft(user)),
                                 fullName: event.target.value,
                               },
                             }))
@@ -742,28 +902,43 @@ export default function UsersPage() {
                         <span className="font-semibold text-[var(--foreground)]">{user.fullName}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">{user.email}</td>
+                    <td className="px-4 py-3">
+                      {isManager ? (
+                        <input
+                          name={`user-email-${user.id}`}
+                          type="email"
+                          value={userDrafts[user.id]?.email ?? user.email}
+                          onChange={(event) =>
+                            setUserDrafts((current) => ({
+                              ...current,
+                              [user.id]: {
+                                ...(current[user.id] ?? buildUserDraft(user)),
+                                email: event.target.value,
+                              },
+                            }))
+                          }
+                          className="w-full min-w-[220px] rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                        />
+                      ) : (
+                        <span className="text-sm text-[var(--foreground)]">{user.email}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {isManager ? (
                         <div className="space-y-2">
                           <select
+                            name={`user-role-${user.id}`}
                             value={userDrafts[user.id]?.role ?? user.role}
                             onChange={(event) =>
                               setUserDrafts((current) => ({
                                 ...current,
                                 [user.id]: {
-                                  ...(current[user.id] ?? {
-                                    fullName: user.fullName,
-                                    role: user.role,
-                                    specialty: user.specialty ?? "",
-                                    isActive: user.isActive,
-                                    password: "",
-                                  }),
+                                  ...(current[user.id] ?? buildUserDraft(user)),
                                   role: event.target.value as UserRow["role"],
-                                  specialty:
+                                  specialties:
                                     event.target.value === "lead"
-                                      ? (current[user.id]?.specialty ?? "")
-                                      : "",
+                                      ? (current[user.id]?.specialties ?? toDraftSpecialties(user))
+                                      : [],
                                 },
                               }))
                             }
@@ -774,32 +949,55 @@ export default function UsersPage() {
                             <option value="worker">{roleLabels.worker}</option>
                           </select>
                           {(userDrafts[user.id]?.role ?? user.role) === "lead" ? (
-                            <select
-                              value={userDrafts[user.id]?.specialty ?? user.specialty ?? ""}
-                              onChange={(event) =>
-                                setUserDrafts((current) => ({
-                                  ...current,
-                                  [user.id]: {
-                                    ...(current[user.id] ?? {
-                                      fullName: user.fullName,
-                                      role: user.role,
-                                      specialty: user.specialty ?? "",
-                                      isActive: user.isActive,
-                                      password: "",
-                                    }),
-                                    specialty: event.target.value as LeadSpecialty,
-                                  },
-                                }))
-                              }
-                              className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
-                            >
-                              <option value="">Especialidad</option>
-                              {LEAD_SPECIALTIES.map((specialty) => (
-                                <option key={specialty} value={specialty}>
-                                  {specialtyLabels[specialty]}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs">
+                              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                                Especialidades (max 2)
+                              </p>
+                              <div className="grid gap-1">
+                                {LEAD_SPECIALTIES.map((specialty) => {
+                                  const selectedSpecialties = userDrafts[user.id]?.specialties ?? toDraftSpecialties(user);
+                                  const checked = selectedSpecialties.includes(specialty);
+
+                                  return (
+                                    <label key={specialty} className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(event) => {
+                                          setUserDrafts((current) => {
+                                            const base = current[user.id] ?? buildUserDraft(user);
+                                            const currentSpecialties = base.specialties;
+
+                                            if (event.target.checked) {
+                                              if (currentSpecialties.length >= 2) {
+                                                return current;
+                                              }
+
+                                              return {
+                                                ...current,
+                                                [user.id]: {
+                                                  ...base,
+                                                  specialties: [...currentSpecialties, specialty],
+                                                },
+                                              };
+                                            }
+
+                                            return {
+                                              ...current,
+                                              [user.id]: {
+                                                ...base,
+                                                specialties: currentSpecialties.filter((item) => item !== specialty),
+                                              },
+                                            };
+                                          });
+                                        }}
+                                      />
+                                      {specialtyLabels[specialty]}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           ) : null}
                         </div>
                       ) : (
@@ -810,19 +1008,74 @@ export default function UsersPage() {
                     </td>
                     <td className="px-4 py-3">
                       {isManager ? (
+                        <div className="space-y-1">
+                          {teams.length === 0 ? (
+                            <span className="text-xs text-[var(--ink-muted)]">Sin equipos</span>
+                          ) : (
+                            teams.map((team) => {
+                              const checked = (userDrafts[user.id]?.teamIds ?? user.teamIds ?? []).includes(team.id);
+
+                              return (
+                                <label key={team.id} className="flex items-center gap-2 text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) =>
+                                      setUserDrafts((current) => {
+                                        const base = current[user.id] ?? buildUserDraft(user);
+                                        const currentTeamIds = base.teamIds;
+
+                                        if (event.target.checked) {
+                                          if (currentTeamIds.includes(team.id)) {
+                                            return current;
+                                          }
+
+                                          return {
+                                            ...current,
+                                            [user.id]: {
+                                              ...base,
+                                              teamIds: [...currentTeamIds, team.id],
+                                            },
+                                          };
+                                        }
+
+                                        return {
+                                          ...current,
+                                          [user.id]: {
+                                            ...base,
+                                            teamIds: currentTeamIds.filter((item) => item !== team.id),
+                                          },
+                                        };
+                                      })
+                                    }
+                                  />
+                                  {team.name}
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-[var(--ink-muted)]">
+                          {(user.teamIds ?? []).length > 0
+                            ? teams
+                                .filter((team) => (user.teamIds ?? []).includes(team.id))
+                                .map((team) => team.name)
+                                .join(", ")
+                            : "Sin equipo"}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isManager ? (
                         <select
+                          name={`user-status-${user.id}`}
                           value={(userDrafts[user.id]?.isActive ?? user.isActive) ? "active" : "inactive"}
                           onChange={(event) =>
                             setUserDrafts((current) => ({
                               ...current,
                               [user.id]: {
-                                ...(current[user.id] ?? {
-                                  fullName: user.fullName,
-                                  role: user.role,
-                                  specialty: user.specialty ?? "",
-                                  isActive: user.isActive,
-                                  password: "",
-                                }),
+                                ...(current[user.id] ?? buildUserDraft(user)),
                                 isActive: event.target.value === "active",
                               },
                             }))
@@ -841,19 +1094,14 @@ export default function UsersPage() {
                     <td className="px-4 py-3">
                       {isManager ? (
                         <input
+                          name={`user-password-${user.id}`}
                           type="password"
                           value={userDrafts[user.id]?.password ?? ""}
                           onChange={(event) =>
                             setUserDrafts((current) => ({
                               ...current,
                               [user.id]: {
-                                ...(current[user.id] ?? {
-                                  fullName: user.fullName,
-                                  role: user.role,
-                                  specialty: user.specialty ?? "",
-                                  isActive: user.isActive,
-                                  password: "",
-                                }),
+                                ...(current[user.id] ?? buildUserDraft(user)),
                                 password: event.target.value,
                               },
                             }))

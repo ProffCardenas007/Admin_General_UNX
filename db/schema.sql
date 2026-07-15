@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name VARCHAR(160) NOT NULL UNIQUE,
     client_name VARCHAR(160),
     owner_team_id UUID REFERENCES teams(id),
+    created_by UUID REFERENCES users(id),
     scope project_scope,
     status project_status NOT NULL DEFAULT 'planned',
     start_date DATE,
@@ -100,6 +101,8 @@ CREATE TABLE IF NOT EXISTS projects (
 
 ALTER TABLE IF EXISTS projects
     ADD COLUMN IF NOT EXISTS scope project_scope;
+ALTER TABLE IF EXISTS projects
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
 
 DO $$
 BEGIN
@@ -125,15 +128,21 @@ $$;
 
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_id UUID,
+    chain_order INT,
     code VARCHAR(60) NOT NULL,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
     activity_type task_activity_type NOT NULL DEFAULT 'creacion',
     title VARCHAR(220) NOT NULL,
     description TEXT,
     assignee_id UUID REFERENCES users(id),
+    created_by UUID REFERENCES users(id),
     status task_status NOT NULL DEFAULT 'todo',
     priority task_priority NOT NULL DEFAULT 'medium',
     due_date DATE,
+    activated_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
     estimated_hours NUMERIC(8, 2) DEFAULT 0 CHECK (estimated_hours >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -142,6 +151,18 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ALTER TABLE IF EXISTS tasks
     ADD COLUMN IF NOT EXISTS activity_type task_activity_type NOT NULL DEFAULT 'creacion';
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS chain_id UUID;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS chain_order INT;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS task_updates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,6 +185,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     message TEXT NOT NULL,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_role user_role NOT NULL,
+    actor_email VARCHAR(180),
+    entity_type VARCHAR(40) NOT NULL,
+    entity_id UUID NOT NULL,
+    entity_label VARCHAR(220),
+    action VARCHAR(80) NOT NULL,
+    changes_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -202,9 +236,11 @@ CREATE TABLE IF NOT EXISTS kpi_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_chain_order ON tasks(chain_id, chain_order);
 CREATE INDEX IF NOT EXISTS idx_task_updates_task_date ON task_updates(task_id, update_date DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_excel_imports_user_date ON excel_imports(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kpi_project_date ON kpi_snapshots(project_id, snapshot_date DESC);
 

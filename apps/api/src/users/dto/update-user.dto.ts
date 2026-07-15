@@ -1,6 +1,10 @@
 import {
+  ArrayMaxSize,
+  ArrayUnique,
   IsBoolean,
+  IsEmail,
   IsIn,
+  IsArray,
   IsOptional,
   IsString,
   MaxLength,
@@ -11,6 +15,10 @@ import { LEAD_SPECIALTY_INPUTS } from '../../common/specialties';
 
 export class UpdateUserDto {
   @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(120)
   fullName?: string;
@@ -20,9 +28,27 @@ export class UpdateUserDto {
   role?: 'manager' | 'lead' | 'worker';
 
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   @IsIn(LEAD_SPECIALTY_INPUTS)
   specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number] | null;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (!Array.isArray(value)) {
+      return value;
+    }
+
+    return value.map((item) =>
+      typeof item === 'string' ? item.trim().toLowerCase() : item,
+    );
+  })
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(2)
+  @IsIn(LEAD_SPECIALTY_INPUTS, { each: true })
+  specialties?: Array<(typeof LEAD_SPECIALTY_INPUTS)[number]> | null;
 
   @IsOptional()
   @IsBoolean()
@@ -33,4 +59,14 @@ export class UpdateUserDto {
   @MinLength(6)
   @MaxLength(120)
   password?: string;
+
+  @IsOptional()
+  @IsString()
+  teamId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  teamIds?: string[] | null;
 }
