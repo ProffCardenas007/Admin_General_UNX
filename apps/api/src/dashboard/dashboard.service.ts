@@ -37,7 +37,7 @@ export class DashboardService {
           `Dashboard schema mismatch during ${operation}: ${dbError.message ?? 'missing column'}`,
         );
         throw new ServiceUnavailableException(
-          'Database schema is outdated. Run "npm run migrate:created-by:ownership" in apps/api and retry.',
+          'Database schema is outdated. Run "npm run migrate:created-by:ownership", "npm run migrate:task-parent-links", and "npm run migrate:task-chains" in apps/api and retry.',
         );
       }
     }
