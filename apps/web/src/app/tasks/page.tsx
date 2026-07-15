@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
@@ -84,6 +84,7 @@ const roleLabels: Record<string, string> = {
 
 export default function TasksPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
@@ -227,9 +228,8 @@ export default function TasksPage() {
   }, [role, currentUserId]);
 
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    const projectIdFromQuery = query.get("projectId") ?? "";
-    const showDoneFromQuery = query.get("showDone") === "1";
+    const projectIdFromQuery = searchParams.get("projectId") ?? "";
+    const showDoneFromQuery = searchParams.get("showDone") === "1";
 
     if (projectIdFromQuery.length > 0) {
       setProjectFilter(projectIdFromQuery);
@@ -238,7 +238,7 @@ export default function TasksPage() {
     if (showDoneFromQuery) {
       setShowDoneTasks(true);
     }
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     if (!centerNoticeMessage) {
