@@ -11,6 +11,8 @@ type TaskRow = {
   id: string;
   projectId: string;
   assigneeId?: string;
+  status?: "todo" | "doing" | "blocked" | "done";
+  dueDate?: string;
   estimatedHours?: string;
   createdAt?: string;
 };
@@ -250,7 +252,11 @@ export default function QuincenasPage() {
         return false;
       }
 
-      const dateKey = parseTaskDateKey(task.createdAt);
+      if (task.status !== "done") {
+        return false;
+      }
+
+      const dateKey = parseTaskDateKey(task.dueDate);
       if (!dateKey) {
         return false;
       }
@@ -466,7 +472,7 @@ export default function QuincenasPage() {
       <article className="kpi-card p-5">
         <h2 className="text-lg font-semibold">Horas por proyecto (quincena)</h2>
         <p className="mt-1 text-sm text-[var(--ink-muted)]">
-          Total del equipo en la quincena: {totalProjectHours.toFixed(2)} h
+          Total del equipo en la quincena (solo tareas finalizadas por fecha de entrega): {totalProjectHours.toFixed(2)} h
         </p>
 
         <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
