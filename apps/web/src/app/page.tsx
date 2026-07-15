@@ -8,11 +8,13 @@ const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 const DEFAULT_LOGIN_EMAIL =
   process.env.NEXT_PUBLIC_DEFAULT_LOGIN_EMAIL ?? "gerente@unx.mx";
+const DEFAULT_LOGIN_PASSWORD =
+  process.env.NEXT_PUBLIC_DEFAULT_LOGIN_PASSWORD ?? "Nihon007$";
 
 export default function Home() {
   const router = useRouter();
   const [email, setEmail] = useState(DEFAULT_LOGIN_EMAIL);
-  const [password, setPassword] = useState("123456");
+  const [password, setPassword] = useState(DEFAULT_LOGIN_PASSWORD);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -107,3 +109,4 @@ export default function Home() {
     </div>
   );
 }
+
