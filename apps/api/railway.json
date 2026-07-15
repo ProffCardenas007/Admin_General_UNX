@@ -6,7 +6,7 @@
   },
   "deploy": {
     "runtime": "V2",
-    "startCommand": "node scripts/upsert-manager.js && node dist/main.js",
+    "startCommand": "npm run upsert:manager && npm run start:prod",
     "numReplicas": 1,
     "sleepApplication": false,
     "useLegacyStacker": false,
