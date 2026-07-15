@@ -470,21 +470,22 @@ export default function CapturePage() {
   };
 
   const addTaskChainStep = () => {
-    const newStep: TaskChainStepDraft = {
-      stepKey: crypto.randomUUID(),
-      activityType: "revision",
-      title: "",
-      description: "",
-      assigneeId: users[0]?.id ?? "",
-      status: "blocked",
-      priority: "medium",
-      dueDate: "",
-      estimatedHours: "",
-    };
-
     setTaskChainForm((current) => ({
       ...current,
-      steps: [...current.steps, newStep].map((step, index) => ({
+      steps: [
+        ...current.steps,
+        {
+          stepKey: crypto.randomUUID(),
+          activityType: "revision",
+          title: "",
+          description: "",
+          assigneeId: users[0]?.id ?? "",
+          status: "blocked",
+          priority: "medium",
+          dueDate: "",
+          estimatedHours: "",
+        },
+      ].map((step, index) => ({
         ...step,
         status: index === 0 ? "todo" : "blocked",
       })),
