@@ -6,6 +6,7 @@
   },
   "deploy": {
     "runtime": "V2",
+    "startCommand": "node scripts/upsert-manager.js && node scripts/migrate-created-by-ownership.js && node scripts/migrate-task-parent-links.js && node scripts/migrate-task-chains.js && node dist/main.js",
     "numReplicas": 1,
     "sleepApplication": false,
     "useLegacyStacker": false,
