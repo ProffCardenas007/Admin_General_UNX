@@ -5,11 +5,8 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableCors({
+    // JWT is sent in Authorization header (no cookies), so wildcard origin is safe here.
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204,
   });
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
