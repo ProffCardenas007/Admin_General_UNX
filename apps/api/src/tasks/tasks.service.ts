@@ -9,6 +9,7 @@ import {
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, QueryFailedError, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { NotificationEntity } from '../database/entities/notification.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
@@ -27,6 +28,7 @@ export class TasksService {
   private readonly logger = new Logger(TasksService.name);
 
   constructor(
+    private readonly dataSource: DataSource,
     @InjectRepository(TaskEntity)
     private readonly tasksRepository: Repository<TaskEntity>,
     @InjectRepository(ProjectEntity)
@@ -44,6 +46,24 @@ export class TasksService {
     @InjectRepository(TeamMemberEntity)
     private readonly teamMembersRepository: Repository<TeamMemberEntity>,
   ) {}
+
+  private async ensureTaskActivityTypeEnumReady() {
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_type t
+          JOIN pg_enum e ON t.oid = e.enumtypid
+          WHERE t.typname = 'task_activity_type'
+            AND e.enumlabel = 'administrativo'
+        ) THEN
+          ALTER TYPE task_activity_type ADD VALUE 'administrativo';
+        END IF;
+      END
+      $$;
+    `);
+  }
 
   private async recordManagerAudit(input: {
     actorId: string;
@@ -253,6 +273,8 @@ export class TasksService {
     },
     maxAttempts = 5,
   ) {
+    await this.ensureTaskActivityTypeEnumReady();
+
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const generatedCode = await this.buildGeneratedCode(
         input.projectId,
