@@ -41,6 +41,20 @@ const IconCalendar = () => (
   </svg>
 );
 
+const IconClassSchedule = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+    <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+    <path d="M1.5 6h13M5.8 2.5v11M9.2 2.5v11M12.6 2.5v11" strokeLinecap="round" />
+  </svg>
+);
+
+const IconClassAvailability = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+    <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+    <path d="M1.5 6h13M5.5 9h1.5m2.2 0h1.5m2.2 0h1.5" strokeLinecap="round" />
+  </svg>
+);
+
 const IconBell = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
     <path d="M8 1.5a.75.75 0 01.75.75v.38A5.25 5.25 0 0113.25 7.5v2.44l.94 1.76a.75.75 0 01-.66 1.05H2.47a.75.75 0 01-.66-1.05L2.75 9.94V7.5A5.25 5.25 0 017.25 2.63v-.38A.75.75 0 018 1.5zM6.25 13.5a1.75 1.75 0 003.5 0h-3.5z" />
@@ -74,6 +88,15 @@ const IconQuincena = () => (
   </svg>
 );
 
+const IconGrid = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+    <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.2" />
+    <rect x="9" y="1.5" width="5.5" height="5.5" rx="1.2" />
+    <rect x="1.5" y="9" width="5.5" height="5.5" rx="1.2" />
+    <rect x="9" y="9" width="5.5" height="5.5" rx="1.2" />
+  </svg>
+);
+
 const IconLogout = () => (
   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
     <path d="M10.5 5l3 3-3 3M13.5 8H5.5M7.5 2.5H3.5A1.5 1.5 0 002 4v8a1.5 1.5 0 001.5 1.5h4" strokeLinecap="round" strokeLinejoin="round" />
@@ -104,11 +127,15 @@ const MAIN_NAV: NavItem[] = [
   { label: "Tareas",          href: "/tasks",           icon: <IconTasks /> },
   { label: "Proyectos",       href: "/projects",        icon: <IconProjects />,   workerHidden: true },
   { label: "Calendario",      href: "/calendar",        icon: <IconCalendar /> },
+  { label: "Clases", href: "/class-schedule", icon: <IconClassSchedule /> },
   { label: "Notificaciones",  href: "/notifications",   icon: <IconBell /> },
 ];
 
 const MANAGER_NAV: NavItem[] = [
   { label: "Usuarios",  href: "/users",   icon: <IconUsers /> },
+  { label: "Programación de clases", href: "/class-availability", icon: <IconClassAvailability /> },
+  { label: "Cursos y sesiones", href: "/class-planning", icon: <IconClassSchedule /> },
+  { label: "Grilla de sesiones", href: "/class-grid",     icon: <IconGrid /> },
   { label: "Reporte", href: "/quincenas", icon: <IconQuincena /> },
   { label: "Historial", href: "/history", icon: <IconHistory /> },
 ];
