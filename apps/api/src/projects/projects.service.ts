@@ -163,16 +163,6 @@ export class ProjectsService {
   ) {
     const normalizedCode = dto.code.trim();
     const normalizedName = dto.name.trim();
-
-    const existingByName = await this.projectsRepository
-      .createQueryBuilder('project')
-      .where('LOWER(project.name) = LOWER(:name)', { name: normalizedName })
-      .getOne();
-
-    if (existingByName) {
-      throw new ConflictException('Project name already exists');
-    }
-
     const resolvedScope = dto.scope ?? null;
     const leadSpecialties = await this.resolveLeadSpecialties(actor);
 
@@ -196,6 +186,20 @@ export class ProjectsService {
       throw new BadRequestException('Project scope is required');
     }
 
+    const existingByNameAndScope = await this.projectsRepository
+      .createQueryBuilder('project')
+      .where('LOWER(TRIM(project.name)) = LOWER(TRIM(:name))', {
+        name: normalizedName,
+      })
+      .andWhere('project.scope = :scope', { scope: resolvedScope })
+      .getOne();
+
+    if (existingByNameAndScope) {
+      throw new ConflictException(
+        'Project name already exists in this specialty',
+      );
+    }
+
     const project = this.projectsRepository.create({
       ...dto,
       code: normalizedCode,
@@ -217,7 +221,9 @@ export class ProjectsService {
 
         if (dbError.code === '23505') {
           if (dbError.constraint?.includes('projects_name')) {
-            throw new ConflictException('Project name already exists');
+            throw new ConflictException(
+              'Project name already exists in this specialty',
+            );
           }
 
           if (dbError.constraint?.includes('projects_code')) {

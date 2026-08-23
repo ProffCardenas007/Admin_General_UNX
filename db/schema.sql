@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS team_members (
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(40) NOT NULL,
-    name VARCHAR(160) NOT NULL UNIQUE,
+    name VARCHAR(160) NOT NULL,
     client_name VARCHAR(160),
     owner_team_id UUID REFERENCES teams(id),
     created_by UUID REFERENCES users(id),
@@ -121,16 +121,17 @@ BEGIN
         ALTER TABLE projects DROP CONSTRAINT projects_code_key;
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'projects_name_key'
-          AND conrelid = 'projects'::regclass
-    ) THEN
-        ALTER TABLE projects ADD CONSTRAINT projects_name_key UNIQUE (name);
-    END IF;
+    ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key;
 END
 $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS projects_name_scope_key
+    ON projects (LOWER(TRIM(name)), scope)
+    WHERE scope IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS projects_name_without_scope_key
+    ON projects (LOWER(TRIM(name)))
+    WHERE scope IS NULL;
 
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

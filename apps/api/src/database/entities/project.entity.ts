@@ -22,7 +22,7 @@ export class ProjectEntity {
   @Column({ type: 'varchar', length: 40 })
   code: string;
 
-  @Column({ type: 'varchar', length: 160, unique: true })
+  @Column({ type: 'varchar', length: 160 })
   name: string;
 
   @Column({ name: 'client_name', type: 'varchar', length: 160, nullable: true })

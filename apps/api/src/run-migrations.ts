@@ -3,6 +3,7 @@ import { join } from 'path';
 type MigrationModule = { run: () => Promise<void> };
 
 const MIGRATION_SCRIPTS = [
+  'migrate-project-uniqueness.js',
   'migrate-task-activity.js',
   'migrate-task-timer.js',
   'migrate-class-schedule.js',
