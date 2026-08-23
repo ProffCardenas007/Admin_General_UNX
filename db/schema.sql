@@ -1,5 +1,11 @@
--- Project management system (MVP) schema
+-- Project management + class planning system schema
 -- PostgreSQL 14+
+--
+-- This file is a reference snapshot for bootstrapping a fresh database.
+-- The actual source of truth applied on every deploy is the idempotent
+-- script chain in apps/api/scripts/migrate-*.js (see "start:prod" in
+-- apps/api/package.json). Keep this file in sync whenever a migrate-*.js
+-- script changes the schema.
 
 BEGIN;
 
@@ -44,7 +50,7 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_activity_type') THEN
-        CREATE TYPE task_activity_type AS ENUM ('revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma');
+        CREATE TYPE task_activity_type AS ENUM ('revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma', 'administrativo');
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'import_status') THEN
@@ -90,6 +96,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name VARCHAR(160) NOT NULL UNIQUE,
     client_name VARCHAR(160),
     owner_team_id UUID REFERENCES teams(id),
+    created_by UUID REFERENCES users(id),
     scope project_scope,
     status project_status NOT NULL DEFAULT 'planned',
     start_date DATE,
@@ -100,6 +107,8 @@ CREATE TABLE IF NOT EXISTS projects (
 
 ALTER TABLE IF EXISTS projects
     ADD COLUMN IF NOT EXISTS scope project_scope;
+ALTER TABLE IF EXISTS projects
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
 
 DO $$
 BEGIN
@@ -125,15 +134,21 @@ $$;
 
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_id UUID,
+    chain_order INT,
     code VARCHAR(60) NOT NULL,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
     activity_type task_activity_type NOT NULL DEFAULT 'creacion',
     title VARCHAR(220) NOT NULL,
     description TEXT,
     assignee_id UUID REFERENCES users(id),
+    created_by UUID REFERENCES users(id),
     status task_status NOT NULL DEFAULT 'todo',
     priority task_priority NOT NULL DEFAULT 'medium',
     due_date DATE,
+    activated_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
     estimated_hours NUMERIC(8, 2) DEFAULT 0 CHECK (estimated_hours >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -142,6 +157,18 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ALTER TABLE IF EXISTS tasks
     ADD COLUMN IF NOT EXISTS activity_type task_activity_type NOT NULL DEFAULT 'creacion';
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS chain_id UUID;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS chain_order INT;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS task_updates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,6 +191,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     message TEXT NOT NULL,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_role user_role NOT NULL,
+    actor_email VARCHAR(180),
+    entity_type VARCHAR(40) NOT NULL,
+    entity_id UUID NOT NULL,
+    entity_label VARCHAR(220),
+    action VARCHAR(80) NOT NULL,
+    changes_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -202,11 +242,147 @@ CREATE TABLE IF NOT EXISTS kpi_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_chain_order ON tasks(chain_id, chain_order);
 CREATE INDEX IF NOT EXISTS idx_task_updates_task_date ON task_updates(task_id, update_date DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_excel_imports_user_date ON excel_imports(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kpi_project_date ON kpi_snapshots(project_id, snapshot_date DESC);
+
+-- Task timer support (paused status + active/paused time tracking)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_type t
+        JOIN pg_enum e ON t.oid = e.enumtypid
+        WHERE t.typname = 'task_status'
+          AND e.enumlabel = 'paused'
+    ) THEN
+        ALTER TYPE task_status ADD VALUE 'paused';
+    END IF;
+END
+$$;
+
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS active_seconds INT NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS timer_started_at TIMESTAMPTZ;
+
+-- Lead multi-specialty support
+ALTER TABLE IF EXISTS users
+    ADD COLUMN IF NOT EXISTS specialties lead_specialty[];
+
+-- Subjects a user (teacher) is qualified to teach
+ALTER TABLE IF EXISTS users
+    ADD COLUMN IF NOT EXISTS class_subjects VARCHAR(60)[];
+
+-- Class planning: courses, subjects and concrete sessions
+CREATE TABLE IF NOT EXISTS class_courses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(40) NOT NULL,
+    section_code VARCHAR(20),
+    name VARCHAR(160) NOT NULL,
+    modality VARCHAR(20) NOT NULL DEFAULT 'presencial',
+    classroom VARCHAR(40) NOT NULL DEFAULT 'Aula 1',
+    schedule_start_time TIME NOT NULL DEFAULT '08:00',
+    schedule_end_time TIME NOT NULL DEFAULT '10:30',
+    term_start_date DATE,
+    term_end_date DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_class_courses_name_section_code UNIQUE (name, section_code)
+);
+
+CREATE TABLE IF NOT EXISTS class_course_subjects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    course_id UUID NOT NULL REFERENCES class_courses(id) ON DELETE CASCADE,
+    name VARCHAR(140) NOT NULL,
+    teacher_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    display_order INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_class_course_subject_name UNIQUE (course_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS class_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    course_id UUID NOT NULL REFERENCES class_courses(id) ON DELETE CASCADE,
+    subject_id UUID NOT NULL REFERENCES class_course_subjects(id) ON DELETE CASCADE,
+    teacher_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    cover_teacher_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    class_date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    classroom VARCHAR(40) NOT NULL DEFAULT 'Aula 1',
+    notes VARCHAR(260),
+    coverage_note VARCHAR(260),
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_class_sessions_time_range CHECK (start_time < end_time)
+);
+
+CREATE INDEX IF NOT EXISTS idx_class_course_subjects_course_id ON class_course_subjects(course_id);
+CREATE INDEX IF NOT EXISTS idx_class_sessions_course_date ON class_sessions(course_id, class_date);
+CREATE INDEX IF NOT EXISTS idx_class_sessions_teacher_date ON class_sessions(teacher_user_id, class_date);
+CREATE INDEX IF NOT EXISTS idx_class_sessions_cover_teacher_date ON class_sessions(cover_teacher_user_id, class_date);
+
+CREATE OR REPLACE FUNCTION set_timestamp_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_class_courses_updated_at ON class_courses;
+CREATE TRIGGER trg_class_courses_updated_at
+    BEFORE UPDATE ON class_courses
+    FOR EACH ROW
+    EXECUTE FUNCTION set_timestamp_updated_at();
+
+DROP TRIGGER IF EXISTS trg_class_course_subjects_updated_at ON class_course_subjects;
+CREATE TRIGGER trg_class_course_subjects_updated_at
+    BEFORE UPDATE ON class_course_subjects
+    FOR EACH ROW
+    EXECUTE FUNCTION set_timestamp_updated_at();
+
+DROP TRIGGER IF EXISTS trg_class_sessions_updated_at ON class_sessions;
+CREATE TRIGGER trg_class_sessions_updated_at
+    BEFORE UPDATE ON class_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION set_timestamp_updated_at();
+
+-- Teacher weekly availability + incidences (used by class planning conflict checks)
+CREATE TABLE IF NOT EXISTS class_schedule_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    availability JSONB NOT NULL DEFAULT '{}'::jsonb,
+    incidences JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION set_class_schedule_profiles_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_class_schedule_profiles_updated_at ON class_schedule_profiles;
+CREATE TRIGGER trg_class_schedule_profiles_updated_at
+    BEFORE UPDATE ON class_schedule_profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION set_class_schedule_profiles_updated_at();
 
 CREATE OR REPLACE VIEW v_project_progress AS
 SELECT

@@ -1,4 +1,11 @@
-import { IsIn, IsNumber, IsOptional, IsString, Min, Max } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class CreateTaskUpdateDto {
   @IsString()

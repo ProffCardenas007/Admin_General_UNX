@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
+import { API_URL, authHeaders, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type ProjectRow = {
@@ -12,6 +12,7 @@ type ProjectRow = {
   code: string;
   name: string;
   ownerTeamId?: string;
+  createdBy?: string | null;
   scope?: LeadSpecialty | null;
   status: "planned" | "active" | "on_hold" | "done" | "cancelled";
   startDate?: string;
@@ -23,7 +24,7 @@ type TaskRow = {
   id: string;
   code: string;
   projectId: string;
-  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
+  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma" | "administrativo";
   title: string;
   assigneeId?: string;
   status: "todo" | "doing" | "blocked" | "done";
@@ -35,6 +36,13 @@ type UserRow = {
   id: string;
   fullName: string;
   role: "manager" | "lead" | "worker";
+};
+
+type ProjectDraft = {
+  name: string;
+  status: ProjectRow["status"];
+  startDate: string;
+  endDate: string;
 };
 
 const statusLabels: Record<ProjectRow["status"], string> = {
@@ -66,6 +74,7 @@ const activityTypeLabels: Record<TaskRow["activityType"], string> = {
   presentaciones: "presentaciones",
   grabacion: "grabacion",
   plataforma: "plataforma",
+  administrativo: "administrativo",
 };
 
 const roleLabels: Record<UserRow["role"], string> = {
@@ -121,16 +130,19 @@ const getProjectHealth = (project: ProjectRow) => {
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [currentUserId, setCurrentUserId] = useState("");
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [savingProjectId, setSavingProjectId] = useState("");
   const [deletingProjectId, setDeletingProjectId] = useState("");
   const [openedProjectId, setOpenedProjectId] = useState("");
+  const [projectDrafts, setProjectDrafts] = useState<Record<string, ProjectDraft>>({});
+  const canEditProjects = role === "manager" || role === "lead";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -148,8 +160,8 @@ export default function ProjectsPage() {
       return;
     }
 
-    setEmail(getStoredEmail());
     setRole(savedRole);
+    setCurrentUserId(getStoredUserId());
 
     const loadProjects = async () => {
       try {
@@ -179,6 +191,19 @@ export default function ProjectsPage() {
         setProjects(projectsResponse.data as ProjectRow[]);
         setTasks(loadedTasks);
         setUsers(usersResponse.data as UserRow[]);
+        setProjectDrafts(
+          Object.fromEntries(
+            (projectsResponse.data as ProjectRow[]).map((project) => [
+              project.id,
+              {
+                name: project.name,
+                status: project.status,
+                startDate: project.startDate ?? "",
+                endDate: project.endDate ?? "",
+              },
+            ]),
+          ),
+        );
       } catch {
         setError("No se pudo cargar el listado de proyectos.");
       } finally {
@@ -190,12 +215,13 @@ export default function ProjectsPage() {
   }, [router]);
 
   const onDeleteProject = async (projectId: string) => {
-    if (role !== "manager") {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) {
       return;
     }
 
-    const project = projects.find((item) => item.id === projectId);
-    if (!project) {
+    const canDeleteProject = role === "manager" || (role === "lead" && project.createdBy === currentUserId);
+    if (!canDeleteProject) {
       return;
     }
 
@@ -216,9 +242,56 @@ export default function ProjectsPage() {
       setProjects((current) => current.filter((item) => item.id !== projectId));
       setInfo(`Proyecto ${project.code} eliminado.`);
     } catch {
-      setError("No se pudo borrar el proyecto. Esta accion es exclusiva de gerencia.");
+      setError("No se pudo borrar el proyecto. Solo gerencia o el lider creador puede hacerlo.");
     } finally {
       setDeletingProjectId("");
+    }
+  };
+
+  const onSaveProject = async (projectId: string) => {
+    if (!canEditProjects) {
+      return;
+    }
+
+    const project = projects.find((item) => item.id === projectId);
+    const draft = projectDrafts[projectId];
+
+    if (!project || !draft) {
+      return;
+    }
+
+    setError("");
+    setInfo("");
+    setSavingProjectId(projectId);
+
+    try {
+      const response = await axios.patch(
+        `${API_URL}/projects/${projectId}`,
+        {
+          name: draft.name,
+          status: draft.status,
+          startDate: draft.startDate || undefined,
+          endDate: draft.endDate || undefined,
+        },
+        { headers: authHeaders() },
+      );
+
+      const updated = response.data as ProjectRow;
+      setProjects((current) => current.map((item) => (item.id === projectId ? updated : item)));
+      setProjectDrafts((current) => ({
+        ...current,
+        [projectId]: {
+          name: updated.name,
+          status: updated.status,
+          startDate: updated.startDate ?? "",
+          endDate: updated.endDate ?? "",
+        },
+      }));
+      setInfo(`Proyecto ${updated.code} actualizado.`);
+    } catch {
+      setError("No se pudo actualizar el proyecto. Revisa permisos o datos capturados.");
+    } finally {
+      setSavingProjectId("");
     }
   };
 
@@ -259,30 +332,24 @@ export default function ProjectsPage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">Proyectos</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesion activa como ${email}.` : "Sesion activa."} Aqui se visualizan todos los proyectos.
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+              Cartera operativa con estado, avance y semáforo de salud.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/dashboard"
-              className="ui-btn ui-btn-secondary"
-            >
-              Volver al panel
-            </Link>
+          {canEditProjects ? (
             <Link
               href="/capture?mode=project"
               className="ui-btn ui-btn-primary"
             >
               Crear proyecto
             </Link>
-          </div>
+          ) : null}
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -326,8 +393,8 @@ export default function ProjectsPage() {
         ) : filteredProjects.length === 0 ? (
           <p className="ui-empty m-4 px-4 py-3 text-sm">No hay proyectos para esos filtros.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="ui-table min-w-full">
+          <div className="max-w-full overflow-x-auto">
+            <table className="ui-table min-w-full w-full">
               <thead>
                 <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
                   <th className="px-4 py-3 font-semibold">Tareas</th>
@@ -338,7 +405,7 @@ export default function ProjectsPage() {
                   <th className="px-4 py-3 font-semibold">Inicio</th>
                   <th className="px-4 py-3 font-semibold">Fin</th>
                   <th className="px-4 py-3 font-semibold">Semaforo</th>
-                  {role === "manager" ? <th className="px-4 py-3 font-semibold">Accion</th> : null}
+                  {canEditProjects ? <th className="px-4 py-3 font-semibold">Accion</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -346,7 +413,9 @@ export default function ProjectsPage() {
                   const health = getProjectHealth(project);
                   const projectTasks = (tasksByProject[project.id] ?? []).filter((task) => task.status !== "done");
                   const isOpen = openedProjectId === project.id;
-                  const colSpan = role === "manager" ? 9 : 8;
+                  const canDeleteProject = role === "manager" || (role === "lead" && project.createdBy === currentUserId);
+                  const colSpan = canEditProjects ? 9 : 8;
+                  const draft = projectDrafts[project.id];
 
                   return (
                     <Fragment key={project.id}>
@@ -360,26 +429,137 @@ export default function ProjectsPage() {
                           </button>
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">{project.code}</td>
-                        <td className="px-4 py-3 font-semibold">{project.name}</td>
-                        <td className="px-4 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
-                        <td className="px-4 py-3">{statusLabels[project.status] ?? project.status}</td>
-                        <td className="px-4 py-3">{project.startDate ?? "-"}</td>
-                        <td className="px-4 py-3">{project.endDate ?? "-"}</td>
+                        <td className="px-4 py-3 font-semibold break-words">
+                          {canEditProjects ? (
+                            <input
+                              value={draft?.name ?? project.name}
+                              onChange={(event) =>
+                                setProjectDrafts((current) => ({
+                                  ...current,
+                                  [project.id]: {
+                                    ...(current[project.id] ?? {
+                                      name: project.name,
+                                      status: project.status,
+                                      startDate: project.startDate ?? "",
+                                      endDate: project.endDate ?? "",
+                                    }),
+                                    name: event.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[200px]"
+                            />
+                          ) : (
+                            project.name
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-normal break-words">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
+                        <td className="px-4 py-3">
+                          {canEditProjects ? (
+                            <select
+                              value={draft?.status ?? project.status}
+                              onChange={(event) =>
+                                setProjectDrafts((current) => ({
+                                  ...current,
+                                  [project.id]: {
+                                    ...(current[project.id] ?? {
+                                      name: project.name,
+                                      status: project.status,
+                                      startDate: project.startDate ?? "",
+                                      endDate: project.endDate ?? "",
+                                    }),
+                                    status: event.target.value as ProjectRow["status"],
+                                  },
+                                }))
+                              }
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[160px]"
+                            >
+                              <option value="planned">planificado</option>
+                              <option value="active">activo</option>
+                              <option value="on_hold">en pausa</option>
+                              <option value="done">finalizado</option>
+                              <option value="cancelled">cancelado</option>
+                            </select>
+                          ) : (
+                            statusLabels[project.status] ?? project.status
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {canEditProjects ? (
+                            <input
+                              type="date"
+                              value={draft?.startDate ?? project.startDate ?? ""}
+                              onChange={(event) =>
+                                setProjectDrafts((current) => ({
+                                  ...current,
+                                  [project.id]: {
+                                    ...(current[project.id] ?? {
+                                      name: project.name,
+                                      status: project.status,
+                                      startDate: project.startDate ?? "",
+                                      endDate: project.endDate ?? "",
+                                    }),
+                                    startDate: event.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[140px]"
+                            />
+                          ) : (
+                            project.startDate ?? "-"
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {canEditProjects ? (
+                            <input
+                              type="date"
+                              value={draft?.endDate ?? project.endDate ?? ""}
+                              onChange={(event) =>
+                                setProjectDrafts((current) => ({
+                                  ...current,
+                                  [project.id]: {
+                                    ...(current[project.id] ?? {
+                                      name: project.name,
+                                      status: project.status,
+                                      startDate: project.startDate ?? "",
+                                      endDate: project.endDate ?? "",
+                                    }),
+                                    endDate: event.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[140px]"
+                            />
+                          ) : (
+                            project.endDate ?? "-"
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-2 text-xs font-semibold ${health.textClass}`}>
                             <span className={`h-2.5 w-2.5 rounded-full ${health.dotClass}`} />
                             {health.label}
                           </span>
                         </td>
-                        {role === "manager" ? (
+                        {canEditProjects ? (
                           <td className="px-4 py-3">
-                            <button
-                              onClick={() => void onDeleteProject(project.id)}
-                              disabled={deletingProjectId === project.id}
-                              className="ui-btn ui-btn-danger ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              {deletingProjectId === project.id ? "Borrando..." : "Borrar"}
-                            </button>
+                            <div className="flex flex-col gap-2">
+                              <button
+                                onClick={() => void onSaveProject(project.id)}
+                                disabled={savingProjectId === project.id}
+                                className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                              >
+                                {savingProjectId === project.id ? "Guardando..." : "Guardar"}
+                              </button>
+                              {canDeleteProject ? (
+                                <button
+                                  onClick={() => void onDeleteProject(project.id)}
+                                  disabled={deletingProjectId === project.id}
+                                  className="ui-btn ui-btn-danger ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                                >
+                                  {deletingProjectId === project.id ? "Borrando..." : "Borrar"}
+                                </button>
+                              ) : null}
+                            </div>
                           </td>
                         ) : null}
                       </tr>

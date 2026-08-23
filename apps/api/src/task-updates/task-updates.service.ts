@@ -1,7 +1,7 @@
 import {
-	ForbiddenException,
-	Injectable,
-	NotFoundException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,90 +11,110 @@ import { CreateTaskUpdateDto } from './dto/create-task-update.dto';
 
 @Injectable()
 export class TaskUpdatesService {
-	constructor(
-		@InjectRepository(TaskUpdateEntity)
-		private readonly taskUpdatesRepository: Repository<TaskUpdateEntity>,
-		@InjectRepository(TaskEntity)
-		private readonly tasksRepository: Repository<TaskEntity>,
-	) {}
+  constructor(
+    @InjectRepository(TaskUpdateEntity)
+    private readonly taskUpdatesRepository: Repository<TaskUpdateEntity>,
+    @InjectRepository(TaskEntity)
+    private readonly tasksRepository: Repository<TaskEntity>,
+  ) {}
 
-	async create(
-		dto: CreateTaskUpdateDto,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker' },
-	) {
-		const task = await this.tasksRepository.findOne({ where: { id: dto.taskId } });
-		if (!task) {
-			throw new NotFoundException('Task not found');
-		}
+  private async syncTaskStatusFromProgress(task: TaskEntity, progressPercent: number) {
+    if (progressPercent < 100 || task.status === 'done') {
+      return;
+    }
 
-		if (actor.role === 'worker' && task.assigneeId !== actor.id) {
-			throw new ForbiddenException('Workers can only report updates on their own tasks');
-		}
+    task.status = 'done';
+    await this.tasksRepository.save(task);
+  }
 
-		const resolvedUserId = actor.role === 'worker' ? actor.id : dto.userId ?? actor.id;
+  async create(
+    dto: CreateTaskUpdateDto,
+    actor: { id: string; role: 'manager' | 'lead' | 'worker' },
+  ) {
+    const task = await this.tasksRepository.findOne({
+      where: { id: dto.taskId },
+    });
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
 
-		const existing = await this.taskUpdatesRepository.findOne({
-			where: {
-				taskId: dto.taskId,
-				userId: resolvedUserId,
-				updateDate: dto.updateDate,
-			},
-		});
+    if (actor.role === 'worker' && task.assigneeId !== actor.id) {
+      throw new ForbiddenException(
+        'Workers can only report updates on their own tasks',
+      );
+    }
 
-		if (existing) {
-			existing.workedHours = String(dto.workedHours);
-			existing.progressPercent = String(dto.progressPercent);
-			existing.blockerReason = dto.blockerReason;
-			existing.comments = dto.comments;
-			return this.taskUpdatesRepository.save(existing);
-		}
+    const resolvedUserId =
+      actor.role === 'worker' ? actor.id : (dto.userId ?? actor.id);
 
-		const created = this.taskUpdatesRepository.create({
-			taskId: dto.taskId,
-			userId: resolvedUserId,
-			updateDate: dto.updateDate,
-			workedHours: String(dto.workedHours),
-			progressPercent: String(dto.progressPercent),
-			blockerReason: dto.blockerReason,
-			comments: dto.comments,
-		});
+    const existing = await this.taskUpdatesRepository.findOne({
+      where: {
+        taskId: dto.taskId,
+        userId: resolvedUserId,
+        updateDate: dto.updateDate,
+      },
+    });
 
-		return this.taskUpdatesRepository.save(created);
-	}
+    if (existing) {
+      existing.workedHours = String(dto.workedHours);
+      existing.progressPercent = String(dto.progressPercent);
+      existing.blockerReason = dto.blockerReason;
+      existing.comments = dto.comments;
+      const saved = await this.taskUpdatesRepository.save(existing);
+      await this.syncTaskStatusFromProgress(task, dto.progressPercent);
+      return saved;
+    }
 
-	async findByTask(
-		taskId: string,
-		actor: { id: string; role: 'manager' | 'lead' | 'worker' },
-		from?: string,
-		to?: string,
-	) {
-		const task = await this.tasksRepository.findOne({ where: { id: taskId } });
-		if (!task) {
-			throw new NotFoundException('Task not found');
-		}
+    const created = this.taskUpdatesRepository.create({
+      taskId: dto.taskId,
+      userId: resolvedUserId,
+      updateDate: dto.updateDate,
+      workedHours: String(dto.workedHours),
+      progressPercent: String(dto.progressPercent),
+      blockerReason: dto.blockerReason,
+      comments: dto.comments,
+    });
 
-		if (actor.role === 'worker' && task.assigneeId !== actor.id) {
-			throw new ForbiddenException('Workers can only view updates on their own tasks');
-		}
+    const saved = await this.taskUpdatesRepository.save(created);
+    await this.syncTaskStatusFromProgress(task, dto.progressPercent);
+    return saved;
+  }
 
-		const qb = this.taskUpdatesRepository
-			.createQueryBuilder('update')
-			.where('update.task_id = :taskId', { taskId })
-			.orderBy('update.update_date', 'DESC')
-			.addOrderBy('update.created_at', 'DESC');
+  async findByTask(
+    taskId: string,
+    actor: { id: string; role: 'manager' | 'lead' | 'worker' },
+    from?: string,
+    to?: string,
+  ) {
+    const task = await this.tasksRepository.findOne({ where: { id: taskId } });
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
 
-		if (from) {
-			qb.andWhere('update.update_date >= :from', { from });
-		}
+    if (actor.role === 'worker' && task.assigneeId !== actor.id) {
+      throw new ForbiddenException(
+        'Workers can only view updates on their own tasks',
+      );
+    }
 
-		if (to) {
-			qb.andWhere('update.update_date <= :to', { to });
-		}
+    const qb = this.taskUpdatesRepository
+      .createQueryBuilder('update')
+      .where('update.task_id = :taskId', { taskId })
+      .orderBy('update.update_date', 'DESC')
+      .addOrderBy('update.created_at', 'DESC');
 
-		if (actor.role === 'worker') {
-			qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
-		}
+    if (from) {
+      qb.andWhere('update.update_date >= :from', { from });
+    }
 
-		return qb.getMany();
-	}
+    if (to) {
+      qb.andWhere('update.update_date <= :to', { to });
+    }
+
+    if (actor.role === 'worker') {
+      qb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+    }
+
+    return qb.getMany();
+  }
 }

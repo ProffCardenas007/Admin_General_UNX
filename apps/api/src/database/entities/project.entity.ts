@@ -7,7 +7,12 @@ import {
 } from 'typeorm';
 import type { ProjectScope } from '../../common/specialties';
 
-export type ProjectStatus = 'planned' | 'active' | 'on_hold' | 'done' | 'cancelled';
+export type ProjectStatus =
+  | 'planned'
+  | 'active'
+  | 'on_hold'
+  | 'done'
+  | 'cancelled';
 
 @Entity({ name: 'projects' })
 export class ProjectEntity {
@@ -26,16 +31,13 @@ export class ProjectEntity {
   @Column({ name: 'owner_team_id', type: 'uuid', nullable: true })
   ownerTeamId?: string;
 
+  @Column({ name: 'created_by', type: 'uuid', nullable: true })
+  createdBy?: string | null;
+
   @Column({
     name: 'scope',
     type: 'enum',
-    enum: [
-      'paa',
-      'exani_ii',
-      'piense',
-      'unam',
-      'modulos',
-    ],
+    enum: ['paa', 'exani_ii', 'piense', 'unam', 'modulos'],
     enumName: 'project_scope',
     nullable: true,
   })

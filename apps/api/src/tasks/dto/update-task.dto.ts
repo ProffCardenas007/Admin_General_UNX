@@ -14,8 +14,8 @@ export class UpdateTaskDto {
   assigneeId?: string;
 
   @IsOptional()
-  @IsIn(['todo', 'doing', 'blocked', 'done'])
-  status?: 'todo' | 'doing' | 'blocked' | 'done';
+  @IsIn(['todo', 'doing', 'paused', 'blocked', 'done'])
+  status?: 'todo' | 'doing' | 'paused' | 'blocked' | 'done';
 
   @IsOptional()
   @IsIn(['low', 'medium', 'high', 'urgent'])
@@ -26,6 +26,11 @@ export class UpdateTaskDto {
   dueDate?: string;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  estimatedHours?: number;
+
+  @IsOptional()
   @IsString()
   handoffToUserId?: string;
 
@@ -34,8 +39,23 @@ export class UpdateTaskDto {
   handoffMessage?: string;
 
   @IsOptional()
-  @IsIn(['revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma'])
-  nextActivityType?: 'revision' | 'edicion' | 'creacion' | 'presentaciones' | 'grabacion' | 'plataforma';
+  @IsIn([
+    'revision',
+    'edicion',
+    'creacion',
+    'presentaciones',
+    'grabacion',
+    'plataforma',
+    'administrativo',
+  ])
+  nextActivityType?:
+    | 'revision'
+    | 'edicion'
+    | 'creacion'
+    | 'presentaciones'
+    | 'grabacion'
+    | 'plataforma'
+    | 'administrativo';
 
   @IsOptional()
   @IsString()

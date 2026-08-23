@@ -27,7 +27,9 @@ export class ReportsService {
     }
 
     if (filters.projectId) {
-      qb.andWhere('task.project_id = :projectId', { projectId: filters.projectId });
+      qb.andWhere('task.project_id = :projectId', {
+        projectId: filters.projectId,
+      });
     }
     if (filters.status) {
       qb.andWhere('task.status = :status', { status: filters.status });
@@ -36,7 +38,9 @@ export class ReportsService {
 
     const tasks = await qb.getMany();
     const projectIds = [...new Set(tasks.map((task) => task.projectId))];
-    const assigneeIds = [...new Set(tasks.map((task) => task.assigneeId).filter(Boolean))] as string[];
+    const assigneeIds = [
+      ...new Set(tasks.map((task) => task.assigneeId).filter(Boolean)),
+    ] as string[];
 
     const projects = projectIds.length
       ? await this.projectsRepository.find({ where: { id: In(projectIds) } })
@@ -45,7 +49,9 @@ export class ReportsService {
       ? await this.usersRepository.find({ where: { id: In(assigneeIds) } })
       : [];
 
-    const projectById = new Map(projects.map((project) => [project.id, project]));
+    const projectById = new Map(
+      projects.map((project) => [project.id, project]),
+    );
     const userById = new Map(users.map((user) => [user.id, user]));
 
     const header = [
@@ -63,7 +69,9 @@ export class ReportsService {
 
     const lines = tasks.map((task) => {
       const project = projectById.get(task.projectId);
-      const assignee = task.assigneeId ? userById.get(task.assigneeId) : undefined;
+      const assignee = task.assigneeId
+        ? userById.get(task.assigneeId)
+        : undefined;
       return [
         task.id,
         task.code,

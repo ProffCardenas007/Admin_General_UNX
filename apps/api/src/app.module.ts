@@ -12,6 +12,8 @@ import { ImportsModule } from './imports/imports.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { TeamsModule } from './teams/teams.module';
 import { UserEntity } from './database/entities/user.entity';
 import { ProjectEntity } from './database/entities/project.entity';
 import { TaskEntity } from './database/entities/task.entity';
@@ -19,6 +21,15 @@ import { TaskUpdateEntity } from './database/entities/task-update.entity';
 import { ExcelImportEntity } from './database/entities/excel-import.entity';
 import { ExcelImportErrorEntity } from './database/entities/excel-import-error.entity';
 import { NotificationEntity } from './database/entities/notification.entity';
+import { AuditLogEntity } from './database/entities/audit-log.entity';
+import { TeamEntity } from './database/entities/team.entity';
+import { TeamMemberEntity } from './database/entities/team-member.entity';
+import { TeacherAvailabilityModule } from './teacher-availability/teacher-availability.module';
+import { ClassScheduleProfileEntity } from './database/entities/class-schedule-profile.entity';
+import { ClassPlanningModule } from './class-planning/class-planning.module';
+import { ClassCourseEntity } from './database/entities/class-course.entity';
+import { ClassCourseSubjectEntity } from './database/entities/class-course-subject.entity';
+import { ClassSessionEntity } from './database/entities/class-session.entity';
 
 @Module({
   imports: [
@@ -59,6 +70,13 @@ import { NotificationEntity } from './database/entities/notification.entity';
             ExcelImportEntity,
             ExcelImportErrorEntity,
             NotificationEntity,
+            AuditLogEntity,
+            TeamEntity,
+            TeamMemberEntity,
+            ClassScheduleProfileEntity,
+            ClassCourseEntity,
+            ClassCourseSubjectEntity,
+            ClassSessionEntity,
           ],
           synchronize: false,
         };
@@ -73,6 +91,10 @@ import { NotificationEntity } from './database/entities/notification.entity';
     DashboardModule,
     ReportsModule,
     NotificationsModule,
+    AuditLogsModule,
+    TeamsModule,
+    TeacherAvailabilityModule,
+    ClassPlanningModule,
   ],
   controllers: [AppController],
   providers: [AppService],

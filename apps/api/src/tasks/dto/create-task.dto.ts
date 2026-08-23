@@ -1,4 +1,12 @@
-import { IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateTaskDto {
   @IsString()
@@ -10,8 +18,23 @@ export class CreateTaskDto {
   code?: string;
 
   @IsString()
-  @IsIn(['revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma'])
-  activityType: 'revision' | 'edicion' | 'creacion' | 'presentaciones' | 'grabacion' | 'plataforma';
+  @IsIn([
+    'revision',
+    'edicion',
+    'creacion',
+    'presentaciones',
+    'grabacion',
+    'plataforma',
+    'administrativo',
+  ])
+  activityType:
+    | 'revision'
+    | 'edicion'
+    | 'creacion'
+    | 'presentaciones'
+    | 'grabacion'
+    | 'plataforma'
+    | 'administrativo';
 
   @IsString()
   @MaxLength(220)
@@ -25,16 +48,20 @@ export class CreateTaskDto {
   assigneeId?: string;
 
   @IsOptional()
-  @IsIn(['todo', 'doing', 'blocked', 'done'])
-  status?: 'todo' | 'doing' | 'blocked' | 'done';
+  @IsString()
+  teamId?: string;
+
+  @IsOptional()
+  @IsIn(['todo', 'doing', 'paused', 'blocked', 'done'])
+  status?: 'todo' | 'doing' | 'paused' | 'blocked' | 'done';
 
   @IsOptional()
   @IsIn(['low', 'medium', 'high', 'urgent'])
   priority?: 'low' | 'medium' | 'high' | 'urgent';
 
-  @IsOptional()
   @IsString()
-  dueDate?: string;
+  @IsNotEmpty()
+  dueDate: string;
 
   @IsOptional()
   @IsNumber()

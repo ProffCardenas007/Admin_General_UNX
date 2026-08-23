@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+require('dotenv').config();
 const { Client } = require('pg');
 const { hash } = require('bcryptjs');
 
@@ -39,10 +40,13 @@ async function main() {
   }
 
   const passwordHash = await hash(plainPassword, 10);
+  const requiresSsl =
+    /sslmode=require/i.test(databaseUrl) ||
+    String(process.env.PGSSLMODE || '').toLowerCase() === 'require';
 
   const client = new Client({
     connectionString: databaseUrl,
-    ssl: { rejectUnauthorized: false },
+    ssl: requiresSsl ? { rejectUnauthorized: false } : false,
   });
 
   await client.connect();

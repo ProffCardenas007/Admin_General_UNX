@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
-import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { API_URL, authHeaders, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
+import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type Summary = {
   activeProjects: number;
@@ -18,23 +18,25 @@ type Summary = {
 type WorkloadRow = {
   userId: string;
   hoursWorked: string;
-  updatesCount: string;
+  activeSecondsWorked?: string;
+  tasksCount: string;
 };
 
 type TrendRow = {
   weekStart: string;
   hoursWorked: string;
-  updatesCount: string;
+  tasksCount: string;
 };
 
 type TaskRow = {
   id: string;
+  createdBy?: string | null;
   projectId: string;
-  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma";
+  activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma" | "administrativo";
   title: string;
   description?: string;
   assigneeId?: string;
-  status: "todo" | "doing" | "blocked" | "done";
+  status: "todo" | "doing" | "paused" | "blocked" | "done";
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
   estimatedHours?: string;
@@ -54,6 +56,13 @@ type UserOption = {
   id: string;
   fullName: string;
   role: "manager" | "lead" | "worker";
+  isActive?: boolean;
+};
+
+type TeamOption = {
+  id: string;
+  name: string;
+  memberCount?: number;
 };
 
 type ProjectProgress = {
@@ -87,6 +96,7 @@ const activityTypeOptions = [
   { value: "presentaciones", label: "presentaciones" },
   { value: "grabacion", label: "grabacion" },
   { value: "plataforma", label: "plataforma" },
+  { value: "administrativo", label: "administrativo" },
 ] as const;
 
 const taskStatusOptions = [
@@ -99,6 +109,7 @@ const taskStatusOptions = [
 const taskStatusLabels: Record<TaskRow["status"], string> = {
   todo: "por hacer",
   doing: "en curso",
+  paused: "pausada",
   blocked: "bloqueada",
   done: "finalizada",
 };
@@ -125,7 +136,7 @@ const roleLabels: Record<UserOption["role"], string> = {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const getTodayDate = () => new Date().toISOString().slice(0, 10);
   const [role, setRole] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -137,14 +148,21 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [teams, setTeams] = useState<TeamOption[]>([]);
   const [projectProgressById, setProjectProgressById] = useState<Record<string, ProjectProgress>>({});
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatusFilter, setProjectStatusFilter] = useState<"" | ProjectRow["status"]>("");
+  const [projectSpecialtyFilter, setProjectSpecialtyFilter] = useState<"" | LeadSpecialty>("");
   const [projectRiskFilter, setProjectRiskFilter] = useState<"all" | RiskLevel>("all");
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
   const [taskProjectFilter, setTaskProjectFilter] = useState("");
   const [taskUserFilter, setTaskUserFilter] = useState("");
   const [taskSearchFilter, setTaskSearchFilter] = useState("");
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+  const [trendWeekFrom, setTrendWeekFrom] = useState("");
+  const [trendWeekTo, setTrendWeekTo] = useState("");
   const [selectedDashboardUserId, setSelectedDashboardUserId] = useState("");
+  const [overloadThresholdHours, setOverloadThresholdHours] = useState(40);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const [taskForm, setTaskForm] = useState({
@@ -153,6 +171,7 @@ export default function DashboardPage() {
     title: "",
     description: "",
     assigneeId: "",
+    teamId: "",
     status: "todo" as TaskRow["status"],
     priority: "medium" as TaskRow["priority"],
     dueDate: "",
@@ -166,12 +185,72 @@ export default function DashboardPage() {
     return Math.max(...workload.map((item) => Number(item.hoursWorked || 0)), 1);
   }, [workload]);
 
-  const trendsMax = useMemo(() => {
-    if (trends.length === 0) {
+  const activeHoursMax = useMemo(() => {
+    if (workload.length === 0) {
       return 1;
     }
-    return Math.max(...trends.map((item) => Number(item.hoursWorked || 0)), 1);
-  }, [trends]);
+    return Math.max(
+      ...workload.map((item) => Number(item.activeSecondsWorked || 0) / 3600),
+      1,
+    );
+  }, [workload]);
+
+  const weekInputToDateKey = (weekValue: string) => {
+    const match = /^(\d{4})-W(\d{2})$/.exec(weekValue);
+    if (!match) {
+      return "";
+    }
+
+    const year = Number(match[1]);
+    const week = Number(match[2]);
+
+    const jan4 = new Date(Date.UTC(year, 0, 4));
+    const jan4Day = jan4.getUTCDay() || 7;
+    const mondayWeek1 = new Date(jan4);
+    mondayWeek1.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+
+    const target = new Date(mondayWeek1);
+    target.setUTCDate(mondayWeek1.getUTCDate() + (week - 1) * 7);
+
+    const yyyy = target.getUTCFullYear();
+    const mm = String(target.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(target.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const normalizeDateKey = (dateValue: string) => {
+    const date = new Date(dateValue);
+    const yyyy = date.getUTCFullYear();
+    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(date.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const trendWeekRangeInvalid =
+    trendWeekFrom.length > 0 && trendWeekTo.length > 0 && trendWeekFrom > trendWeekTo;
+
+  const filteredTrends = useMemo(() => {
+    if (trendWeekRangeInvalid) {
+      return [];
+    }
+
+    const fromDateKey = trendWeekFrom ? weekInputToDateKey(trendWeekFrom) : "";
+    const toDateKey = trendWeekTo ? weekInputToDateKey(trendWeekTo) : "";
+
+    return trends.filter((item) => {
+      const itemDateKey = normalizeDateKey(item.weekStart);
+      const byFrom = fromDateKey.length === 0 || itemDateKey >= fromDateKey;
+      const byTo = toDateKey.length === 0 || itemDateKey <= toDateKey;
+      return byFrom && byTo;
+    });
+  }, [trendWeekFrom, trendWeekRangeInvalid, trendWeekTo, trends]);
+
+  const trendsMax = useMemo(() => {
+    if (filteredTrends.length === 0) {
+      return 1;
+    }
+    return Math.max(...filteredTrends.map((item) => Number(item.hoursWorked || 0)), 1);
+  }, [filteredTrends]);
 
   const getRiskLevel = (project: ProjectRow, progress?: ProjectProgress): RiskLevel => {
     if (project.status === "cancelled") {
@@ -216,11 +295,12 @@ export default function DashboardPage() {
         project.code.toLowerCase().includes(projectSearch.toLowerCase()) ||
         project.name.toLowerCase().includes(projectSearch.toLowerCase());
       const byStatus = projectStatusFilter.length === 0 || project.status === projectStatusFilter;
+      const bySpecialty = projectSpecialtyFilter.length === 0 || project.scope === projectSpecialtyFilter;
       const byRisk = projectRiskFilter === "all" || project.risk === projectRiskFilter;
 
-      return bySearch && byStatus && byRisk;
+      return bySearch && byStatus && bySpecialty && byRisk;
     });
-  }, [projectPortfolioRows, projectRiskFilter, projectSearch, projectStatusFilter]);
+  }, [projectPortfolioRows, projectRiskFilter, projectSearch, projectSpecialtyFilter, projectStatusFilter]);
 
   const projectKpis = useMemo(() => {
     const total = projectPortfolioRows.length;
@@ -286,6 +366,39 @@ export default function DashboardPage() {
       myTasks,
     };
   }, [tasks, currentUserId]);
+
+  const teamAlerts = useMemo(() => {
+    if (role !== "manager") {
+      return { withoutActiveTasks: [], overloaded: [] };
+    }
+
+    const trackedUsers = users.filter(
+      (user) => user.role !== "manager" && user.isActive !== false,
+    );
+
+    const rows = trackedUsers.map((user) => {
+      const activeTasks = tasks.filter(
+        (task) => task.assigneeId === user.id && task.status !== "done",
+      );
+      const activeHours = activeTasks.reduce(
+        (sum, task) => sum + Number(task.estimatedHours ?? 0),
+        0,
+      );
+
+      return {
+        user,
+        activeTasksCount: activeTasks.length,
+        activeHours,
+      };
+    });
+
+    const withoutActiveTasks = rows.filter((row) => row.activeTasksCount === 0);
+    const overloaded = rows
+      .filter((row) => row.activeHours > overloadThresholdHours)
+      .sort((a, b) => b.activeHours - a.activeHours);
+
+    return { withoutActiveTasks, overloaded };
+  }, [role, users, tasks, overloadThresholdHours]);
 
   const projectsById = useMemo(() => {
     return Object.fromEntries(projects.map((project) => [project.id, project]));
@@ -365,6 +478,35 @@ export default function DashboardPage() {
     };
   }, [selectedDashboardUserTasks]);
 
+  const selectedUserAssignedHoursBySpecialty = useMemo(() => {
+    if (!selectedDashboardUserId) {
+      return [] as Array<{ specialty: string; hours: number; tasks: number }>;
+    }
+
+    const grouped = new Map<string, { specialty: string; hours: number; tasks: number }>();
+
+    selectedDashboardUserTasks.forEach((task) => {
+      const scope = projectsById[task.projectId]?.scope;
+      const specialty = scope ? specialtyLabels[scope] : "Sin especialidad";
+      const estimated = Number(task.estimatedHours ?? 0);
+
+      const current = grouped.get(specialty) ?? { specialty, hours: 0, tasks: 0 };
+      current.hours += Number.isFinite(estimated) ? estimated : 0;
+      current.tasks += 1;
+      grouped.set(specialty, current);
+    });
+
+    return [...grouped.values()].sort((a, b) => b.hours - a.hours);
+  }, [projectsById, selectedDashboardUserId, selectedDashboardUserTasks]);
+
+  const selectedSpecialtyHoursMax = useMemo(() => {
+    if (selectedUserAssignedHoursBySpecialty.length === 0) {
+      return 1;
+    }
+
+    return Math.max(...selectedUserAssignedHoursBySpecialty.map((row) => row.hours), 1);
+  }, [selectedUserAssignedHoursBySpecialty]);
+
   const selectedTaskProject = useMemo(
     () => projects.find((project) => project.id === taskForm.projectId),
     [projects, taskForm.projectId],
@@ -380,26 +522,26 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const savedToken = getStoredToken();
-    const savedEmail = getStoredEmail();
     const savedRole = getStoredRole();
+    const savedUserId = getStoredUserId();
 
     if (!savedToken) {
       router.replace("/");
       return;
     }
 
-    setEmail(savedEmail);
     setRole(savedRole);
-    setCurrentUserId(getStoredUserId());
+    setCurrentUserId(savedUserId);
 
     const loadDashboard = async () => {
       try {
         const headers = authHeaders();
-        const [summaryResponse, workloadResponse, trendsResponse, projectsResponse] = await Promise.all([
+        const [summaryResponse, workloadResponse, trendsResponse, projectsResponse, teamsResponse] = await Promise.all([
           axios.get(`${API_URL}/dashboard/summary`, { headers }),
           axios.get(`${API_URL}/dashboard/workload`, { headers }),
           axios.get(`${API_URL}/dashboard/trends`, { headers }),
           axios.get(`${API_URL}/projects`, { headers }),
+          axios.get(`${API_URL}/teams`, { headers }),
         ]);
 
         let loadedTasks: TaskRow[] = [];
@@ -410,7 +552,12 @@ export default function DashboardPage() {
           ]);
 
           const deduped = new Map<string, TaskRow>();
-          [...(myTasksResponse.data as TaskRow[]), ...(assignedTasksResponse.data as TaskRow[])].forEach((task) => {
+          const myTasks = myTasksResponse.data as TaskRow[];
+          const createdByLead = (assignedTasksResponse.data as TaskRow[]).filter(
+            (task) => task.createdBy === savedUserId,
+          );
+
+          [...myTasks, ...createdByLead].forEach((task) => {
             deduped.set(task.id, task);
           });
           loadedTasks = [...deduped.values()];
@@ -443,6 +590,7 @@ export default function DashboardPage() {
 
         const loadedProjects = projectsResponse.data as ProjectRow[];
         setProjects(loadedProjects);
+        setTeams(teamsResponse.data as TeamOption[]);
         setTaskForm((current) => {
           const selectedProjectId =
             current.projectId && loadedProjects.some((project) => project.id === current.projectId)
@@ -474,8 +622,23 @@ export default function DashboardPage() {
           }
         });
         setProjectProgressById(progressMap);
-      } catch {
-        setError("No se pudo cargar el panel. Vuelve a iniciar sesión.");
+      } catch (caughtError) {
+        if (axios.isAxiosError(caughtError)) {
+          const backendMessage =
+            typeof caughtError.response?.data?.message === "string"
+              ? caughtError.response.data.message
+              : undefined;
+
+          if (backendMessage) {
+            setError(`No se pudo cargar el panel: ${backendMessage}`);
+          } else if (caughtError.response?.status === 401) {
+            setError("Sesión no válida. Vuelve a iniciar sesión.");
+          } else {
+            setError("No se pudo cargar el panel. Verifica conexión con backend y base de datos.");
+          }
+        } else {
+          setError("No se pudo cargar el panel. Verifica conexión con backend y base de datos.");
+        }
       } finally {
         setLoading(false);
       }
@@ -484,14 +647,6 @@ export default function DashboardPage() {
     void loadDashboard();
   }, [router]);
 
-  const onLogout = () => {
-    window.localStorage.removeItem("sistema_mvp_token");
-    window.localStorage.removeItem("sistema_mvp_email");
-    window.localStorage.removeItem("sistema_mvp_role");
-    window.localStorage.removeItem("sistema_mvp_specialty");
-    router.replace("/");
-  };
-
   const openTaskModal = (projectId?: string) => {
     setError("");
     setInfo("");
@@ -499,6 +654,7 @@ export default function DashboardPage() {
       ...current,
       projectId: projectId || current.projectId || projects[0]?.id || "",
       assigneeId: current.assigneeId || users[0]?.id || "",
+      teamId: "",
       title: "",
       description: "",
       dueDate: "",
@@ -510,6 +666,12 @@ export default function DashboardPage() {
   const submitTaskFromModal = async () => {
     setError("");
     setInfo("");
+
+    if (!taskForm.dueDate) {
+      setError("Selecciona una fecha de finalizacion para la tarea.");
+      return;
+    }
+
     setSavingTask(true);
 
     try {
@@ -518,10 +680,11 @@ export default function DashboardPage() {
         activityType: taskForm.activityType,
         title: taskForm.title,
         description: taskForm.description,
-        assigneeId: taskForm.assigneeId || undefined,
+        assigneeId: taskForm.teamId ? undefined : taskForm.assigneeId || undefined,
+        teamId: taskForm.teamId || undefined,
         status: taskForm.status,
         priority: taskForm.priority,
-        dueDate: taskForm.dueDate || undefined,
+        dueDate: taskForm.dueDate,
         estimatedHours: taskForm.estimatedHours
           ? Number(taskForm.estimatedHours)
           : undefined,
@@ -568,7 +731,7 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
               Sistema de proyectos
@@ -576,92 +739,21 @@ export default function DashboardPage() {
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
               Panel ejecutivo
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {email ? `Sesión activa como ${email}.` : "Sesión activa."} Aquí ves el resumen, la carga por persona y la tendencia semanal.
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+              Resumen operativo: carga por persona y tendencia semanal.
             </p>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-2 font-mono text-xs">
-            API: {API_URL}
+          <div className="flex flex-wrap gap-2">
+            <a href="#resumen" className="ui-btn ui-btn-secondary ui-btn-sm">Resumen</a>
+            <a href="#proyectos" className="ui-btn ui-btn-secondary ui-btn-sm">Proyectos</a>
+            <a href="#tareas" className="ui-btn ui-btn-secondary ui-btn-sm">Tareas</a>
+            {role === "manager" ? (
+              <a href="#alertas" className="ui-btn ui-btn-secondary ui-btn-sm">Alertas</a>
+            ) : null}
+            {role === "manager" ? (
+              <a href="#usuarios" className="ui-btn ui-btn-secondary ui-btn-sm">Usuarios</a>
+            ) : null}
           </div>
-        </div>
-
-        <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/20 bg-[var(--accent)]/8 p-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold">Sesión iniciada</p>
-            <p className="mt-1 text-sm text-[var(--ink-muted)]">
-              Estás dentro del panel. Si quieres salir, cierra la sesión.
-            </p>
-          </div>
-          <button
-            onClick={onLogout}
-            className="ui-btn ui-btn-secondary"
-          >
-            Cerrar sesión
-          </button>
-        </div>
-
-        <div className="mt-5 grid gap-3 lg:grid-cols-2">
-          <nav className="rounded-2xl border border-[var(--line)] bg-white/70 p-3">
-            <p className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-              Dashboard
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {[
-                { label: "Resumen", href: "#resumen" },
-                { label: "Proyectos", href: "#proyectos" },
-                { label: "Tareas", href: "#tareas" },
-                ...(role === "manager" ? [{ label: "Usuarios", href: "#usuarios" }] : []),
-              ].map((item) => (
-                <a
-                  key={item.href}
-                  href={item.href}
-                  className="rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                >
-                  {item.label}
-                </a>
-              ))}
-            </div>
-          </nav>
-
-          <nav className="rounded-2xl border border-[var(--line)] bg-white/70 p-3">
-            <p className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-              Visualizacion
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Link
-                href="/projects"
-                className="ui-btn ui-btn-secondary"
-              >
-                Ver proyectos
-              </Link>
-              <Link
-                href="/tasks"
-                className="ui-btn ui-btn-secondary"
-              >
-                Ver tareas
-              </Link>
-              {role === "manager" ? (
-                <Link
-                  href="/users"
-                  className="ui-btn ui-btn-secondary"
-                >
-                  Ver usuarios
-                </Link>
-              ) : null}
-              <Link
-                href="/notifications"
-                className="ui-btn ui-btn-secondary"
-              >
-                Ver notificaciones
-              </Link>
-              <Link
-                href="/capture"
-                className="ui-btn ui-btn-primary"
-              >
-                Cargar datos
-              </Link>
-            </div>
-          </nav>
         </div>
 
         {error ? (
@@ -748,123 +840,159 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <input
-              value={projectSearch}
-              onChange={(event) => setProjectSearch(event.target.value)}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-              placeholder="Buscar por academia o nombre"
-            />
-
-            <select
-              value={projectStatusFilter}
-              onChange={(event) => setProjectStatusFilter(event.target.value as "" | ProjectRow["status"])}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--line)] bg-white px-4 py-3">
+            <p className="text-sm text-[var(--ink-muted)]">
+              {projectsExpanded
+                ? `Mostrando ${filteredProjectRows.length} proyecto(s) en el listado.`
+                : "Lista de proyectos"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setProjectsExpanded((current) => !current)}
+              className="ui-btn ui-btn-secondary ui-btn-sm"
             >
-              <option value="">Todos los estados</option>
-              <option value="planned">planificado</option>
-              <option value="active">activo</option>
-              <option value="on_hold">en pausa</option>
-              <option value="done">finalizado</option>
-              <option value="cancelled">cancelado</option>
-            </select>
-
-            <select
-              value={projectRiskFilter}
-              onChange={(event) => setProjectRiskFilter(event.target.value as "all" | RiskLevel)}
-              className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
-            >
-              <option value="all">Todos los riesgos</option>
-              <option value="green">estable</option>
-              <option value="amber">en seguimiento</option>
-              <option value="red">en riesgo</option>
-            </select>
+              {projectsExpanded ? "Ocultar proyectos" : "Desplegar proyectos"}
+            </button>
           </div>
 
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
-                  <th className="px-3 py-3 font-semibold">Academia</th>
-                  <th className="px-3 py-3 font-semibold">Nombre</th>
-                  <th className="px-3 py-3 font-semibold">Especialidad</th>
-                  <th className="px-3 py-3 font-semibold">Estado</th>
-                  <th className="px-3 py-3 font-semibold">Avance</th>
-                  <th className="px-3 py-3 font-semibold">Vencidas</th>
-                  <th className="px-3 py-3 font-semibold">Semaforo</th>
-                  <th className="px-3 py-3 font-semibold">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredProjectRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-3 py-4 text-center text-[var(--ink-muted)]">
-                      No hay proyectos para los filtros seleccionados.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredProjectRows.map((project) => (
-                    <tr key={project.id} className="border-b border-[var(--line)]/50 align-top">
-                      <td className="px-3 py-3 font-mono text-xs">{project.code}</td>
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{project.name}</p>
-                        <p className="mt-1 text-xs text-[var(--ink-muted)]">
-                          Fin: {project.endDate ?? "sin fecha"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
-                      <td className="px-3 py-3">{projectStatusLabels[project.status] ?? project.status}</td>
-                      <td className="px-3 py-3">{project.completionRate.toFixed(1)}%</td>
-                      <td className="px-3 py-3">{project.overdueTasks}</td>
-                      <td className="px-3 py-3">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            project.risk === "green"
-                              ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
-                              : project.risk === "amber"
-                                ? "border border-amber-300 bg-amber-50 text-amber-700"
-                                : "border border-red-300 bg-red-50 text-red-700"
-                          }`}
-                        >
-                          {riskLabelMap[project.risk]}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Link
-                            href="/projects"
-                            className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
-                          >
-                            Ver
-                          </Link>
-                          <Link
-                            href="/tasks"
-                            className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
-                          >
-                            Tareas
-                          </Link>
-                          {role === "manager" || role === "lead" ? (
-                            <button
-                              onClick={() => openTaskModal(project.id)}
-                              className="rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-2 py-1 text-xs font-semibold text-[var(--accent)]"
-                            >
-                              Crear tarea
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
+          {projectsExpanded ? (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <input
+                  name="dashboard-project-search"
+                  value={projectSearch}
+                  onChange={(event) => setProjectSearch(event.target.value)}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                  placeholder="Buscar por academia o nombre"
+                />
+
+                <select
+                  name="dashboard-project-status-filter"
+                  value={projectStatusFilter}
+                  onChange={(event) => setProjectStatusFilter(event.target.value as "" | ProjectRow["status"])}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                >
+                  <option value="">Todos los estados</option>
+                  <option value="planned">planificado</option>
+                  <option value="active">activo</option>
+                  <option value="on_hold">en pausa</option>
+                  <option value="done">finalizado</option>
+                  <option value="cancelled">cancelado</option>
+                </select>
+
+                <select
+                  name="dashboard-project-specialty-filter"
+                  value={projectSpecialtyFilter}
+                  onChange={(event) => setProjectSpecialtyFilter(event.target.value as "" | LeadSpecialty)}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                >
+                  <option value="">Todas las especialidades</option>
+                  {LEAD_SPECIALTIES.map((specialty) => (
+                    <option key={specialty} value={specialty}>
+                      {specialtyLabels[specialty]}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  name="dashboard-project-risk-filter"
+                  value={projectRiskFilter}
+                  onChange={(event) => setProjectRiskFilter(event.target.value as "all" | RiskLevel)}
+                  className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                >
+                  <option value="all">Todos los riesgos</option>
+                  <option value="green">estable</option>
+                  <option value="amber">en seguimiento</option>
+                  <option value="red">en riesgo</option>
+                </select>
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
+                      <th className="px-3 py-3 font-semibold">Academia</th>
+                      <th className="px-3 py-3 font-semibold">Nombre</th>
+                      <th className="px-3 py-3 font-semibold">Especialidad</th>
+                      <th className="px-3 py-3 font-semibold">Estado</th>
+                      <th className="px-3 py-3 font-semibold">Avance</th>
+                      <th className="px-3 py-3 font-semibold">Vencidas</th>
+                      <th className="px-3 py-3 font-semibold">Semaforo</th>
+                      <th className="px-3 py-3 font-semibold">Acciones</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredProjectRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-3 py-4 text-center text-[var(--ink-muted)]">
+                          No hay proyectos para los filtros seleccionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredProjectRows.map((project) => (
+                        <tr key={project.id} className="border-b border-[var(--line)]/50 align-top">
+                          <td className="px-3 py-3">
+                            <p className="font-semibold">{project.name}</p>
+                            <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                              Fin: {project.endDate ?? "sin fecha"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 font-mono text-xs">{project.code}</td>
+                          <td className="px-3 py-3">{project.scope ? specialtyLabels[project.scope] : "-"}</td>
+                          <td className="px-3 py-3">{projectStatusLabels[project.status] ?? project.status}</td>
+                          <td className="px-3 py-3">{project.completionRate.toFixed(1)}%</td>
+                          <td className="px-3 py-3">{project.overdueTasks}</td>
+                          <td className="px-3 py-3">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                project.risk === "green"
+                                  ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
+                                  : project.risk === "amber"
+                                    ? "border border-amber-300 bg-amber-50 text-amber-700"
+                                    : "border border-red-300 bg-red-50 text-red-700"
+                              }`}
+                            >
+                              {riskLabelMap[project.risk]}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Link
+                                href="/projects"
+                                className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
+                              >
+                                Ver
+                              </Link>
+                              <Link
+                                href={`/tasks?projectId=${project.id}&showDone=1`}
+                                className="rounded-lg border border-[var(--line)] bg-white px-2 py-1 text-xs font-semibold"
+                              >
+                                Tareas
+                              </Link>
+                              {role === "manager" || role === "lead" ? (
+                                <button
+                                  onClick={() => openTaskModal(project.id)}
+                                  className="rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-2 py-1 text-xs font-semibold text-[var(--accent)]"
+                                >
+                                  Crear tarea
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
-            {projectKpis.inRisk > 0
-              ? `Atencion: hay ${projectKpis.inRisk} proyecto(s) en seguimiento o en riesgo.`
-              : "Todos los proyectos de la cartera estan estables hoy."}
-          </div>
+              <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
+                {projectKpis.inRisk > 0
+                  ? `Atencion: hay ${projectKpis.inRisk} proyecto(s) en seguimiento o en riesgo.`
+                  : "Todos los proyectos de la cartera estan estables hoy."}
+              </div>
+            </>
+          ) : null}
         </article>
 
         <article id="tareas" className="kpi-card fade-up p-5 scroll-mt-6" style={{ animationDelay: "300ms" }}>
@@ -888,133 +1016,131 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <select
-              value={taskProjectFilter}
-              onChange={(event) => setTaskProjectFilter(event.target.value)}
-              className="ui-control"
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--line)] bg-white px-4 py-3">
+            <p className="text-sm text-[var(--ink-muted)]">
+              {tasksExpanded
+                ? `Mostrando ${filteredTaskRows.length} tarea(s) en el listado.`
+                : "Lista de tareas"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setTasksExpanded((current) => !current)}
+              className="ui-btn ui-btn-secondary ui-btn-sm"
             >
-              <option value="">Todos los proyectos</option>
-              {taskProjectOptions.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-
-            <input
-              value={taskSearchFilter}
-              onChange={(event) => setTaskSearchFilter(event.target.value)}
-              className="ui-control"
-              placeholder="Buscar tarea"
-            />
-
-            <select
-              value={taskUserFilter}
-              onChange={(event) => setTaskUserFilter(event.target.value)}
-              className="ui-control"
-            >
-              <option value="">Todos los usuarios</option>
-              {taskUserOptions.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.fullName}
-                </option>
-              ))}
-            </select>
+              {tasksExpanded ? "Ocultar tareas" : "Desplegar tareas"}
+            </button>
           </div>
 
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
-                  <th className="px-3 py-3 font-semibold">Proyecto</th>
-                  <th className="px-3 py-3 font-semibold">Tarea</th>
-                  <th className="px-3 py-3 font-semibold">Usuario</th>
-                  <th className="px-3 py-3 font-semibold">Estado</th>
-                  <th className="px-3 py-3 font-semibold">Prioridad</th>
-                  <th className="px-3 py-3 font-semibold">Vence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTaskRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-4 text-center">
-                      <span className="ui-empty inline-block px-4 py-2 text-sm">
-                        No hay tareas para los filtros seleccionados.
-                      </span>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTaskRows.map((task) => (
-                    <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
-                        <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
-                          {projectsById[task.projectId]?.code ?? "-"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{task.title}</p>
-                        <p className="mt-1 text-xs text-[var(--ink-muted)]">{task.activityType}</p>
-                      </td>
-                      <td className="px-3 py-3">
-                        {task.assigneeId
-                          ? (usersById[task.assigneeId]?.fullName ?? task.assigneeId.slice(0, 8))
-                          : "Sin asignar"}
-                      </td>
-                      <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
-                      <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
-                      <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
+          {tasksExpanded ? (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <select
+                  name="dashboard-task-project-filter"
+                  value={taskProjectFilter}
+                  onChange={(event) => setTaskProjectFilter(event.target.value)}
+                  className="ui-control"
+                >
+                  <option value="">Todos los proyectos</option>
+                  {taskProjectOptions.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  name="dashboard-task-search"
+                  value={taskSearchFilter}
+                  onChange={(event) => setTaskSearchFilter(event.target.value)}
+                  className="ui-control"
+                  placeholder="Buscar tarea"
+                />
+
+                <select
+                  name="dashboard-task-user-filter"
+                  value={taskUserFilter}
+                  onChange={(event) => setTaskUserFilter(event.target.value)}
+                  className="ui-control"
+                >
+                  <option value="">Todos los usuarios</option>
+                  {taskUserOptions.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
+                      <th className="px-3 py-3 font-semibold">Proyecto</th>
+                      <th className="px-3 py-3 font-semibold">Tarea</th>
+                      <th className="px-3 py-3 font-semibold">Usuario</th>
+                      <th className="px-3 py-3 font-semibold">Estado</th>
+                      <th className="px-3 py-3 font-semibold">Prioridad</th>
+                      <th className="px-3 py-3 font-semibold">Vence</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredTaskRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-4 text-center">
+                          <span className="ui-empty inline-block px-4 py-2 text-sm">
+                            No hay tareas para los filtros seleccionados.
+                          </span>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredTaskRows.map((task) => (
+                        <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
+                          <td className="px-3 py-3">
+                            <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
+                            <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
+                              {projectsById[task.projectId]?.code ?? "-"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3">
+                            <p className="font-semibold">{task.title}</p>
+                            <p className="mt-1 text-xs text-[var(--ink-muted)]">{task.activityType}</p>
+                          </td>
+                          <td className="px-3 py-3">
+                            {task.assigneeId
+                              ? (usersById[task.assigneeId]?.fullName ?? task.assigneeId.slice(0, 8))
+                              : "Sin asignar"}
+                          </td>
+                          <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
+                          <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
+                          <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link
-              href="/tasks?status=blocked"
-              className="rounded-full border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700"
-            >
-              Ver bloqueadas
-            </Link>
-            <Link
-              href="/tasks?due=soon"
-              className="rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700"
-            >
-              Vencen pronto
-            </Link>
-            <Link
-              href="/tasks?due=overdue"
-              className="rounded-full border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-xs font-semibold text-[var(--danger)]"
-            >
-              Vencidas
-            </Link>
-            <Link
-              href="/tasks?scope=my"
-              className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold"
-            >
-              Mis tareas
-            </Link>
-            <Link
-              href="/tasks?priority=urgent"
-              className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold"
-            >
-              Prioridad urgente
-            </Link>
-          </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  href="/tasks"
+                  className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-xs font-semibold"
+                >
+                  Ir a tareas
+                </Link>
+              </div>
 
-          <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
-            {role === "worker"
-              ? `Tienes ${taskKpis.myTasks} tarea(s) pendiente(s) asignadas a tu usuario.`
-              : `Hay ${taskKpis.urgent} tarea(s) urgentes activas y ${taskKpis.todo} en por hacer.`}
-          </div>
+              <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
+                {role === "worker"
+                  ? `Tienes ${taskKpis.myTasks} tarea(s) pendiente(s) asignadas a tu usuario.`
+                  : `Hay ${taskKpis.urgent} tarea(s) urgentes activas y ${taskKpis.todo} en por hacer.`}
+              </div>
+            </>
+          ) : null}
 
           <div className="mt-5 space-y-4">
             <div>
               <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Carga por colaborador
+                Horas asignadas por colaborador
               </p>
               {workload.length === 0 ? (
                 <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
@@ -1022,12 +1148,18 @@ export default function DashboardPage() {
                 workload.map((row) => {
                   const hours = Number(row.hoursWorked || 0);
                   const pct = Math.min((hours / workloadMax) * 100, 100);
+                  const workloadUser = usersById[row.userId];
+                  const workloadLabel = workloadUser?.fullName
+                    ? workloadUser.fullName
+                    : row.userId === currentUserId
+                      ? "Mi usuario"
+                      : row.userId.slice(0, 8);
                   return (
                     <div key={row.userId} className="mb-3">
                       <div className="mb-1 flex items-center justify-between gap-3">
-                        <p className="font-mono text-xs">{row.userId.slice(0, 8)}</p>
+                        <p className="text-xs font-semibold">{workloadLabel}</p>
                         <p className="text-sm text-[var(--ink-muted)]">
-                          {hours.toFixed(2)} h ({row.updatesCount} actualizaciones)
+                          {hours.toFixed(2)} h ({row.tasksCount} tareas)
                         </p>
                       </div>
                       <div className="bar-track">
@@ -1041,12 +1173,81 @@ export default function DashboardPage() {
 
             <div>
               <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Tendencia semanal
+                Horas reales trabajadas (cronómetro) por colaborador
               </p>
-              {trends.length === 0 ? (
+              {workload.length === 0 ? (
                 <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
               ) : (
-                trends.map((row) => {
+                workload.map((row) => {
+                  const activeHours = Number(row.activeSecondsWorked || 0) / 3600;
+                  const pct = Math.min((activeHours / activeHoursMax) * 100, 100);
+                  const workloadUser = usersById[row.userId];
+                  const workloadLabel = workloadUser?.fullName
+                    ? workloadUser.fullName
+                    : row.userId === currentUserId
+                      ? "Mi usuario"
+                      : row.userId.slice(0, 8);
+                  return (
+                    <div key={row.userId} className="mb-3">
+                      <div className="mb-1 flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold">{workloadLabel}</p>
+                        <p className="text-sm text-[var(--ink-muted)]">{activeHours.toFixed(2)} h</p>
+                      </div>
+                      <div className="bar-track">
+                        <div
+                          className="bar-fill"
+                          style={{ width: `${pct}%`, background: "linear-gradient(90deg, var(--accent), #34d399)" }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                Tendencia semanal de horas asignadas
+              </p>
+              <div className="mb-3 grid gap-2 md:grid-cols-[minmax(130px,170px),minmax(130px,170px),auto]">
+                <label className="text-xs text-[var(--ink-muted)]">
+                  Semana desde
+                  <input
+                    type="week"
+                    value={trendWeekFrom}
+                    onChange={(event) => setTrendWeekFrom(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                  />
+                </label>
+                <label className="text-xs text-[var(--ink-muted)]">
+                  Semana hasta
+                  <input
+                    type="week"
+                    value={trendWeekTo}
+                    onChange={(event) => setTrendWeekTo(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
+                  />
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrendWeekFrom("");
+                      setTrendWeekTo("");
+                    }}
+                    className="ui-btn ui-btn-secondary ui-btn-sm"
+                  >
+                    Limpiar filtro
+                  </button>
+                </div>
+              </div>
+              {trendWeekRangeInvalid ? (
+                <p className="text-sm text-[var(--danger)]">El rango de semanas es inválido.</p>
+              ) : null}
+              {filteredTrends.length === 0 ? (
+                <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
+              ) : (
+                filteredTrends.map((row) => {
                   const hours = Number(row.hoursWorked || 0);
                   const pct = Math.min((hours / trendsMax) * 100, 100);
                   const date = new Date(row.weekStart);
@@ -1061,7 +1262,7 @@ export default function DashboardPage() {
                           })}
                         </p>
                         <p className="text-sm text-[var(--ink-muted)]">
-                          {hours.toFixed(2)} h ({row.updatesCount} actualizaciones)
+                          {hours.toFixed(2)} h ({row.tasksCount} tareas)
                         </p>
                       </div>
                       <div className="bar-track">
@@ -1084,6 +1285,98 @@ export default function DashboardPage() {
       </section>
 
       {role === "manager" ? (
+      <section id="alertas" className="kpi-card fade-up p-5 scroll-mt-6" style={{ animationDelay: "340ms" }}>
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Alertas del equipo</h2>
+            <p className="mt-1 text-sm text-[var(--ink-muted)]">
+              Colaboradores sin tareas activas y colaboradores con carga por encima del umbral.
+            </p>
+          </div>
+          <label className="text-xs text-[var(--ink-muted)]">
+            Umbral de sobrecarga (horas activas)
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={overloadThresholdHours}
+              onChange={(event) =>
+                setOverloadThresholdHours(Math.max(1, Number(event.target.value) || 1))
+              }
+              className="mt-1 block w-32 rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">
+              Sin tareas activas ({teamAlerts.withoutActiveTasks.length})
+            </p>
+            {teamAlerts.withoutActiveTasks.length === 0 ? (
+              <p className="mt-3 text-sm text-amber-800/80">
+                Todos los colaboradores activos tienen al menos una tarea en curso.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {teamAlerts.withoutActiveTasks.map((row) => (
+                  <div
+                    key={row.user.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white px-3 py-2"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold">{row.user.fullName}</p>
+                      <p className="text-xs text-[var(--ink-muted)]">{roleLabels[row.user.role]}</p>
+                    </div>
+                    <Link
+                      href={`/tasks?assigneeId=${row.user.id}`}
+                      className="rounded-lg border border-amber-300 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800"
+                    >
+                      Asignar tarea
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
+              Sobrecarga ({teamAlerts.overloaded.length})
+            </p>
+            {teamAlerts.overloaded.length === 0 ? (
+              <p className="mt-3 text-sm text-red-700/80">
+                Nadie supera el umbral de {overloadThresholdHours}h activas por ahora.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {teamAlerts.overloaded.map((row) => (
+                  <div
+                    key={row.user.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-white px-3 py-2"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold">{row.user.fullName}</p>
+                      <p className="text-xs text-[var(--ink-muted)]">
+                        {roleLabels[row.user.role]} · {row.activeHours.toFixed(1)} h en {row.activeTasksCount} tarea(s)
+                      </p>
+                    </div>
+                    <Link
+                      href={`/tasks?assigneeId=${row.user.id}`}
+                      className="rounded-lg border border-red-300 bg-red-100 px-2 py-1 text-xs font-semibold text-red-700"
+                    >
+                      Ver tareas
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+      ) : null}
+
+      {role === "manager" ? (
       <section id="usuarios" className="kpi-card fade-up p-5 scroll-mt-6" style={{ animationDelay: "380ms" }}>
         <h2 className="text-lg font-semibold">Usuarios</h2>
         {role === "manager" ? (
@@ -1094,6 +1387,7 @@ export default function DashboardPage() {
 
             <div className="mt-4 grid gap-3 md:grid-cols-[minmax(260px,340px),1fr]">
               <select
+                name="dashboard-user-stats-select"
                 value={selectedDashboardUserId}
                 onChange={(event) => setSelectedDashboardUserId(event.target.value)}
                 className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
@@ -1135,42 +1429,47 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
-              <table className="min-w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
-                    <th className="px-3 py-3 font-semibold">Proyecto</th>
-                    <th className="px-3 py-3 font-semibold">Tarea</th>
-                    <th className="px-3 py-3 font-semibold">Estado</th>
-                    <th className="px-3 py-3 font-semibold">Prioridad</th>
-                    <th className="px-3 py-3 font-semibold">Vence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!selectedDashboardUser || selectedDashboardUserTasks.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-4 text-center text-[var(--ink-muted)]">
-                        Este usuario no tiene tareas asignadas.
-                      </td>
-                    </tr>
-                  ) : (
-                    selectedDashboardUserTasks.map((task) => (
-                      <tr key={task.id} className="border-b border-[var(--line)]/50 align-top">
-                        <td className="px-3 py-3">
-                          <p className="font-semibold">{projectsById[task.projectId]?.name ?? "-"}</p>
-                          <p className="mt-1 font-mono text-xs text-[var(--ink-muted)]">
-                            {projectsById[task.projectId]?.code ?? "-"}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3">{task.title}</td>
-                        <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
-                        <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
-                        <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div className="mt-4 grid gap-4">
+              <article className="rounded-2xl border border-[var(--line)] bg-white p-4">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  Horas asignadas por especialidad
+                </p>
+                <p className="mt-1 text-sm text-[var(--ink-muted)]">
+                  {selectedDashboardUser
+                    ? `${selectedDashboardUser.fullName} · distribucion por academia`
+                    : "Selecciona un usuario para ver su distribucion"}
+                </p>
+
+                {!selectedDashboardUser || selectedUserAssignedHoursBySpecialty.length === 0 ? (
+                  <p className="mt-4 text-sm text-[var(--ink-muted)]">
+                    Sin horas asignadas por especialidad para mostrar.
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {selectedUserAssignedHoursBySpecialty.map((row) => {
+                      const pct = Math.min((row.hours / selectedSpecialtyHoursMax) * 100, 100);
+                      return (
+                        <div key={row.specialty}>
+                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                            <p className="font-semibold">{row.specialty}</p>
+                            <p className="text-[var(--ink-muted)]">{row.hours.toFixed(2)} h ({row.tasks} tareas)</p>
+                          </div>
+                          <div className="bar-track">
+                            <div className="bar-fill" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--background)] p-4 text-sm text-[var(--ink-muted)]">
+              Para ver resumen quincenal por proyecto y porcentajes por persona, abre el apartado de reporte.
+              <div className="mt-3">
+                <Link href="/quincenas" className="ui-btn ui-btn-secondary ui-btn-sm">Abrir reporte</Link>
+              </div>
             </div>
           </>
         ) : (
@@ -1207,6 +1506,7 @@ export default function DashboardPage() {
 
             <div className="mt-4 space-y-3">
               <select
+                name="task-modal-project"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 value={taskForm.projectId}
                 onChange={(event) => setTaskForm({ ...taskForm, projectId: event.target.value })}
@@ -1221,12 +1521,14 @@ export default function DashboardPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <input
+                  name="task-modal-academia"
                   className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
                   placeholder="Academia"
                   value={selectedTaskProject?.code ?? ""}
                   readOnly
                 />
                 <input
+                  name="task-modal-especialidad"
                   className="w-full rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm"
                   placeholder="Especialidad"
                   value={projectTaskSpecialtyLabel(selectedTaskProject)}
@@ -1235,6 +1537,7 @@ export default function DashboardPage() {
               </div>
 
               <select
+                name="task-modal-activity"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 value={taskForm.activityType}
                 onChange={(event) =>
@@ -1249,6 +1552,7 @@ export default function DashboardPage() {
               </select>
 
               <input
+                name="task-modal-title"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 placeholder="Titulo"
                 value={taskForm.title}
@@ -1256,6 +1560,7 @@ export default function DashboardPage() {
               />
 
               <textarea
+                name="task-modal-description"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 placeholder="Descripcion"
                 value={taskForm.description}
@@ -1264,6 +1569,7 @@ export default function DashboardPage() {
               />
 
               <select
+                name="task-modal-assignee"
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 value={taskForm.assigneeId}
                 onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}
@@ -1276,8 +1582,29 @@ export default function DashboardPage() {
                 ))}
               </select>
 
+              <select
+                name="task-modal-team"
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                value={taskForm.teamId}
+                onChange={(event) =>
+                  setTaskForm((current) => ({
+                    ...current,
+                    teamId: event.target.value,
+                    assigneeId: event.target.value ? "" : current.assigneeId,
+                  }))
+                }
+              >
+                <option value="">Asignar por equipo (opcional)</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name} ({team.memberCount ?? 0})
+                  </option>
+                ))}
+              </select>
+
               <div className="grid gap-3 md:grid-cols-2">
                 <select
+                  name="task-modal-status"
                   className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                   value={taskForm.status}
                   onChange={(event) =>
@@ -1292,6 +1619,7 @@ export default function DashboardPage() {
                 </select>
 
                 <select
+                  name="task-modal-priority"
                   className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                   value={taskForm.priority}
                   onChange={(event) =>
@@ -1308,12 +1636,21 @@ export default function DashboardPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <input
+                  name="task-modal-due-date"
                   type="date"
+                  required
+                  placeholder="Fecha de finalizacion"
                   className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                   value={taskForm.dueDate}
+                  onFocus={() => {
+                    if (!taskForm.dueDate) {
+                      setTaskForm((current) => ({ ...current, dueDate: getTodayDate() }));
+                    }
+                  }}
                   onChange={(event) => setTaskForm({ ...taskForm, dueDate: event.target.value })}
                 />
                 <input
+                  name="task-modal-estimated-hours"
                   type="number"
                   min="0"
                   step="0.5"

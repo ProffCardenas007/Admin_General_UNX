@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
+export type TaskStatus = 'todo' | 'doing' | 'paused' | 'blocked' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskActivityType =
   | 'revision'
@@ -14,12 +14,19 @@ export type TaskActivityType =
   | 'creacion'
   | 'presentaciones'
   | 'grabacion'
-  | 'plataforma';
+  | 'plataforma'
+  | 'administrativo';
 
 @Entity({ name: 'tasks' })
 export class TaskEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column({ name: 'chain_id', type: 'uuid', nullable: true })
+  chainId?: string | null;
+
+  @Column({ name: 'chain_order', type: 'int', nullable: true })
+  chainOrder?: number | null;
 
   @Column({ type: 'varchar', length: 60 })
   code: string;
@@ -27,10 +34,21 @@ export class TaskEntity {
   @Column({ name: 'project_id', type: 'uuid' })
   projectId: string;
 
+  @Column({ name: 'parent_task_id', type: 'uuid', nullable: true })
+  parentTaskId?: string | null;
+
   @Column({
     name: 'activity_type',
     type: 'enum',
-    enum: ['revision', 'edicion', 'creacion', 'presentaciones', 'grabacion', 'plataforma'],
+    enum: [
+      'revision',
+      'edicion',
+      'creacion',
+      'presentaciones',
+      'grabacion',
+      'plataforma',
+      'administrativo',
+    ],
     enumName: 'task_activity_type',
   })
   activityType: TaskActivityType;
@@ -44,9 +62,12 @@ export class TaskEntity {
   @Column({ name: 'assignee_id', type: 'uuid', nullable: true })
   assigneeId?: string;
 
+  @Column({ name: 'created_by', type: 'uuid', nullable: true })
+  createdBy?: string | null;
+
   @Column({
     type: 'enum',
-    enum: ['todo', 'doing', 'blocked', 'done'],
+    enum: ['todo', 'doing', 'paused', 'blocked', 'done'],
     enumName: 'task_status',
     default: 'todo',
   })
@@ -62,6 +83,18 @@ export class TaskEntity {
 
   @Column({ name: 'due_date', type: 'date', nullable: true })
   dueDate?: string;
+
+  @Column({ name: 'activated_at', type: 'timestamptz', nullable: true })
+  activatedAt?: Date | null;
+
+  @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
+  completedAt?: Date | null;
+
+  @Column({ name: 'active_seconds', type: 'int', default: 0 })
+  activeSeconds: number;
+
+  @Column({ name: 'timer_started_at', type: 'timestamptz', nullable: true })
+  timerStartedAt?: Date | null;
 
   @Column({
     name: 'estimated_hours',

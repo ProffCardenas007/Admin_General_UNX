@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
-import AppBrandLink from "./app-brand-link";
+import AppNav from "./app-nav";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -29,13 +29,15 @@ export default function RootLayout({
       lang="es"
       className={`${spaceGrotesk.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <header className="app-brand-bar">
-          <div className="app-brand-wrap">
-            <AppBrandLink />
-          </div>
-        </header>
-        <main className="flex-1">{children}</main>
+      {/*
+        flex (sin flex-col) → sidebar izquierdo + contenido a la derecha.
+        La pantalla de login no muestra sidebar (AppNav lo detecta por pathname).
+      */}
+      <body className="min-h-full flex">
+        <AppNav />
+        <div className="app-layout-content">
+          <main className="flex-1">{children}</main>
+        </div>
       </body>
     </html>
   );
