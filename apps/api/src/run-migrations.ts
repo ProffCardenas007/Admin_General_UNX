@@ -6,6 +6,7 @@ const MIGRATION_SCRIPTS = [
   'migrate-project-uniqueness.js',
   'migrate-task-activity.js',
   'migrate-task-timer.js',
+  'migrate-task-completion-outcome.js',
   'migrate-class-schedule.js',
   'migrate-class-planning.js',
   'migrate-class-subjects.js',

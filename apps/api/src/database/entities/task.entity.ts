@@ -90,6 +90,9 @@ export class TaskEntity {
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt?: Date | null;
 
+  @Column({ name: 'completion_outcome', type: 'varchar', length: 20, nullable: true })
+  completionOutcome?: 'completed' | 'not_completed' | null;
+
   @Column({ name: 'active_seconds', type: 'int', default: 0 })
   activeSeconds: number;
 

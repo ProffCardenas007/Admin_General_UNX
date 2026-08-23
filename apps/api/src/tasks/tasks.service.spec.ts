@@ -31,6 +31,17 @@ describe('TasksService', () => {
       findOne: jest.fn(),
       save: jest.fn(),
       create: jest.fn(),
+      manager: {
+        transaction: jest.fn(async (callback) =>
+          callback({
+            getRepository: jest.fn((entity) =>
+              entity.name === 'TaskEntity'
+                ? tasksRepository
+                : taskUpdatesRepository,
+            ),
+          }),
+        ),
+      },
     };
     projectsRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'project-1', scope: 'creacion' }),
@@ -240,6 +251,123 @@ describe('TasksService', () => {
     expect(result.timerStartedAt).toBeNull();
     expect(result.activeSeconds).toBeGreaterThanOrEqual(3);
     expect(result.completedAt).toBeInstanceOf(Date);
+  });
+
+  it('closes a task as not completed and records the previous assignee', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      code: 'TASK-1',
+      title: 'Tarea pendiente',
+      projectId: 'project-1',
+      assigneeId: 'worker-1',
+      status: 'doing',
+      activeSeconds: 0,
+      timerStartedAt: new Date(Date.now() - 2000),
+    });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+
+    const result = await service.markNotCompleted(
+      'task-1',
+      { reason: 'No entregó el material solicitado' },
+      { id: 'manager-1', role: 'manager' },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'done',
+        completionOutcome: 'not_completed',
+        timerStartedAt: null,
+      }),
+    );
+    expect(result.completedAt).toBeInstanceOf(Date);
+    expect(taskUpdatesRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        userId: 'worker-1',
+        blockerReason: 'No entregó el material solicitado',
+      }),
+    );
+  });
+
+  it('records non-completion and reassigns the task as pending', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      code: 'TASK-1',
+      title: 'Tarea pendiente',
+      projectId: 'project-1',
+      assigneeId: 'worker-1',
+      status: 'paused',
+      activeSeconds: 30,
+      timerStartedAt: null,
+    });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+    usersRepository.findOne.mockImplementation(async ({ where }: any) => {
+      if (where.id === 'worker-2') {
+        return { id: 'worker-2', fullName: 'Responsable nuevo', isActive: true };
+      }
+      return { id: 'manager-1', role: 'manager' };
+    });
+
+    const result = await service.markNotCompleted(
+      'task-1',
+      {
+        reason: 'No respondió al seguimiento',
+        reassignToUserId: 'worker-2',
+      },
+      { id: 'manager-1', role: 'manager' },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        assigneeId: 'worker-2',
+        status: 'todo',
+        completedAt: null,
+        completionOutcome: null,
+      }),
+    );
+    expect(taskUpdatesRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        userId: 'worker-1',
+        comments: expect.stringContaining('Responsable nuevo'),
+      }),
+    );
+  });
+
+  it('appends non-completion without replacing same-day history', async () => {
+    const existingUpdate = {
+      id: 'update-1',
+      taskId: 'task-1',
+      userId: 'worker-1',
+      updateDate: '2026-01-01',
+      workedHours: '2',
+      progressPercent: '40',
+      blockerReason: 'Faltó acceso',
+      comments: 'Avance parcial',
+    };
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      code: 'TASK-1',
+      title: 'Tarea pendiente',
+      projectId: 'project-1',
+      assigneeId: 'worker-1',
+      status: 'todo',
+      activeSeconds: 0,
+      timerStartedAt: null,
+    });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+    taskUpdatesRepository.findOne.mockResolvedValue(existingUpdate);
+
+    await service.markNotCompleted(
+      'task-1',
+      { reason: 'No realizó la entrega final' },
+      { id: 'manager-1', role: 'manager' },
+    );
+
+    expect(existingUpdate.blockerReason).toBe('Faltó acceso');
+    expect(existingUpdate.comments).toContain('Avance parcial');
+    expect(existingUpdate.comments).toContain('No realizó la entrega final');
+    expect(taskUpdatesRepository.save).toHaveBeenCalledWith(existingUpdate);
   });
 
   it('links each following step in a chain to the previous task as parent', async () => {

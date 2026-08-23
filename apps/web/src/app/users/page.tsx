@@ -48,6 +48,7 @@ type TaskStatsRow = {
   status: "todo" | "doing" | "paused" | "blocked" | "done";
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
+  completionOutcome?: "completed" | "not_completed" | null;
 };
 
 type TaskUpdateRow = {
@@ -84,6 +85,11 @@ const taskStatusLabels: Record<TaskStatsRow["status"], string> = {
   blocked: "bloqueada",
   done: "finalizada",
 };
+
+const taskStatusLabel = (task: TaskStatsRow) =>
+  task.status === "done" && task.completionOutcome === "not_completed"
+    ? "no completada"
+    : taskStatusLabels[task.status] ?? task.status;
 
 export default function UsersPage() {
   const router = useRouter();
@@ -290,7 +296,9 @@ export default function UsersPage() {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const total = selectedUserTasksByPeriod.length;
-    const done = selectedUserTasksByPeriod.filter((task) => task.status === "done").length;
+    const done = selectedUserTasksByPeriod.filter(
+      (task) => task.status === "done" && task.completionOutcome !== "not_completed",
+    ).length;
     const blocked = selectedUserTasksByPeriod.filter((task) => task.status === "blocked").length;
     const active = selectedUserTasksByPeriod.filter((task) => task.status !== "done").length;
     const urgent = selectedUserTasksByPeriod.filter(
@@ -855,7 +863,7 @@ export default function UsersPage() {
                       <tr key={task.id} className="border-b border-[var(--line)]/60 align-top">
                         <td className="px-4 py-3 font-semibold">{task.title}</td>
                         <td className="px-4 py-3">{activityTypeLabels[task.activityType] ?? task.activityType}</td>
-                        <td className="px-4 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
+                        <td className="px-4 py-3">{taskStatusLabel(task)}</td>
                         <td className="px-4 py-3">{task.priority}</td>
                         <td className="px-4 py-3">{task.dueDate ?? "-"}</td>
                       </tr>

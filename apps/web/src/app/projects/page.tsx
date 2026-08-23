@@ -30,6 +30,7 @@ type TaskRow = {
   status: "todo" | "doing" | "blocked" | "done";
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
+  completionOutcome?: "completed" | "not_completed" | null;
 };
 
 type UserRow = {
@@ -59,6 +60,11 @@ const taskStatusLabels: Record<TaskRow["status"], string> = {
   blocked: "bloqueada",
   done: "finalizada",
 };
+
+const taskStatusLabel = (task: TaskRow) =>
+  task.status === "done" && task.completionOutcome === "not_completed"
+    ? "no completada"
+    : taskStatusLabels[task.status] ?? task.status;
 
 const taskPriorityLabels: Record<TaskRow["priority"], string> = {
   low: "baja",
@@ -620,7 +626,7 @@ export default function ProjectsPage() {
                                       Responsable: {assigneeLabel(task.assigneeId)} | Actividad: {activityTypeLabels[task.activityType] ?? task.activityType}
                                     </p>
                                     <p className="mt-1 text-[var(--ink-muted)]">
-                                      {taskStatusLabels[task.status] ?? task.status} | prioridad {taskPriorityLabels[task.priority] ?? task.priority} | fecha fin {task.dueDate ?? "-"}
+                                      {taskStatusLabel(task)} | prioridad {taskPriorityLabels[task.priority] ?? task.priority} | fecha fin {task.dueDate ?? "-"}
                                     </p>
                                     {role === "manager" ? (
                                       <div className="mt-3 flex max-w-3xl flex-col gap-2 border-t border-[var(--line)] pt-3 sm:flex-row sm:items-center">

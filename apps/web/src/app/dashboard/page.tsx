@@ -40,6 +40,7 @@ type TaskRow = {
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
   estimatedHours?: string;
+  completionOutcome?: "completed" | "not_completed" | null;
 };
 
 type ProjectRow = {
@@ -113,6 +114,11 @@ const taskStatusLabels: Record<TaskRow["status"], string> = {
   blocked: "bloqueada",
   done: "finalizada",
 };
+
+const taskStatusLabel = (task: TaskRow) =>
+  task.status === "done" && task.completionOutcome === "not_completed"
+    ? "no completada"
+    : taskStatusLabels[task.status] ?? task.status;
 
 const priorityOptions = [
   { value: "low", label: "baja" },
@@ -335,7 +341,9 @@ export default function DashboardPage() {
     const todo = tasks.filter((task) => task.status === "todo").length;
     const doing = tasks.filter((task) => task.status === "doing").length;
     const blocked = tasks.filter((task) => task.status === "blocked").length;
-    const done = tasks.filter((task) => task.status === "done").length;
+    const done = tasks.filter(
+      (task) => task.status === "done" && task.completionOutcome !== "not_completed",
+    ).length;
     const urgent = tasks.filter((task) => task.priority === "urgent" && task.status !== "done").length;
     const overdue = tasks.filter((task) => {
       if (task.status === "done" || !task.dueDate) {
@@ -454,7 +462,9 @@ export default function DashboardPage() {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const total = selectedDashboardUserTasks.length;
-    const done = selectedDashboardUserTasks.filter((task) => task.status === "done").length;
+    const done = selectedDashboardUserTasks.filter(
+      (task) => task.status === "done" && task.completionOutcome !== "not_completed",
+    ).length;
     const blocked = selectedDashboardUserTasks.filter((task) => task.status === "blocked").length;
     const active = selectedDashboardUserTasks.filter((task) => task.status !== "done").length;
     const urgent = selectedDashboardUserTasks.filter(
@@ -1110,7 +1120,7 @@ export default function DashboardPage() {
                               ? (usersById[task.assigneeId]?.fullName ?? task.assigneeId.slice(0, 8))
                               : "Sin asignar"}
                           </td>
-                          <td className="px-3 py-3">{taskStatusLabels[task.status] ?? task.status}</td>
+                          <td className="px-3 py-3">{taskStatusLabel(task)}</td>
                           <td className="px-3 py-3">{taskPriorityLabels[task.priority] ?? task.priority}</td>
                           <td className="px-3 py-3">{task.dueDate ?? "-"}</td>
                         </tr>

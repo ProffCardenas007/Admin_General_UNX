@@ -38,6 +38,7 @@ type TaskRow = {
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
   estimatedHours?: string;
+  completionOutcome?: "completed" | "not_completed" | null;
 };
 
 type UserRow = {
@@ -86,6 +87,11 @@ const taskStatusLabels: Record<TaskRow["status"], string> = {
   blocked: "bloqueada",
   done: "finalizada",
 };
+
+const taskStatusLabel = (task: TaskRow) =>
+  task.status === "done" && task.completionOutcome === "not_completed"
+    ? "no completada"
+    : taskStatusLabels[task.status];
 
 const activityTypeLabels: Record<TaskRow["activityType"], string> = {
   revision: "revision",
@@ -805,7 +811,7 @@ export default function CalendarPage() {
                     {isTask && task ? (
                       <div className="mt-3 space-y-1 text-xs opacity-90">
                         <p>Vinculo: {taskRelationLabels[getTaskRelation(task, effectiveCalendarUserId)]}</p>
-                        <p>Estado: {taskStatusLabels[task.status]}</p>
+                        <p>Estado: {taskStatusLabel(task)}</p>
                         <p>Prioridad: {taskPriorityLabels[task.priority]}</p>
                         <p>Proyecto: {project ? `${project.code} - ${project.name}` : "Sin proyecto visible"}</p>
                         <p>Responsable: {assignee ? `${assignee.fullName} (${roleLabels[assignee.role]})` : "Sin asignar"}</p>
@@ -978,7 +984,7 @@ export default function CalendarPage() {
                                 {childTask.code} · {childTask.title}
                               </p>
                               <span className="rounded-full border border-cyan-200 bg-cyan-100 px-3 py-1 text-[11px] font-semibold text-cyan-800">
-                                {taskStatusLabels[childTask.status]}
+                                {taskStatusLabel(childTask)}
                               </span>
                             </div>
                             <p className="mt-1 text-xs text-[var(--ink-muted)]">

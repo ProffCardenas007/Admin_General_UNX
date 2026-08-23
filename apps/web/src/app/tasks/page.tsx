@@ -30,6 +30,7 @@ type TaskRow = {
   estimatedHours: string;
   activeSeconds?: number;
   timerStartedAt?: string | null;
+  completionOutcome?: "completed" | "not_completed" | null;
 };
 
 type ProjectRow = {
@@ -333,6 +334,10 @@ export default function TasksPage() {
   const [openedTrackingTaskId, setOpenedTrackingTaskId] = useState("");
   const [openedDescriptionTaskId, setOpenedDescriptionTaskId] = useState("");
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
+  const [openedNotCompletedTaskId, setOpenedNotCompletedTaskId] = useState("");
+  const [notCompletedReason, setNotCompletedReason] = useState("");
+  const [notCompletedReassignToUserId, setNotCompletedReassignToUserId] = useState("");
+  const [notCompletedError, setNotCompletedError] = useState("");
   const [centerNoticeMessage, setCenterNoticeMessage] = useState("");
   const showCodeAndAssigneeColumns = role !== "worker";
   const isWorker = role === "worker";
@@ -851,7 +856,9 @@ export default function TasksPage() {
 
   const workerKpis = useMemo(() => {
     const total = filteredTasks.length;
-    const done = filteredTasks.filter((task) => task.status === "done").length;
+    const done = filteredTasks.filter(
+      (task) => task.status === "done" && task.completionOutcome !== "not_completed",
+    ).length;
     const doing = filteredTasks.filter((task) => task.status === "doing").length;
     const blocked = filteredTasks.filter((task) => task.status === "blocked").length;
     const dueToday = filteredTasks.filter((task) => task.status !== "done" && task.dueDate === todayIso).length;
@@ -912,6 +919,13 @@ export default function TasksPage() {
 
   const taskDueSemaforo = (task: TaskRow) => {
     if (task.status === "done") {
+      if (task.completionOutcome === "not_completed") {
+        return {
+          label: "No completada",
+          dotClass: "bg-red-500",
+          textClass: "text-red-600",
+        };
+      }
       return {
         label: "Finalizada",
         dotClass: "bg-emerald-500",
@@ -1334,6 +1348,78 @@ export default function TasksPage() {
     }
   };
 
+  const closeNotCompletedModal = () => {
+    setOpenedNotCompletedTaskId("");
+    setNotCompletedReason("");
+    setNotCompletedReassignToUserId("");
+    setNotCompletedError("");
+  };
+
+  const onMarkTaskNotCompleted = async () => {
+    const task = tasks.find((item) => item.id === openedNotCompletedTaskId);
+    const reason = notCompletedReason.trim();
+    if (!task || !reason) {
+      setNotCompletedError("Escribe el motivo por el que la tarea no fue completada.");
+      return;
+    }
+
+    setInfo("");
+    setError("");
+    setNotCompletedError("");
+    setSavingTaskId(task.id);
+
+    try {
+      const response = await axios.patch(
+        `${API_URL}/tasks/${task.id}/not-completed`,
+        {
+          reason,
+          reassignToUserId: notCompletedReassignToUserId || undefined,
+        },
+        { headers: authHeaders() },
+      );
+      const updatedTask = response.data as TaskRow;
+
+      setTasks((current) =>
+        current.map((item) => (item.id === task.id ? { ...item, ...updatedTask } : item)),
+      );
+      setTaskDrafts((current) => ({
+        ...current,
+        [task.id]: {
+          ...current[task.id],
+          status: updatedTask.status,
+          assigneeId: updatedTask.assigneeId ?? "",
+        },
+      }));
+      setFloatingTimers((current) => {
+        if (!current[task.id]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+      setHistoryByTask((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([key]) => !key.startsWith(`${task.id}|`)),
+        ),
+      );
+
+      const wasReassigned = Boolean(notCompletedReassignToUserId);
+      closeNotCompletedModal();
+      setInfo(
+        wasReassigned
+          ? `Incumplimiento registrado y tarea ${task.code} reasignada.`
+          : `Tarea ${task.code} cerrada como no completada.`,
+      );
+    } catch (caughtError) {
+      setNotCompletedError(
+        extractErrorMessage(caughtError, "No se pudo registrar la tarea no completada."),
+      );
+    } finally {
+      setSavingTaskId("");
+    }
+  };
+
   const floatingTimerEntries = Object.entries(floatingTimers)
     .map(([taskId, entry]) => {
       const task = tasks.find((item) => item.id === taskId && item.status !== "done");
@@ -1342,6 +1428,8 @@ export default function TasksPage() {
     .filter((row): row is { task: TaskRow; entry: { x: number; y: number; minimized: boolean } } => row !== null);
 
   const canPlanConsequence = role === "manager" || role === "lead" || role === "worker";
+  const canMarkNotCompleted = role === "manager" || role === "lead";
+  const notCompletedTask = tasks.find((item) => item.id === openedNotCompletedTaskId);
   const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
   const consequenceDraft = openedConsequenceTaskId
     ? taskDrafts[openedConsequenceTaskId]
@@ -2063,11 +2151,15 @@ export default function TasksPage() {
                               <option value="doing">{statusLabels.doing}</option>
                               <option value="paused">{statusLabels.paused}</option>
                               <option value="blocked">{statusLabels.blocked}</option>
-                              <option value="done">{statusLabels.done}</option>
+                              <option value="done">
+                                {task.completionOutcome === "not_completed" ? "no completada" : statusLabels.done}
+                              </option>
                             </select>
                           ) : (
                             <span className="inline-block rounded-full border border-[var(--line)] bg-white px-3 py-1 text-xs font-semibold">
-                              {statusLabels[task.status] ?? task.status}
+                              {task.status === "done" && task.completionOutcome === "not_completed"
+                                ? "no completada"
+                                : statusLabels[task.status] ?? task.status}
                             </span>
                           )}
                           <p className="mt-2 text-xs text-[var(--ink-muted)]">
@@ -2221,6 +2313,19 @@ export default function TasksPage() {
                                 Tarea consecuente
                               </button>
                             ) : null}
+                            {canMarkNotCompleted && task.status !== "done" ? (
+                              <button
+                                onClick={() => {
+                                  setOpenedNotCompletedTaskId(task.id);
+                                  setNotCompletedReason("");
+                                  setNotCompletedReassignToUserId("");
+                                  setNotCompletedError("");
+                                }}
+                                className="ui-btn ui-btn-danger ui-btn-sm"
+                              >
+                                Tarea no completada
+                              </button>
+                            ) : null}
                             {canDeleteTask ? (
                               <button
                                 onClick={() => void onDeleteTask(task.id)}
@@ -2314,7 +2419,7 @@ export default function TasksPage() {
                                   ) : null}
                                   {item.blockerReason ? (
                                     <p className="mt-1 text-xs text-[var(--danger)]">
-                                      Bloqueo: {item.blockerReason}
+                                      Detalle: {item.blockerReason}
                                     </p>
                                   ) : null}
                                 </div>
@@ -2344,7 +2449,9 @@ export default function TasksPage() {
                                         {childTask.code} · {childTask.title}
                                       </span>
                                       <span className="rounded-full border border-cyan-200 bg-cyan-100 px-3 py-1 font-semibold text-cyan-800">
-                                        {statusLabels[childTask.status] ?? childTask.status}
+                                        {childTask.status === "done" && childTask.completionOutcome === "not_completed"
+                                          ? "no completada"
+                                          : statusLabels[childTask.status] ?? childTask.status}
                                       </span>
                                     </div>
                                     <p className="mt-2 text-xs text-[var(--ink-muted)]">
@@ -2386,6 +2493,95 @@ export default function TasksPage() {
               Entendido
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {canMarkNotCompleted && notCompletedTask ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4"
+          onClick={closeNotCompletedModal}
+        >
+          <form
+            className="w-full max-w-xl rounded-2xl border border-[var(--line)] bg-white p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onMarkTaskNotCompleted();
+            }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--danger)]">
+                  Tarea no completada
+                </p>
+                <h3 className="mt-1 text-lg font-semibold">{notCompletedTask.title}</h3>
+                <p className="text-xs text-[var(--ink-muted)]">
+                  Responsable actual: {assigneeLabel(notCompletedTask.assigneeId)}
+                </p>
+              </div>
+              <button type="button" onClick={closeNotCompletedModal} className="ui-btn ui-btn-secondary ui-btn-sm">
+                Cerrar
+              </button>
+            </div>
+
+            <label className="mt-5 block text-sm font-semibold text-[var(--foreground)]">
+              Motivo
+              <textarea
+                value={notCompletedReason}
+                onChange={(event) => setNotCompletedReason(event.target.value)}
+                rows={4}
+                maxLength={1000}
+                className="mt-2 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-normal"
+                placeholder="Describe qué quedó pendiente o por qué no se completó"
+                autoFocus
+              />
+            </label>
+
+            <label className="mt-4 block text-sm font-semibold text-[var(--foreground)]">
+              Reasignar a otra persona (opcional)
+              <select
+                value={notCompletedReassignToUserId}
+                onChange={(event) => setNotCompletedReassignToUserId(event.target.value)}
+                className="mt-2 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-normal"
+              >
+                <option value="">No reasignar: cerrar la tarea</option>
+                {users
+                  .filter((user) => user.id !== notCompletedTask.assigneeId)
+                  .map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName} ({roleLabels[user.role] ?? user.role})
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <p className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--ink-muted)]">
+              {notCompletedReassignToUserId
+                ? "Se registrará el incumplimiento del responsable actual y la tarea volverá a Por hacer con el nuevo responsable."
+                : "Se registrará el incumplimiento del responsable actual y la tarea quedará cerrada como No completada."}
+            </p>
+
+            {notCompletedError ? (
+              <p className="mt-3 text-sm text-[var(--danger)]">{notCompletedError}</p>
+            ) : null}
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button type="button" onClick={closeNotCompletedModal} className="ui-btn ui-btn-secondary">
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingTaskId === notCompletedTask.id}
+                className="ui-btn ui-btn-danger disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {savingTaskId === notCompletedTask.id
+                  ? "Registrando..."
+                  : notCompletedReassignToUserId
+                    ? "Registrar y reasignar"
+                    : "Registrar y cerrar tarea"}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
 

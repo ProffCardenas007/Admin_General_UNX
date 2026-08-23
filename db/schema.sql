@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     due_date DATE,
     activated_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
+    completion_outcome VARCHAR(20) CHECK (completion_outcome IS NULL OR completion_outcome IN ('completed', 'not_completed')),
     estimated_hours NUMERIC(8, 2) DEFAULT 0 CHECK (estimated_hours >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -170,6 +171,8 @@ ALTER TABLE IF EXISTS tasks
     ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS tasks
     ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tasks
+    ADD COLUMN IF NOT EXISTS completion_outcome VARCHAR(20);
 
 CREATE TABLE IF NOT EXISTS task_updates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

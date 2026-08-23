@@ -20,6 +20,7 @@ import { TeamMemberEntity } from '../database/entities/team-member.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { CreateTaskChainDto } from './dto/create-task-chain.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { MarkTaskNotCompletedDto } from './dto/mark-task-not-completed.dto';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 
 @Injectable()
@@ -591,6 +592,10 @@ export class TasksService {
     Object.assign(task, taskFields);
     if (taskFields.status === 'done' && before.status !== 'done') {
       task.completedAt = new Date();
+      task.completionOutcome = 'completed';
+    } else if (taskFields.status !== undefined && taskFields.status !== 'done') {
+      task.completedAt = null;
+      task.completionOutcome = null;
     }
 
     if (
@@ -792,6 +797,155 @@ export class TasksService {
           await this.notificationsRepository.save(completionNotification);
         }
       }
+    }
+
+    return savedTask;
+  }
+
+  async markNotCompleted(
+    taskId: string,
+    dto: MarkTaskNotCompletedDto,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    if (actor.role === 'worker') {
+      throw new ForbiddenException(
+        'Only managers and leads can mark tasks as not completed',
+      );
+    }
+
+    const task = await this.tasksRepository.findOne({ where: { id: taskId } });
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const project = await this.projectsRepository.findOne({
+      where: { id: task.projectId },
+    });
+    if (actor.role === 'lead') {
+      const leadSpecialties = await this.resolveLeadSpecialties(actor);
+      const isLeadAssignee = task.assigneeId === actor.id;
+      if (
+        !isLeadAssignee &&
+        (leadSpecialties.length === 0 ||
+          !project?.scope ||
+          !leadSpecialties.includes(project.scope))
+      ) {
+        throw new ForbiddenException(
+          'Leads can only update tasks within their specialties',
+        );
+      }
+    }
+
+    if (!task.assigneeId) {
+      throw new BadRequestException(
+        'The task must have an assignee before it can be marked as not completed',
+      );
+    }
+
+    const reason = dto.reason.trim();
+    if (!reason) {
+      throw new BadRequestException('A non-completion reason is required');
+    }
+    const previousAssigneeId = task.assigneeId;
+    let reassignedUser: UserEntity | null = null;
+
+    if (dto.reassignToUserId) {
+      if (dto.reassignToUserId === task.assigneeId) {
+        throw new BadRequestException('Select a different assignee');
+      }
+      reassignedUser = await this.usersRepository.findOne({
+        where: { id: dto.reassignToUserId, isActive: true },
+      });
+      if (!reassignedUser) {
+        throw new NotFoundException('Reassignment user not found');
+      }
+    }
+
+    if (task.status === 'doing' && task.timerStartedAt) {
+      const elapsedSeconds = Math.max(
+        0,
+        Math.round((Date.now() - task.timerStartedAt.getTime()) / 1000),
+      );
+      task.activeSeconds = (task.activeSeconds ?? 0) + elapsedSeconds;
+    }
+    task.timerStartedAt = null;
+
+    if (reassignedUser) {
+      task.assigneeId = reassignedUser.id;
+      task.status = 'todo';
+      task.completedAt = null;
+      task.completionOutcome = null;
+    } else {
+      task.status = 'done';
+      task.completedAt = new Date();
+      task.completionOutcome = 'not_completed';
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const historyMessage = reassignedUser
+      ? `Tarea no completada. Motivo: ${reason}. Reasignada a ${reassignedUser.fullName}.`
+      : `Tarea no completada. Motivo: ${reason}.`;
+    const savedTask = await this.tasksRepository.manager.transaction(
+      async (manager) => {
+        const transactionalTasksRepository = manager.getRepository(TaskEntity);
+        const transactionalUpdatesRepository =
+          manager.getRepository(TaskUpdateEntity);
+        const saved = await transactionalTasksRepository.save(task);
+        const existingUpdate = await transactionalUpdatesRepository.findOne({
+          where: {
+            taskId: task.id,
+            userId: previousAssigneeId,
+            updateDate: today,
+          },
+        });
+
+        if (existingUpdate) {
+          existingUpdate.blockerReason = existingUpdate.blockerReason || reason;
+          existingUpdate.comments = existingUpdate.comments
+            ? `${existingUpdate.comments}\n${historyMessage}`
+            : historyMessage;
+          await transactionalUpdatesRepository.save(existingUpdate);
+        } else {
+          const historyUpdate = transactionalUpdatesRepository.create({
+            taskId: task.id,
+            userId: previousAssigneeId,
+            updateDate: today,
+            workedHours: '0',
+            progressPercent: '0',
+            blockerReason: reason,
+            comments: historyMessage,
+          });
+          await transactionalUpdatesRepository.save(historyUpdate);
+        }
+
+        return saved;
+      },
+    );
+
+    if (actor.role === 'manager') {
+      await this.recordManagerAudit({
+        actorId: actor.id,
+        action: 'task_not_completed',
+        entityType: 'task',
+        entityId: savedTask.id,
+        entityLabel: `${savedTask.code} - ${savedTask.title}`,
+        changes: {
+          completionOutcome: {
+            before: null,
+            after: reassignedUser ? 'reassigned' : 'not_completed',
+          },
+          assigneeId: {
+            before: previousAssigneeId,
+            after: savedTask.assigneeId ?? null,
+          },
+          reason: { before: null, after: reason },
+        },
+      });
     }
 
     return savedTask;
