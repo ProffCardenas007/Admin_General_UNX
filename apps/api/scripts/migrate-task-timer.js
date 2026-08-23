@@ -58,7 +58,11 @@ async function run() {
   console.log('DB_OK: tasks timer fields ready');
 }
 
-run().catch((error) => {
-  console.error('DB_ERR:', error.message);
-  process.exit(1);
-});
+module.exports = { run };
+
+if (require.main === module) {
+  run().catch((error) => {
+    console.error('DB_ERR:', error.message);
+    process.exit(1);
+  });
+}

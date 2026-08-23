@@ -1,8 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { runStartupMigrations } from './run-migrations';
 
 async function bootstrap() {
+  await runStartupMigrations();
+
   const app = await NestFactory.create(AppModule);
   app.enableCors({
     // JWT is sent in Authorization header (no cookies), so wildcard origin is safe here.
