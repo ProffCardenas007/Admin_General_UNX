@@ -170,7 +170,6 @@ export default function ClassPlanningPage() {
   const [startWithDoubleMath, setStartWithDoubleMath] = useState(false);
   const [sessionNotes, setSessionNotes] = useState("");
   const [coverageBySession, setCoverageBySession] = useState<Record<string, string>>({});
-  const [showPendingCoverageOnly, setShowPendingCoverageOnly] = useState(false);
 
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -240,10 +239,8 @@ export default function ClassPlanningPage() {
   );
 
   const visibleSessions = useMemo(
-    () => (showPendingCoverageOnly
-      ? sessions.filter((session) => session.hasTitularIncidenceConflict && !session.isCovered)
-      : sessions),
-    [sessions, showPendingCoverageOnly],
+    () => sessions.filter((session) => session.hasTitularIncidenceConflict && !session.isCovered),
+    [sessions],
   );
 
   const pendingCoverageCount = useMemo(
@@ -705,7 +702,6 @@ export default function ClassPlanningPage() {
       }
 
       setSessionNotes("");
-      setShowPendingCoverageOnly(false);
 
       if (availabilityWarnings.length > 0) {
         setInfo(
@@ -731,7 +727,6 @@ export default function ClassPlanningPage() {
       await loadData();
 
       if (createdSessionsCount > 0) {
-        setShowPendingCoverageOnly(false);
         setInfo(`Se programaron ${createdSessionsCount} semana(s) antes del conflicto.`);
         setError(
           getApiErrorMessage(
@@ -781,10 +776,6 @@ export default function ClassPlanningPage() {
 
       setError(getApiErrorMessage(error, "No se pudo asignar la cobertura. Revisa choques de horario del profesor de apoyo."));
     }
-  };
-
-  const onTogglePendingCoverage = async () => {
-    setShowPendingCoverageOnly((current) => !current);
   };
 
   const startEditCourse = (course: CourseRow) => {
@@ -1512,21 +1503,14 @@ export default function ClassPlanningPage() {
 
         <div className="glass-panel fade-up p-4 md:p-5" style={{ animationDelay: "180ms" }}>
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Sesiones programadas</p>
-            <button
-              type="button"
-              onClick={() => void onTogglePendingCoverage()}
-              className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-[var(--ink-soft)] hover:border-white/30"
-            >
-              {showPendingCoverageOnly ? "Ver todas" : "Solo pendientes por cubrir"}
-            </button>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Coberturas pendientes</p>
           </div>
           <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
-            Pendientes por cubrir: {pendingCoverageCount}
+            Sesiones con incidencia del profesor titular y sin suplente: {pendingCoverageCount}
           </p>
           <div className="mt-2 max-h-[420px] space-y-2 overflow-auto pr-1">
             {visibleSessions.length === 0 ? (
-              <p className="text-sm text-[var(--ink-soft)]">Sin sesiones programadas.</p>
+              <p className="text-sm text-[var(--ink-soft)]">No hay sesiones pendientes de cobertura.</p>
             ) : (
               visibleSessions.map((session) => (
                 <div key={session.id} className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
@@ -1561,7 +1545,7 @@ export default function ClassPlanningPage() {
                       }
                       className="ui-control"
                     >
-                      <option value="">Sin cobertura (titular)</option>
+                      <option value="">Selecciona quién cubrirá la sesión</option>
                       {teachers
                         .filter((teacher) => teacher.id !== session.teacherUserId)
                         .map((teacher) => (
