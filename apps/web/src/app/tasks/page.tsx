@@ -1581,6 +1581,33 @@ export default function TasksPage() {
 
         {canManagePlanning ? (
           <div className="mt-6 space-y-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                Vista personal
+              </p>
+              <button
+                type="button"
+                aria-pressed={selectedAssigneeId === currentUserId && selectedProjectId === ""}
+                disabled={!currentUserId}
+                onClick={() => {
+                  const shouldShowMyTasks = selectedAssigneeId !== currentUserId || selectedProjectId !== "";
+                  setSelectedAssigneeId(shouldShowMyTasks ? currentUserId : "");
+                  setSelectedSpecialty("");
+                  setSelectedProjectId("");
+                  if (shouldShowMyTasks) {
+                    setShowAllActivityQuincenas(true);
+                  }
+                }}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selectedAssigneeId === currentUserId && selectedProjectId === ""
+                    ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                    : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                }`}
+              >
+                Mis tareas
+              </button>
+            </div>
+
             {selectedAssigneeId && !selectedProjectId ? (
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-2 text-sm">
                 <span>
