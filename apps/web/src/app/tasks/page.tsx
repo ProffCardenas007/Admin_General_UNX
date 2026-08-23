@@ -5,7 +5,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
-import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type TaskRow = {
   id: string;
@@ -354,6 +354,7 @@ export default function TasksPage() {
   const [appliedHistoryTo, setAppliedHistoryTo] = useState("");
 
   const [search, setSearch] = useState("");
+  const [selectedSpecialty, setSelectedSpecialty] = useState<"" | LeadSpecialty>("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
   const [activityYearMonth, setActivityYearMonth] = useState(() => {
@@ -637,6 +638,8 @@ export default function TasksPage() {
       const byDoneStatus = showDoneTasks || task.status !== "done";
 
       if (canManagePlanning) {
+        const project = projects.find((item) => item.id === task.projectId);
+        const bySpecialty = selectedSpecialty.length === 0 || project?.scope === selectedSpecialty;
         const byProject = selectedProjectId.length === 0 || task.projectId === selectedProjectId;
         const byAssignee =
           selectedAssigneeId.length === 0 ||
@@ -651,7 +654,7 @@ export default function TasksPage() {
             task.dueDate >= activityQuincenaRange.startKey &&
             task.dueDate <= activityQuincenaRange.endKey);
 
-        return byProject && byAssignee && byActivityQuincena && byDoneStatus;
+        return bySpecialty && byProject && byAssignee && byActivityQuincena && byDoneStatus;
       }
 
       const bySearch =
@@ -667,6 +670,8 @@ export default function TasksPage() {
     tasks,
     search,
     canManagePlanning,
+    projects,
+    selectedSpecialty,
     selectedProjectId,
     selectedAssigneeId,
     activityQuincenaRange,
@@ -675,8 +680,13 @@ export default function TasksPage() {
   ]);
 
   const activeProjects = useMemo(
-    () => projects.filter((project) => project.status === "active"),
-    [projects],
+    () =>
+      projects.filter(
+        (project) =>
+          project.status === "active" &&
+          (selectedSpecialty.length === 0 || project.scope === selectedSpecialty),
+      ),
+    [projects, selectedSpecialty],
   );
 
   const peopleForSelectedProject = useMemo(() => {
@@ -1590,6 +1600,47 @@ export default function TasksPage() {
                 </button>
               </div>
             ) : null}
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                Especialidades
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSpecialty("");
+                    setSelectedProjectId("");
+                    setSelectedAssigneeId("");
+                  }}
+                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                    selectedSpecialty === ""
+                      ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                      : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                  }`}
+                >
+                  Todas las especialidades
+                </button>
+                {LEAD_SPECIALTIES.map((specialty) => (
+                  <button
+                    key={specialty}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSpecialty((current) => (current === specialty ? "" : specialty));
+                      setSelectedProjectId("");
+                      setSelectedAssigneeId("");
+                    }}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      selectedSpecialty === specialty
+                        ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                        : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                    }`}
+                  >
+                    {specialtyLabels[specialty]}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
