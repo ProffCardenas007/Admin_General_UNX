@@ -16,4 +16,4 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/scripts ./scripts
-CMD ["sh", "-c", "node scripts/migrate-task-activity.js && node scripts/upsert-manager.js && node dist/main.js"]
+CMD ["sh", "-c", "node scripts/migrate-task-activity.js && node scripts/migrate-task-timer.js && node scripts/migrate-class-schedule.js && node scripts/migrate-class-planning.js && node scripts/migrate-class-subjects.js && node scripts/upsert-manager.js && node dist/main.js"]
