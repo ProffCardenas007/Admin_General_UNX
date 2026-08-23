@@ -5,9 +5,17 @@ import { ReportsService } from './reports.service';
 import { TaskEntity } from '../database/entities/task.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
+import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TaskEntity, ProjectEntity, UserEntity])],
+  imports: [
+    TypeOrmModule.forFeature([
+      TaskEntity,
+      ProjectEntity,
+      UserEntity,
+      TaskUpdateEntity,
+    ]),
+  ],
   controllers: [ReportsController],
   providers: [ReportsService],
 })

@@ -320,6 +320,45 @@ body {
   color: var(--danger);
 }
 
+@media (max-width: 767px) {
+  .app-sidebar,
+  .app-sidebar--collapsed {
+    width: 58px;
+  }
+
+  .app-sidebar-brand,
+  .app-sidebar--collapsed .app-sidebar-brand {
+    justify-content: center;
+    gap: 0;
+    padding: 0.7rem 0.5rem;
+  }
+
+  .app-sidebar-brand-mark,
+  .app-sidebar--collapsed .app-sidebar-brand-mark {
+    display: flex;
+  }
+
+  .app-sidebar-brand-text,
+  .app-sidebar-collapse-btn,
+  .app-sidebar-label,
+  .app-sidebar-user {
+    display: none;
+  }
+
+  .app-sidebar-item,
+  .app-sidebar--collapsed .app-sidebar-item,
+  .app-sidebar-logout,
+  .app-sidebar--collapsed .app-sidebar-logout {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .app-sidebar-nav {
+    overflow-y: auto;
+  }
+}
+
 /* ─────────────────────────────────────────
    ORIGINAL BRAND BAR (kept for compatibility)
 ───────────────────────────────────────── */
@@ -350,6 +389,7 @@ body {
   width: 2rem;
   height: 2rem;
 }
+
 
 .app-brand-name {
   margin: 0;

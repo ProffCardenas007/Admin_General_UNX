@@ -133,6 +133,7 @@ const MAIN_NAV: NavItem[] = [
 
 const MANAGER_NAV: NavItem[] = [
   { label: "Usuarios",  href: "/users",   icon: <IconUsers /> },
+  { label: "Reporte por Usuario", href: "/user-reports", icon: <IconQuincena /> },
   { label: "Programación de clases", href: "/class-availability", icon: <IconClassAvailability /> },
   { label: "Cursos y sesiones", href: "/class-planning", icon: <IconClassSchedule /> },
   { label: "Grilla de sesiones", href: "/class-grid",     icon: <IconGrid /> },

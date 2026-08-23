@@ -66,6 +66,12 @@ describe('Role Access (e2e)', () => {
 
   const reportsServiceMock = {
     buildTasksCsv: jest.fn().mockResolvedValue('task_id,task_code\n1,TASK-1'),
+    getUserPerformance: jest.fn().mockResolvedValue({
+      period: { from: null, to: null },
+      weights: {},
+      team: { users: 0, averageHours: 0, averagePoints: 0, totalCompletedTasks: 0 },
+      users: [],
+    }),
   };
 
   const usersServiceMock = {
@@ -142,6 +148,25 @@ describe('Role Access (e2e)', () => {
       { projectId: undefined, status: undefined },
       { id: 'worker-99', role: 'worker' },
     );
+  });
+
+  it('manager can access user performance reports', async () => {
+    await request(app.getHttpServer())
+      .get('/reports/users/performance?from=2026-08-01&to=2026-08-15')
+      .set('x-test-role', 'manager')
+      .expect(200);
+
+    expect(reportsServiceMock.getUserPerformance).toHaveBeenCalledWith({
+      from: '2026-08-01',
+      to: '2026-08-15',
+    });
+  });
+
+  it('worker cannot access user performance reports', async () => {
+    await request(app.getHttpServer())
+      .get('/reports/users/performance')
+      .set('x-test-role', 'worker')
+      .expect(403);
   });
 
   it('worker cannot list users', async () => {

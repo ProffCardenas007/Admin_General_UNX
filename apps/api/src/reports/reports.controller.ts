@@ -10,6 +10,15 @@ import { ReportsService } from './reports.service';
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
+  @Get('users/performance')
+  @Roles('manager')
+  getUserPerformance(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+  ) {
+    return this.reportsService.getUserPerformance({ from, to });
+  }
+
   @Get('tasks.csv')
   @Roles('manager', 'lead', 'worker')
   async downloadTasksCsv(
