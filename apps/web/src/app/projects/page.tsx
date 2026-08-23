@@ -340,7 +340,9 @@ export default function ProjectsPage() {
         project.code.toLowerCase().includes(search.toLowerCase()) ||
         project.name.toLowerCase().includes(search.toLowerCase());
 
-      const byStatus = statusFilter.length === 0 || project.status === statusFilter;
+      const byStatus = statusFilter.length === 0
+        ? project.status !== "done"
+        : project.status === statusFilter;
 
       return bySearch && byStatus;
     });
@@ -402,7 +404,7 @@ export default function ProjectsPage() {
             onChange={(event) => setStatusFilter(event.target.value)}
             className="ui-control"
           >
-            <option value="">Todos los estados</option>
+            <option value="">Todos excepto finalizados</option>
             <option value="planned">planificado</option>
             <option value="active">activo</option>
             <option value="on_hold">en pausa</option>
@@ -635,7 +637,11 @@ export default function ProjectsPage() {
                                         >
                                           <option value="">Seleccionar proyecto destino</option>
                                           {projects
-                                            .filter((destination) => destination.id !== task.projectId)
+                                            .filter(
+                                              (destination) =>
+                                                destination.id !== task.projectId &&
+                                                destination.status !== "done",
+                                            )
                                             .map((destination) => (
                                               <option key={destination.id} value={destination.id}>
                                                 {destination.code} · {destination.name} · {destination.scope ? specialtyLabels[destination.scope] : "Sin especialidad"}

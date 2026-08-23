@@ -355,6 +355,7 @@ export default function TasksPage() {
 
   const [search, setSearch] = useState("");
   const [selectedSpecialty, setSelectedSpecialty] = useState<"" | LeadSpecialty>("");
+  const [selectedAcademy, setSelectedAcademy] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
   const [activityYearMonth, setActivityYearMonth] = useState(() => {
@@ -640,6 +641,7 @@ export default function TasksPage() {
       if (canManagePlanning) {
         const project = projects.find((item) => item.id === task.projectId);
         const bySpecialty = selectedSpecialty.length === 0 || project?.scope === selectedSpecialty;
+        const byAcademy = selectedAcademy.length === 0 || project?.code === selectedAcademy;
         const byProject = selectedProjectId.length === 0 || task.projectId === selectedProjectId;
         const byAssignee =
           selectedAssigneeId.length === 0 ||
@@ -654,7 +656,7 @@ export default function TasksPage() {
             task.dueDate >= activityQuincenaRange.startKey &&
             task.dueDate <= activityQuincenaRange.endKey);
 
-        return bySpecialty && byProject && byAssignee && byActivityQuincena && byDoneStatus;
+        return bySpecialty && byAcademy && byProject && byAssignee && byActivityQuincena && byDoneStatus;
       }
 
       const bySearch =
@@ -672,6 +674,7 @@ export default function TasksPage() {
     canManagePlanning,
     projects,
     selectedSpecialty,
+    selectedAcademy,
     selectedProjectId,
     selectedAssigneeId,
     activityQuincenaRange,
@@ -679,14 +682,30 @@ export default function TasksPage() {
     showDoneTasks,
   ]);
 
+  const availableAcademies = useMemo(
+    () =>
+      [...new Set(
+        projects
+          .filter(
+            (project) =>
+              project.status === "active" &&
+              selectedSpecialty.length > 0 &&
+              project.scope === selectedSpecialty,
+          )
+          .map((project) => project.code),
+      )].sort((left, right) => left.localeCompare(right, "es")),
+    [projects, selectedSpecialty],
+  );
+
   const activeProjects = useMemo(
     () =>
       projects.filter(
         (project) =>
           project.status === "active" &&
-          (selectedSpecialty.length === 0 || project.scope === selectedSpecialty),
+          (selectedSpecialty.length === 0 || project.scope === selectedSpecialty) &&
+          (selectedAcademy.length === 0 || project.code === selectedAcademy),
       ),
-    [projects, selectedSpecialty],
+    [projects, selectedSpecialty, selectedAcademy],
   );
 
   const peopleForSelectedProject = useMemo(() => {
@@ -1593,6 +1612,7 @@ export default function TasksPage() {
                   const shouldShowMyTasks = selectedAssigneeId !== currentUserId || selectedProjectId !== "";
                   setSelectedAssigneeId(shouldShowMyTasks ? currentUserId : "");
                   setSelectedSpecialty("");
+                  setSelectedAcademy("");
                   setSelectedProjectId("");
                   if (shouldShowMyTasks) {
                     setShowAllActivityQuincenas(true);
@@ -1637,6 +1657,7 @@ export default function TasksPage() {
                   type="button"
                   onClick={() => {
                     setSelectedSpecialty("");
+                    setSelectedAcademy("");
                     setSelectedProjectId("");
                     setSelectedAssigneeId("");
                   }}
@@ -1654,6 +1675,7 @@ export default function TasksPage() {
                     type="button"
                     onClick={() => {
                       setSelectedSpecialty((current) => (current === specialty ? "" : specialty));
+                      setSelectedAcademy("");
                       setSelectedProjectId("");
                       setSelectedAssigneeId("");
                     }}
@@ -1668,6 +1690,49 @@ export default function TasksPage() {
                 ))}
               </div>
             </div>
+
+            {role === "manager" && selectedSpecialty ? (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  Academias
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAcademy("");
+                      setSelectedProjectId("");
+                      setSelectedAssigneeId("");
+                    }}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      selectedAcademy === ""
+                        ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                        : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                    }`}
+                  >
+                    Todas las academias
+                  </button>
+                  {availableAcademies.map((academy) => (
+                    <button
+                      key={academy}
+                      type="button"
+                      onClick={() => {
+                        setSelectedAcademy((current) => (current === academy ? "" : academy));
+                        setSelectedProjectId("");
+                        setSelectedAssigneeId("");
+                      }}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        selectedAcademy === academy
+                          ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                          : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                      }`}
+                    >
+                      {academy}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
