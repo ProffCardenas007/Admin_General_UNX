@@ -140,7 +140,9 @@ export default function ProjectsPage() {
   const [info, setInfo] = useState("");
   const [savingProjectId, setSavingProjectId] = useState("");
   const [deletingProjectId, setDeletingProjectId] = useState("");
+  const [movingTaskId, setMovingTaskId] = useState("");
   const [openedProjectId, setOpenedProjectId] = useState("");
+  const [taskDestinationById, setTaskDestinationById] = useState<Record<string, string>>({});
   const [projectDrafts, setProjectDrafts] = useState<Record<string, ProjectDraft>>({});
   const canEditProjects = role === "manager" || role === "lead";
 
@@ -292,6 +294,42 @@ export default function ProjectsPage() {
       setError("No se pudo actualizar el proyecto. Revisa permisos o datos capturados.");
     } finally {
       setSavingProjectId("");
+    }
+  };
+
+  const onMoveTask = async (task: TaskRow) => {
+    if (role !== "manager") {
+      return;
+    }
+
+    const destinationProjectId = taskDestinationById[task.id] ?? "";
+    const destinationProject = projects.find((project) => project.id === destinationProjectId);
+    if (!destinationProject || destinationProject.id === task.projectId) {
+      return;
+    }
+
+    setError("");
+    setInfo("");
+    setMovingTaskId(task.id);
+
+    try {
+      const response = await axios.patch(
+        `${API_URL}/tasks/${task.id}`,
+        { projectId: destinationProject.id },
+        { headers: authHeaders() },
+      );
+      const updatedTask = response.data as TaskRow;
+      setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
+      setTaskDestinationById((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+      setInfo(`Tarea ${task.code} movida a ${destinationProject.code} · ${destinationProject.name}.`);
+    } catch {
+      setError("No se pudo mover la tarea. Esta accion es exclusiva de gerencia.");
+    } finally {
+      setMovingTaskId("");
     }
   };
 
@@ -582,6 +620,38 @@ export default function ProjectsPage() {
                                     <p className="mt-1 text-[var(--ink-muted)]">
                                       {taskStatusLabels[task.status] ?? task.status} | prioridad {taskPriorityLabels[task.priority] ?? task.priority} | fecha fin {task.dueDate ?? "-"}
                                     </p>
+                                    {role === "manager" ? (
+                                      <div className="mt-3 flex max-w-3xl flex-col gap-2 border-t border-[var(--line)] pt-3 sm:flex-row sm:items-center">
+                                        <select
+                                          aria-label={`Proyecto destino para ${task.title}`}
+                                          value={taskDestinationById[task.id] ?? ""}
+                                          onChange={(event) =>
+                                            setTaskDestinationById((current) => ({
+                                              ...current,
+                                              [task.id]: event.target.value,
+                                            }))
+                                          }
+                                          className="ui-control min-w-0 flex-1 text-xs"
+                                        >
+                                          <option value="">Seleccionar proyecto destino</option>
+                                          {projects
+                                            .filter((destination) => destination.id !== task.projectId)
+                                            .map((destination) => (
+                                              <option key={destination.id} value={destination.id}>
+                                                {destination.code} · {destination.name} · {destination.scope ? specialtyLabels[destination.scope] : "Sin especialidad"}
+                                              </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          onClick={() => void onMoveTask(task)}
+                                          disabled={!taskDestinationById[task.id] || movingTaskId === task.id}
+                                          className="ui-btn ui-btn-primary ui-btn-sm shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                          {movingTaskId === task.id ? "Moviendo..." : "Mover tarea"}
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 ))}
                               </div>

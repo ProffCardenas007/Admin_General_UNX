@@ -3,6 +3,10 @@ import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 export class UpdateTaskDto {
   @IsOptional()
   @IsString()
+  projectId?: string;
+
+  @IsOptional()
+  @IsString()
   title?: string;
 
   @IsOptional()

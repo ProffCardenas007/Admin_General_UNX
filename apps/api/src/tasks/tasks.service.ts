@@ -511,6 +511,12 @@ export class TasksService {
       throw new NotFoundException('Task not found');
     }
 
+    if (dto.projectId !== undefined && actor.role !== 'manager') {
+      throw new ForbiddenException(
+        'Only managers can move tasks between projects',
+      );
+    }
+
     const project = await this.projectsRepository.findOne({
       where: { id: task.projectId },
     });
@@ -547,6 +553,15 @@ export class TasksService {
       );
     }
 
+    if (dto.projectId !== undefined && dto.projectId !== task.projectId) {
+      const destinationProject = await this.projectsRepository.findOne({
+        where: { id: dto.projectId },
+      });
+      if (!destinationProject) {
+        throw new NotFoundException('Destination project not found');
+      }
+    }
+
     const {
       handoffToUserId,
       handoffMessage,
@@ -558,6 +573,7 @@ export class TasksService {
     } = dto;
 
     const before = {
+      projectId: task.projectId,
       title: task.title,
       description: task.description ?? null,
       assigneeId: task.assigneeId ?? null,
@@ -597,6 +613,16 @@ export class TasksService {
 
     if (actor.role === 'manager') {
       const changes: Record<string, { before: unknown; after: unknown }> = {};
+
+      if (
+        taskFields.projectId !== undefined &&
+        before.projectId !== savedTask.projectId
+      ) {
+        changes.projectId = {
+          before: before.projectId,
+          after: savedTask.projectId,
+        };
+      }
 
       if (taskFields.title !== undefined && before.title !== savedTask.title) {
         changes.title = { before: before.title, after: savedTask.title };

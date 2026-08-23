@@ -1,5 +1,8 @@
 import { TasksService } from './tasks.service';
-import { ForbiddenException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 
 describe('TasksService', () => {
   let service: TasksService;
@@ -105,6 +108,75 @@ describe('TasksService', () => {
 
     expect(result).toEqual({ id: 'task-1', status: 'done' });
     expect(tasksRepository.save).toHaveBeenCalled();
+  });
+
+  it('allows manager moving a task to an existing project', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      code: 'TASK-1',
+      title: 'Tarea',
+      projectId: 'project-1',
+      status: 'todo',
+      priority: 'medium',
+    });
+    projectsRepository.findOne
+      .mockResolvedValueOnce({ id: 'project-1', scope: 'paa' })
+      .mockResolvedValueOnce({ id: 'project-2', scope: 'exani_ii' });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+
+    const result = await service.update(
+      'task-1',
+      { projectId: 'project-2' },
+      { id: 'manager-1', role: 'manager' },
+    );
+
+    expect(result.projectId).toBe('project-2');
+    expect(auditLogsRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'task_updated',
+        changesJson: {
+          projectId: { before: 'project-1', after: 'project-2' },
+        },
+      }),
+    );
+  });
+
+  it('blocks lead moving a task between projects', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      projectId: 'project-1',
+      assigneeId: 'lead-1',
+    });
+
+    await expect(
+      service.update(
+        'task-1',
+        { projectId: 'project-2' },
+        { id: 'lead-1', role: 'lead', specialties: ['paa'] },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(tasksRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects moving a task to a missing project', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      projectId: 'project-1',
+    });
+    projectsRepository.findOne
+      .mockResolvedValueOnce({ id: 'project-1', scope: 'paa' })
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.update(
+        'task-1',
+        { projectId: 'project-2' },
+        { id: 'manager-1', role: 'manager' },
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(tasksRepository.save).not.toHaveBeenCalled();
   });
 
   it('starts the timer when a task moves into doing', async () => {
