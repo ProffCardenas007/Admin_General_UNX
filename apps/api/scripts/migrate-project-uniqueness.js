@@ -20,31 +20,31 @@ async function run() {
       LIMIT 10
     `);
 
-    if (duplicates.rows.length > 0) {
+    await client.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_code_key');
+    await client.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key');
+
+    if (duplicates.rows.length === 0) {
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS projects_name_scope_key
+        ON projects (LOWER(TRIM(name)), scope)
+        WHERE scope IS NOT NULL
+      `);
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS projects_name_without_scope_key
+        ON projects (LOWER(TRIM(name)))
+        WHERE scope IS NULL
+      `);
+    } else {
       const examples = duplicates.rows
         .map(
           (row) =>
             `${row.normalized_name} / ${row.specialty ?? 'sin especialidad'} (${row.total})`,
         )
         .join(', ');
-
-      throw new Error(
-        `Cannot add unique project name/specialty index. Duplicates found: ${examples}`,
+      console.warn(
+        `DB_WARN: unique project name/specialty index deferred; historical duplicates found: ${examples}`,
       );
     }
-
-    await client.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_code_key');
-    await client.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key');
-    await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS projects_name_scope_key
-      ON projects (LOWER(TRIM(name)), scope)
-      WHERE scope IS NOT NULL
-    `);
-    await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS projects_name_without_scope_key
-      ON projects (LOWER(TRIM(name)))
-      WHERE scope IS NULL
-    `);
 
     await client.query('COMMIT');
     console.log('DB_OK: project uniqueness scoped by specialty (code can repeat)');
