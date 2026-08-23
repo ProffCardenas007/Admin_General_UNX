@@ -57,4 +57,25 @@ export class NotificationsService {
 
     return { ok: true };
   }
+
+  async createMany(
+    recipients: Array<{ userId: string }>,
+    input: { title: string; message: string; taskId?: string | null },
+  ) {
+    if (recipients.length === 0) {
+      return { created: 0 };
+    }
+
+    const notifications = recipients.map((recipient) =>
+      this.notificationsRepository.create({
+        userId: recipient.userId,
+        taskId: input.taskId ?? undefined,
+        title: input.title,
+        message: input.message,
+      }),
+    );
+
+    await this.notificationsRepository.save(notifications);
+    return { created: notifications.length };
+  }
 }

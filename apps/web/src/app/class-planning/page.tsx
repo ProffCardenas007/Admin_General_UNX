@@ -10,6 +10,7 @@ type UserRow = {
   fullName: string;
   role: "manager" | "lead" | "worker";
   isActive: boolean;
+  classSubjects?: string[] | null;
 };
 
 type SubjectRow = {
@@ -30,6 +31,8 @@ type CourseRow = {
   classroom: string;
   scheduleStartTime: string;
   scheduleEndTime: string;
+  termStartDate?: string | null;
+  termEndDate?: string | null;
   isActive: boolean;
   subjects: SubjectRow[];
 };
@@ -153,6 +156,8 @@ export default function ClassPlanningPage() {
   const [courseModality, setCourseModality] = useState<"presencial" | "virtual">("presencial");
   const [courseClassroom, setCourseClassroom] = useState(CLASSROOM_OPTIONS[0]);
   const [courseTimeBlock, setCourseTimeBlock] = useState("08:00-10:30");
+  const [courseTermStart, setCourseTermStart] = useState("");
+  const [courseTermEnd, setCourseTermEnd] = useState("");
   const [courseNameFilter, setCourseNameFilter] = useState("");
 
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -173,6 +178,8 @@ export default function ClassPlanningPage() {
   const [editClassroom, setEditClassroom] = useState(CLASSROOM_OPTIONS[0]);
   const [editModality, setEditModality] = useState<"presencial" | "virtual">("presencial");
   const [editTimeBlock, setEditTimeBlock] = useState("08:00-10:30");
+  const [editTermStart, setEditTermStart] = useState("");
+  const [editTermEnd, setEditTermEnd] = useState("");
 
   // Single-subject mode (Regularización / Asesorías / Examen)
   const [singleSubjectName, setSingleSubjectName] = useState("Materia");
@@ -182,6 +189,20 @@ export default function ClassPlanningPage() {
     () => users.filter((user) => user.isActive && (user.role === "lead" || user.role === "worker" || user.role === "manager")),
     [users],
   );
+
+  // Prefer teachers tagged with this subject; fall back to everyone if no tags match
+  // (avoids blocking scheduling when a teacher's materias haven't been captured yet).
+  const getTeachersForSubject = (subjectName: string, currentTeacherId?: string | null) => {
+    const tagged = teachers.filter((teacher) => teacher.classSubjects?.includes(subjectName));
+    if (tagged.length === 0) {
+      return teachers;
+    }
+    if (currentTeacherId && !tagged.some((teacher) => teacher.id === currentTeacherId)) {
+      const current = teachers.find((teacher) => teacher.id === currentTeacherId);
+      return current ? [...tagged, current] : tagged;
+    }
+    return tagged;
+  };
 
   const isCourseTypePAA = (code: string) => code === "Curso";
 
@@ -402,6 +423,11 @@ export default function ClassPlanningPage() {
       return;
     }
 
+    if (courseTermStart && courseTermEnd && courseTermStart > courseTermEnd) {
+      setError("La fecha de fin de vigencia debe ser mayor a la de inicio.");
+      return;
+    }
+
     try {
       await axios.post(
         `${API_URL}/class-planning/courses`,
@@ -413,6 +439,8 @@ export default function ClassPlanningPage() {
           classroom: courseClassroom,
           startTime: courseStartTime,
           endTime: courseEndTime,
+          termStartDate: courseTermStart || undefined,
+          termEndDate: courseTermEnd || undefined,
         },
         { headers: authHeaders() },
       );
@@ -423,6 +451,8 @@ export default function ClassPlanningPage() {
       setCourseModality("presencial");
       setCourseClassroom(getClassroomOptions("presencial")[0] ?? CLASSROOM_OPTIONS[0]);
       setCourseTimeBlock("08:00-10:30");
+      setCourseTermStart("");
+      setCourseTermEnd("");
       setInfo("Curso creado correctamente.");
       await loadData();
     } catch (error) {
@@ -764,6 +794,8 @@ export default function ClassPlanningPage() {
     setEditClassroom(course.classroom);
     setEditModality(course.modality);
     setEditTimeBlock(`${course.scheduleStartTime.slice(0, 5)}-${course.scheduleEndTime.slice(0, 5)}`);
+    setEditTermStart(course.termStartDate ?? "");
+    setEditTermEnd(course.termEndDate ?? "");
   };
 
   const onUpdateCourse = async (courseId: string) => {
@@ -773,6 +805,11 @@ export default function ClassPlanningPage() {
     const [startTime, endTime] = editTimeBlock.split("-");
     if (!startTime || !endTime) {
       setError("Selecciona un horario válido.");
+      return;
+    }
+
+    if (editTermStart && editTermEnd && editTermStart > editTermEnd) {
+      setError("La fecha de fin de vigencia debe ser mayor a la de inicio.");
       return;
     }
 
@@ -786,6 +823,8 @@ export default function ClassPlanningPage() {
           modality: editModality,
           startTime,
           endTime,
+          termStartDate: editTermStart || null,
+          termEndDate: editTermEnd || null,
         },
         { headers: authHeaders() },
       );
@@ -973,10 +1012,29 @@ export default function ClassPlanningPage() {
                 ))}
               </select>
             </label>
+            <label className="flex flex-col gap-1 text-xs text-[var(--ink-soft)]">
+              Inicio de vigencia (opcional)
+              <input
+                type="date"
+                value={courseTermStart}
+                onChange={(event) => setCourseTermStart(event.target.value)}
+                className="ui-control"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-[var(--ink-soft)]">
+              Fin de vigencia (opcional)
+              <input
+                type="date"
+                value={courseTermEnd}
+                onChange={(event) => setCourseTermEnd(event.target.value)}
+                className="ui-control"
+              />
+            </label>
           </div>
           <p className="mt-2 rounded-lg border border-white/12 bg-white/[0.03] px-2.5 py-2 text-[11px] text-[var(--ink-soft)]">
             Horarios permitidos: 8:30 am - 10:30 am, 11:00 am - 1:30 pm, 4:00 pm - 6:30 pm.
             Para modalidad virtual tambien: 7:00 pm - 10:30 pm.
+            Sin vigencia definida, el aula/horario del curso queda reservada indefinidamente.
           </p>
           <button type="button" onClick={onCreateCourse} className="ui-btn ui-btn-primary mt-3 h-9 px-4 text-sm">
             Crear curso
@@ -1020,7 +1078,7 @@ export default function ClassPlanningPage() {
                       className="ui-control"
                     >
                       <option value="">Sin asignar</option>
-                      {teachers.map((teacher) => (
+                      {getTeachersForSubject("Español", spanishTeacherId).map((teacher) => (
                         <option key={teacher.id} value={teacher.id}>
                           {teacher.fullName}
                         </option>
@@ -1039,7 +1097,7 @@ export default function ClassPlanningPage() {
                       className="ui-control"
                     >
                       <option value="">Sin asignar</option>
-                      {teachers.map((teacher) => (
+                      {getTeachersForSubject("Matemáticas", mathTeacherId).map((teacher) => (
                         <option key={teacher.id} value={teacher.id}>
                           {teacher.fullName}
                         </option>
@@ -1069,7 +1127,7 @@ export default function ClassPlanningPage() {
                     className="ui-control"
                   >
                     <option value="">Sin asignar</option>
-                    {teachers.map((teacher) => (
+                    {getTeachersForSubject(singleSubjectName.trim(), singleTeacherId).map((teacher) => (
                       <option key={teacher.id} value={teacher.id}>
                         {teacher.fullName}
                       </option>
@@ -1134,6 +1192,9 @@ export default function ClassPlanningPage() {
                       </p>
                       <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
                         {course.modality === "virtual" ? "Sala virtual" : "Aula base"}: {course.classroom} · Horario base: {toTimeBlockLabel(course.scheduleStartTime, course.scheduleEndTime)}
+                        {(course.termStartDate || course.termEndDate) && (
+                          <> · Vigencia: {course.termStartDate ?? "…"} a {course.termEndDate ?? "…"}</>
+                        )}
                         {isProgrammed && (
                           <span className="ml-2 rounded-full border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] text-[var(--accent)]">
                             Programado
@@ -1246,6 +1307,24 @@ export default function ClassPlanningPage() {
                           ))}
                         </select>
                       </label>
+                      <label className="flex flex-col gap-1 text-xs text-[var(--ink-soft)]">
+                        Inicio de vigencia (opcional)
+                        <input
+                          type="date"
+                          value={editTermStart}
+                          onChange={(event) => setEditTermStart(event.target.value)}
+                          className="ui-control"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-[var(--ink-soft)]">
+                        Fin de vigencia (opcional)
+                        <input
+                          type="date"
+                          value={editTermEnd}
+                          onChange={(event) => setEditTermEnd(event.target.value)}
+                          className="ui-control"
+                        />
+                      </label>
                       <div className="sm:col-span-2">
                         <button
                           type="button"
@@ -1284,7 +1363,7 @@ export default function ClassPlanningPage() {
                                 className="ui-control md:w-[280px]"
                               >
                                 <option value="">Sin asignar</option>
-                                {teachers.map((teacher) => (
+                                {getTeachersForSubject(subject.name, subject.teacherUserId).map((teacher) => (
                                   <option key={teacher.id} value={teacher.id}>
                                     {teacher.fullName}
                                   </option>

@@ -3,10 +3,12 @@ import {
   CreateDateColumn,
   Entity,
   PrimaryGeneratedColumn,
+  Unique,
   UpdateDateColumn,
 } from 'typeorm';
 
 @Entity({ name: 'class_courses' })
+@Unique('uq_class_courses_name_section_code', ['name', 'sectionCode'])
 export class ClassCourseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -17,7 +19,7 @@ export class ClassCourseEntity {
   @Column({ name: 'section_code', type: 'varchar', length: 20, nullable: true })
   sectionCode?: string | null;
 
-  @Column({ type: 'varchar', length: 160, unique: true })
+  @Column({ type: 'varchar', length: 160 })
   name: string;
 
   @Column({ type: 'varchar', length: 20, default: 'presencial' })
@@ -31,6 +33,12 @@ export class ClassCourseEntity {
 
   @Column({ name: 'schedule_end_time', type: 'time', default: '10:30' })
   scheduleEndTime: string;
+
+  @Column({ name: 'term_start_date', type: 'date', nullable: true })
+  termStartDate?: string | null;
+
+  @Column({ name: 'term_end_date', type: 'date', nullable: true })
+  termEndDate?: string | null;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;

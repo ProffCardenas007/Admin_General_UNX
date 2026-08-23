@@ -14,6 +14,7 @@ type UserRow = {
   role: "manager" | "lead" | "worker";
   specialty?: LeadSpecialty | null;
   specialties?: LeadSpecialty[] | null;
+  classSubjects?: string[] | null;
   teamIds?: string[];
   isActive: boolean;
   createdAt: string;
@@ -30,10 +31,13 @@ type UserDraft = {
   email: string;
   role: UserRow["role"];
   specialties: LeadSpecialty[];
+  classSubjects: string[];
   teamIds: string[];
   isActive: boolean;
   password: string;
 };
+
+const CLASS_SUBJECT_OPTIONS = ["Matemáticas", "Español"] as const;
 
 type TaskStatsRow = {
   id: string;
@@ -41,7 +45,7 @@ type TaskStatsRow = {
   activityType: "revision" | "edicion" | "creacion" | "presentaciones" | "grabacion" | "plataforma" | "administrativo";
   title: string;
   assigneeId?: string;
-  status: "todo" | "doing" | "blocked" | "done";
+  status: "todo" | "doing" | "paused" | "blocked" | "done";
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
 };
@@ -76,6 +80,7 @@ const activityTypeLabels: Record<TaskStatsRow["activityType"], string> = {
 const taskStatusLabels: Record<TaskStatsRow["status"], string> = {
   todo: "por hacer",
   doing: "en curso",
+  paused: "pausada",
   blocked: "bloqueada",
   done: "finalizada",
 };
@@ -122,6 +127,7 @@ export default function UsersPage() {
     email: user.email,
     role: user.role,
     specialties: toDraftSpecialties(user),
+    classSubjects: user.classSubjects ?? [],
     teamIds: user.teamIds ?? [],
     isActive: user.isActive,
     password: "",
@@ -203,6 +209,23 @@ export default function UsersPage() {
       return bySearch && byRole && byStatus;
     });
   }, [users, search, roleFilter, statusFilter]);
+
+  const usersWithoutActiveTasks = useMemo(() => {
+    const activeTaskUserIds = new Set(
+      tasksForStats
+        .filter((task) => task.status !== "done" && task.assigneeId)
+        .map((task) => task.assigneeId as string),
+    );
+
+    return new Set(
+      users
+        .filter(
+          (user) =>
+            user.role !== "manager" && user.isActive && !activeTaskUserIds.has(user.id),
+        )
+        .map((user) => user.id),
+    );
+  }, [users, tasksForStats]);
 
   const selectedStatsUser = useMemo(
     () => users.find((user) => user.id === selectedStatsUserId),
@@ -408,6 +431,7 @@ export default function UsersPage() {
       fullName: draft.fullName,
       role: draft.role,
       specialties: draft.role === "lead" ? draft.specialties : null,
+      classSubjects: draft.classSubjects,
       teamIds: draft.teamIds,
       isActive: draft.isActive,
       password: draft.password.trim().length > 0 ? draft.password : undefined,
@@ -874,6 +898,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3 font-semibold">Nombre</th>
                   <th className="px-4 py-3 font-semibold">Correo</th>
                   <th className="px-4 py-3 font-semibold">Rol</th>
+                  <th className="px-4 py-3 font-semibold">Materias</th>
                   <th className="px-4 py-3 font-semibold">Equipos</th>
                   <th className="px-4 py-3 font-semibold">Estado</th>
                   <th className="px-4 py-3 font-semibold">Contrasena</th>
@@ -903,6 +928,11 @@ export default function UsersPage() {
                       ) : (
                         <span className="font-semibold text-[var(--foreground)]">{user.fullName}</span>
                       )}
+                      {usersWithoutActiveTasks.has(user.id) ? (
+                        <span className="mt-1 inline-block rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-800">
+                          Sin tareas activas
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       {isManager ? (
@@ -1005,6 +1035,46 @@ export default function UsersPage() {
                       ) : (
                         <span className="text-sm text-[var(--foreground)]">
                           {roleLabels[user.role]}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isManager ? (
+                        <div className="grid gap-1">
+                          {CLASS_SUBJECT_OPTIONS.map((subjectName) => {
+                            const selectedSubjects = userDrafts[user.id]?.classSubjects ?? user.classSubjects ?? [];
+                            const checked = selectedSubjects.includes(subjectName);
+
+                            return (
+                              <label key={subjectName} className="flex items-center gap-2 text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(event) =>
+                                    setUserDrafts((current) => {
+                                      const base = current[user.id] ?? buildUserDraft(user);
+                                      const currentSubjects = base.classSubjects;
+
+                                      return {
+                                        ...current,
+                                        [user.id]: {
+                                          ...base,
+                                          classSubjects: event.target.checked
+                                            ? [...currentSubjects, subjectName]
+                                            : currentSubjects.filter((item) => item !== subjectName),
+                                        },
+                                      };
+                                    })
+                                  }
+                                />
+                                {subjectName}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-[var(--ink-muted)]">
+                          {(user.classSubjects ?? []).length > 0 ? user.classSubjects!.join(", ") : "Sin materias"}
                         </span>
                       )}
                     </td>

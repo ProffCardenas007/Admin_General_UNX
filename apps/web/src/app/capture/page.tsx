@@ -210,6 +210,19 @@ export default function CapturePage() {
   const [createdChainSteps, setCreatedChainSteps] = useState<CreatedTaskChainStep[]>([]);
   const selectedChainProject = projects.find((project) => project.id === taskChainForm.projectId);
 
+  useEffect(() => {
+    if (!createdChainId) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCreatedChainId("");
+      setCreatedChainSteps([]);
+    }, 2200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [createdChainId]);
+
   const [userForm, setUserForm] = useState({
     fullName: "",
     email: "",
@@ -432,6 +445,12 @@ export default function CapturePage() {
 
   const submitTask = async () => {
     setMessage("");
+
+    if (!taskForm.dueDate) {
+      setMessage("Selecciona una fecha de finalizacion para la tarea.");
+      return;
+    }
+
     try {
       const payload = {
         projectId: taskForm.projectId,
@@ -442,7 +461,7 @@ export default function CapturePage() {
         teamId: taskForm.teamId || undefined,
         status: taskForm.status,
         priority: taskForm.priority,
-        dueDate: taskForm.dueDate || undefined,
+        dueDate: taskForm.dueDate,
         estimatedHours: taskForm.estimatedHours ? Number(taskForm.estimatedHours) : undefined,
       };
 
@@ -602,6 +621,11 @@ export default function CapturePage() {
       return;
     }
 
+    if (taskChainForm.steps.some((step) => !step.dueDate)) {
+      setMessage("Todos los pasos deben tener fecha de finalizacion.");
+      return;
+    }
+
     if (taskChainForm.steps.some((step) => step.estimatedHours.trim().length > 0 && Number(step.estimatedHours) < 0)) {
       setMessage("Las horas estimadas no pueden ser negativas.");
       return;
@@ -633,7 +657,7 @@ export default function CapturePage() {
 
       setCreatedChainId(response.data?.chainId ?? "");
       setCreatedChainSteps(sortedCreated);
-      setMessage(`Flujo creado con ${sortedCreated.length} tareas encadenadas.`);
+      setMessage(`Tarea completa realizada. Flujo creado con ${sortedCreated.length} tareas encadenadas.`);
       setTaskChainForm((current) => ({
         ...current,
         steps: current.steps.map((step) => ({
@@ -939,7 +963,9 @@ export default function CapturePage() {
             <div className="grid gap-3 md:grid-cols-2">
               <input
                 type="date"
+                required
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                placeholder="Fecha de finalizacion"
                 value={taskForm.dueDate}
                 onFocus={() => {
                   if (!taskForm.dueDate) {
@@ -1092,7 +1118,9 @@ export default function CapturePage() {
                     </select>
                     <input
                       type="date"
+                      required
                       className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      placeholder="Fecha de finalizacion"
                       value={step.dueDate}
                       onFocus={() => {
                         if (!step.dueDate) {
@@ -1131,24 +1159,36 @@ export default function CapturePage() {
             </button>
 
             {createdChainId ? (
-              <div className="rounded-2xl border border-[var(--line)] bg-white p-4">
-                <p className="text-sm font-semibold">Seguimiento de la cadena</p>
-                <p className="mt-1 text-xs text-[var(--ink-muted)]">Flujo {createdChainId.slice(0, 8)}</p>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                  {createdChainSteps.map((step, index) => {
-                    const visual = taskStatusVisuals[step.status] ?? taskStatusVisuals.todo;
-                    const assignee = users.find((item) => item.id === step.assigneeId);
-                    return (
-                      <Fragment key={step.id}>
-                        <span className={`rounded-full border border-[var(--line)] bg-[var(--background)] px-3 py-1 ${visual.tone}`}>
-                          {visual.icon} {activityTypeOptions.find((item) => item.value === step.activityType)?.label ?? step.activityType}
-                          {assignee ? ` · ${assignee.fullName}` : ""}
-                          {` (${visual.label})`}
-                        </span>
-                        {index < createdChainSteps.length - 1 ? <span className="text-[var(--ink-muted)]">→</span> : null}
-                      </Fragment>
-                    );
-                  })}
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/35 px-4">
+                <div className="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-5 text-center shadow-2xl">
+                  <p className="text-sm uppercase tracking-[0.12em] text-emerald-700">Confirmacion</p>
+                  <p className="mt-2 text-lg font-semibold text-[var(--foreground)]">Tarea completa realizada</p>
+                  <p className="mt-2 text-sm text-[var(--ink-muted)]">Flujo {createdChainId.slice(0, 8)}</p>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-sm">
+                    {createdChainSteps.map((step, index) => {
+                      const visual = taskStatusVisuals[step.status] ?? taskStatusVisuals.todo;
+                      const assignee = users.find((item) => item.id === step.assigneeId);
+                      return (
+                        <Fragment key={step.id}>
+                          <span className={`rounded-full border border-[var(--line)] bg-[var(--background)] px-3 py-1 ${visual.tone}`}>
+                            {visual.icon} {activityTypeOptions.find((item) => item.value === step.activityType)?.label ?? step.activityType}
+                            {assignee ? ` · ${assignee.fullName}` : ""}
+                          </span>
+                          {index < createdChainSteps.length - 1 ? <span className="text-[var(--ink-muted)]">→</span> : null}
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreatedChainId("");
+                      setCreatedChainSteps([]);
+                    }}
+                    className="ui-btn ui-btn-primary ui-btn-sm mt-4"
+                  >
+                    Entendido
+                  </button>
                 </div>
               </div>
             ) : null}

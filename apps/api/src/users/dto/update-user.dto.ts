@@ -69,4 +69,11 @@ export class UpdateUserDto {
   @ArrayUnique()
   @IsString({ each: true })
   teamIds?: string[] | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  classSubjects?: string[] | null;
 }

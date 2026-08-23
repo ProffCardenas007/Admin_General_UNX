@@ -78,10 +78,12 @@ export class ClassPlanningService {
     const code = this.normalizeCourseType(dto.code);
     const sectionCode = this.normalizeSectionCode(dto.sectionCode);
     const name = dto.name.trim();
-    const modality = dto.modality === 'virtual' ? 'virtual' : 'presencial';
+    const modality = dto.modality;
     const classroom = dto.classroom.trim();
     const startTime = dto.startTime;
     const endTime = dto.endTime;
+    const termStartDate = dto.termStartDate ? dto.termStartDate.slice(0, 10) : null;
+    const termEndDate = dto.termEndDate ? dto.termEndDate.slice(0, 10) : null;
 
     if (!getAvailableRooms(modality).includes(classroom)) {
       throw new BadRequestException(
@@ -95,17 +97,23 @@ export class ClassPlanningService {
       throw new BadRequestException('La hora fin debe ser mayor a la hora inicio');
     }
 
-    this.ensureValidTimeBlockByModality(modality, startTime, endTime);
-    await this.ensureNoCourseBaseClassroomConflict(classroom, startTime, endTime);
-
-    const duplicateName = await this.coursesRepository.findOne({ where: { name } });
-    if (duplicateName) {
-      throw new ConflictException(`Ya existe un curso con el nombre ${name}`);
+    if (termStartDate && termEndDate && termStartDate > termEndDate) {
+      throw new BadRequestException('La fecha de fin de vigencia debe ser mayor a la fecha de inicio');
     }
 
-    const duplicateSectionCode = await this.coursesRepository.findOne({ where: { sectionCode } });
-    if (duplicateSectionCode) {
-      throw new ConflictException(`Ya existe un curso con el codigo ${sectionCode}`);
+    this.ensureValidTimeBlockByModality(modality, startTime, endTime);
+    await this.ensureNoCourseBaseClassroomConflict(
+      classroom,
+      startTime,
+      endTime,
+      undefined,
+      termStartDate,
+      termEndDate,
+    );
+
+    const duplicateCourse = await this.coursesRepository.findOne({ where: { name, sectionCode } });
+    if (duplicateCourse) {
+      throw new ConflictException(`Ya existe el curso ${name} ${sectionCode}`);
     }
 
     return this.coursesRepository.save(
@@ -117,6 +125,8 @@ export class ClassPlanningService {
         classroom,
         scheduleStartTime: startTime,
         scheduleEndTime: endTime,
+        termStartDate,
+        termEndDate,
         isActive: dto.isActive ?? true,
       }),
     );
@@ -392,32 +402,38 @@ export class ClassPlanningService {
   async updateCourse(courseId: string, dto: UpdateClassCourseDto) {
     const course = await this.ensureCourseExists(courseId);
 
-    if (dto.name !== undefined) {
-      const trimmedName = dto.name.trim();
-      if (trimmedName && trimmedName !== course.name) {
-        const dup = await this.coursesRepository.findOne({ where: { name: trimmedName } });
-        if (dup) {
-          throw new ConflictException(`Ya existe un curso con el nombre ${trimmedName}`);
-        }
-        course.name = trimmedName;
+    const trimmedName = dto.name?.trim();
+    const newName = trimmedName || course.name;
+    const newSectionCode =
+      dto.sectionCode !== undefined ? this.normalizeSectionCode(dto.sectionCode) : course.sectionCode;
+
+    if (
+      newSectionCode &&
+      (newName !== course.name || newSectionCode !== course.sectionCode)
+    ) {
+      const duplicateCourse = await this.coursesRepository.findOne({
+        where: { name: newName, sectionCode: newSectionCode },
+      });
+      if (duplicateCourse && duplicateCourse.id !== courseId) {
+        throw new ConflictException(`Ya existe el curso ${newName} ${newSectionCode}`);
       }
     }
 
-    if (dto.sectionCode !== undefined) {
-      const normalized = this.normalizeSectionCode(dto.sectionCode);
-      if (normalized !== course.sectionCode) {
-        const dup = await this.coursesRepository.findOne({ where: { sectionCode: normalized } });
-        if (dup) {
-          throw new ConflictException(`Ya existe un curso con el codigo ${normalized}`);
-        }
-        course.sectionCode = normalized;
-      }
-    }
+    course.name = newName;
+    course.sectionCode = newSectionCode;
 
     const newClassroom = dto.classroom?.trim() ?? course.classroom;
     const newModality = (dto.modality ?? course.modality) as 'presencial' | 'virtual';
     const newStartTime = dto.startTime ?? course.scheduleStartTime;
     const newEndTime = dto.endTime ?? course.scheduleEndTime;
+    const newTermStartDate =
+      dto.termStartDate !== undefined
+        ? (dto.termStartDate ? dto.termStartDate.slice(0, 10) : null)
+        : (course.termStartDate ?? null);
+    const newTermEndDate =
+      dto.termEndDate !== undefined
+        ? (dto.termEndDate ? dto.termEndDate.slice(0, 10) : null)
+        : (course.termEndDate ?? null);
 
     if (dto.classroom !== undefined && !getAvailableRooms(newModality).includes(newClassroom)) {
       throw new BadRequestException(
@@ -431,22 +447,37 @@ export class ClassPlanningService {
       throw new BadRequestException('La hora fin debe ser mayor a la hora inicio');
     }
 
+    if (newTermStartDate && newTermEndDate && newTermStartDate > newTermEndDate) {
+      throw new BadRequestException('La fecha de fin de vigencia debe ser mayor a la fecha de inicio');
+    }
+
     this.ensureValidTimeBlockByModality(newModality, newStartTime, newEndTime);
 
     const scheduleOrRoomChanged =
       newClassroom !== course.classroom ||
       newStartTime !== course.scheduleStartTime ||
       newEndTime !== course.scheduleEndTime ||
-      newModality !== course.modality;
+      newModality !== course.modality ||
+      newTermStartDate !== (course.termStartDate ?? null) ||
+      newTermEndDate !== (course.termEndDate ?? null);
 
     if (scheduleOrRoomChanged) {
-      await this.ensureNoCourseBaseClassroomConflict(newClassroom, newStartTime, newEndTime, courseId);
+      await this.ensureNoCourseBaseClassroomConflict(
+        newClassroom,
+        newStartTime,
+        newEndTime,
+        courseId,
+        newTermStartDate,
+        newTermEndDate,
+      );
     }
 
     course.classroom = newClassroom;
     course.modality = newModality;
     course.scheduleStartTime = newStartTime;
     course.scheduleEndTime = newEndTime;
+    course.termStartDate = newTermStartDate;
+    course.termEndDate = newTermEndDate;
 
     if (dto.isActive !== undefined) {
       course.isActive = dto.isActive;
@@ -748,6 +779,8 @@ export class ClassPlanningService {
     startTime: string,
     endTime: string,
     excludeCourseId?: string,
+    termStartDate?: string | null,
+    termEndDate?: string | null,
   ) {
     const qb = this.coursesRepository
       .createQueryBuilder('course')
@@ -760,20 +793,39 @@ export class ClassPlanningService {
 
     const coursesInClassroom = await qb.getMany();
 
-    const conflict = coursesInClassroom.find((course) =>
-      this.hasTimeOverlap(
-        startTime,
-        endTime,
-        course.scheduleStartTime,
-        course.scheduleEndTime,
-      ),
+    const conflict = coursesInClassroom.find(
+      (course) =>
+        this.hasTimeOverlap(startTime, endTime, course.scheduleStartTime, course.scheduleEndTime) &&
+        this.hasDateRangeOverlap(
+          termStartDate ?? null,
+          termEndDate ?? null,
+          course.termStartDate ?? null,
+          course.termEndDate ?? null,
+        ),
     );
 
     if (conflict) {
       throw new ConflictException(
-        `El aula ${classroom} ya esta ocupada en el horario ${conflict.scheduleStartTime.slice(0, 5)}-${conflict.scheduleEndTime.slice(0, 5)} por el curso ${conflict.name}`,
+        `El aula ${classroom} ya esta ocupada en el horario ${conflict.scheduleStartTime.slice(0, 5)}-${conflict.scheduleEndTime.slice(0, 5)} por el curso ${conflict.name}${conflict.termEndDate ? ` (vigente hasta ${conflict.termEndDate})` : ''}`,
       );
     }
+  }
+
+  private hasDateRangeOverlap(
+    aStart: string | null,
+    aEnd: string | null,
+    bStart: string | null,
+    bEnd: string | null,
+  ) {
+    if (aEnd && bStart && aEnd < bStart) {
+      return false;
+    }
+
+    if (bEnd && aStart && bEnd < aStart) {
+      return false;
+    }
+
+    return true;
   }
 
   private async ensureNoSessionClassroomConflict(
@@ -802,60 +854,60 @@ export class ClassPlanningService {
       );
     }
   }
-}
 
-private classDateToDayName(classDate: string): string {
-  const date = new Date(`${classDate.slice(0, 10)}T12:00:00Z`);
-  const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-  return DAYS[date.getUTCDay()] ?? '';
-}
+  private classDateToDayName(classDate: string): string {
+    const date = new Date(`${classDate.slice(0, 10)}T12:00:00Z`);
+    const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    return DAYS[date.getUTCDay()] ?? '';
+  }
 
-private formatAvailabilitySlot(hour: number): string {
-  const suffix = hour >= 12 ? 'pm' : 'am';
-  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
-  return `${hour12}:00 ${suffix}`;
-}
+  private formatAvailabilitySlot(hour: number): string {
+    const suffix = hour >= 12 ? 'pm' : 'am';
+    const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+    return `${hour12}:00 ${suffix}`;
+  }
 
-private getOverlappingHourSlots(startTime: string, endTime: string): string[] {
-  const [startHour, startMin] = startTime.slice(0, 5).split(':').map(Number);
-  const [endHour, endMin] = endTime.slice(0, 5).split(':').map(Number);
-  const startMinutes = startHour * 60 + startMin;
-  const endMinutes = endHour * 60 + endMin;
+  private getOverlappingHourSlots(startTime: string, endTime: string): string[] {
+    const [startHour, startMin] = startTime.slice(0, 5).split(':').map(Number);
+    const [endHour, endMin] = endTime.slice(0, 5).split(':').map(Number);
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
 
-  const slots: string[] = [];
-  for (let h = 7; h <= 22; h += 1) {
-    const slotStart = h * 60;
-    const slotEnd = (h + 1) * 60;
-    if (slotStart < endMinutes && slotEnd > startMinutes) {
-      slots.push(this.formatAvailabilitySlot(h));
+    const slots: string[] = [];
+    for (let h = 7; h <= 22; h += 1) {
+      const slotStart = h * 60;
+      const slotEnd = (h + 1) * 60;
+      if (slotStart < endMinutes && slotEnd > startMinutes) {
+        slots.push(this.formatAvailabilitySlot(h));
+      }
     }
-  }
-  return slots;
-}
-
-private matchAvailabilityStatus(
-  rawAvailability: unknown,
-  classDate: string,
-  startTime: string,
-  endTime: string,
-): 'busy' | 'confirm' | null {
-  if (!rawAvailability || typeof rawAvailability !== 'object') {
-    return null;
+    return slots;
   }
 
-  const availability = rawAvailability as Record<string, string>;
-  const dayName = this.classDateToDayName(classDate);
-  if (!dayName) return null;
+  private matchAvailabilityStatus(
+    rawAvailability: unknown,
+    classDate: string,
+    startTime: string,
+    endTime: string,
+  ): 'busy' | 'confirm' | null {
+    if (!rawAvailability || typeof rawAvailability !== 'object') {
+      return null;
+    }
 
-  const slots = this.getOverlappingHourSlots(startTime, endTime);
-  let hasConfirm = false;
+    const availability = rawAvailability as Record<string, string>;
+    const dayName = this.classDateToDayName(classDate);
+    if (!dayName) return null;
 
-  for (const slot of slots) {
-    const key = `${dayName}-${slot}`;
-    const status = availability[key];
-    if (status === 'busy') return 'busy';
-    if (status === 'confirm') hasConfirm = true;
+    const slots = this.getOverlappingHourSlots(startTime, endTime);
+    let hasConfirm = false;
+
+    for (const slot of slots) {
+      const key = `${dayName}-${slot}`;
+      const status = availability[key];
+      if (status === 'busy') return 'busy';
+      if (status === 'confirm') hasConfirm = true;
+    }
+
+    return hasConfirm ? 'confirm' : null;
   }
-
-  return hasConfirm ? 'confirm' : null;
 }

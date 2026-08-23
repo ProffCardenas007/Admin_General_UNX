@@ -9,7 +9,6 @@ import {
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, QueryFailedError, Repository } from 'typeorm';
-import { DataSource } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { NotificationEntity } from '../database/entities/notification.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
@@ -28,7 +27,6 @@ export class TasksService {
   private readonly logger = new Logger(TasksService.name);
 
   constructor(
-    private readonly dataSource: DataSource,
     @InjectRepository(TaskEntity)
     private readonly tasksRepository: Repository<TaskEntity>,
     @InjectRepository(ProjectEntity)
@@ -46,24 +44,6 @@ export class TasksService {
     @InjectRepository(TeamMemberEntity)
     private readonly teamMembersRepository: Repository<TeamMemberEntity>,
   ) {}
-
-  private async ensureTaskActivityTypeEnumReady() {
-    await this.dataSource.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1
-          FROM pg_type t
-          JOIN pg_enum e ON t.oid = e.enumtypid
-          WHERE t.typname = 'task_activity_type'
-            AND e.enumlabel = 'administrativo'
-        ) THEN
-          ALTER TYPE task_activity_type ADD VALUE 'administrativo';
-        END IF;
-      END
-      $$;
-    `);
-  }
 
   private async recordManagerAudit(input: {
     actorId: string;
@@ -265,7 +245,7 @@ export class TasksService {
       description?: string;
       assigneeId?: string;
       createdBy?: string;
-      status: 'todo' | 'doing' | 'blocked' | 'done';
+      status: 'todo' | 'doing' | 'paused' | 'blocked' | 'done';
       priority: 'low' | 'medium' | 'high' | 'urgent';
       dueDate?: string;
       estimatedHours: string;
@@ -273,8 +253,6 @@ export class TasksService {
     },
     maxAttempts = 5,
   ) {
-    await this.ensureTaskActivityTypeEnumReady();
-
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const generatedCode = await this.buildGeneratedCode(
         input.projectId,
@@ -360,8 +338,10 @@ export class TasksService {
     for (let index = 0; index < dto.steps.length; index += 1) {
       const step = dto.steps[index];
       const isFirst = index === 0;
+      const previousTask = chainTasks[chainTasks.length - 1];
       const createdTask = await this.createTaskWithGeneratedCode({
         projectId: dto.projectId,
+        parentTaskId: isFirst ? undefined : previousTask?.id,
         chainId,
         chainOrder: index + 1,
         activityType: step.activityType,
@@ -596,6 +576,23 @@ export class TasksService {
     if (taskFields.status === 'done' && before.status !== 'done') {
       task.completedAt = new Date();
     }
+
+    if (
+      taskFields.status !== undefined &&
+      taskFields.status !== before.status
+    ) {
+      if (taskFields.status === 'doing') {
+        task.timerStartedAt = new Date();
+      } else if (before.status === 'doing' && task.timerStartedAt) {
+        const elapsedSeconds = Math.max(
+          0,
+          Math.round((Date.now() - task.timerStartedAt.getTime()) / 1000),
+        );
+        task.activeSeconds = (task.activeSeconds ?? 0) + elapsedSeconds;
+        task.timerStartedAt = null;
+      }
+    }
+
     const savedTask = await this.tasksRepository.save(task);
 
     if (actor.role === 'manager') {

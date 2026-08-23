@@ -135,8 +135,9 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
+    const normalizedEmail = dto.email.trim().toLowerCase();
     const existing = await this.usersRepository.findOne({
-      where: { email: dto.email },
+      where: { email: normalizedEmail },
     });
     if (existing) {
       throw new ConflictException('Email already registered');
@@ -154,11 +155,12 @@ export class UsersService {
 
     const user = this.usersRepository.create({
       fullName: dto.fullName,
-      email: dto.email,
+      email: normalizedEmail,
       role: dto.role,
       specialty:
         dto.role === 'lead' ? (normalizedSpecialties[0] ?? null) : null,
       specialties: dto.role === 'lead' ? normalizedSpecialties : null,
+      classSubjects: dto.classSubjects?.length ? dto.classSubjects : null,
       passwordHash,
       isActive: true,
     });
@@ -226,6 +228,10 @@ export class UsersService {
     if (user.role !== 'lead') {
       user.specialty = null;
       user.specialties = null;
+    }
+
+    if (typeof dto.classSubjects !== 'undefined') {
+      user.classSubjects = dto.classSubjects?.length ? dto.classSubjects : null;
     }
 
     if (typeof dto.isActive !== 'undefined') {

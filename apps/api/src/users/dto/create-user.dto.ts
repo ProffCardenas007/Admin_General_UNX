@@ -60,4 +60,11 @@ export class CreateUserDto {
   @ArrayUnique()
   @IsString({ each: true })
   teamIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  classSubjects?: string[];
 }

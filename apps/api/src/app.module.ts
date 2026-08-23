@@ -24,6 +24,12 @@ import { NotificationEntity } from './database/entities/notification.entity';
 import { AuditLogEntity } from './database/entities/audit-log.entity';
 import { TeamEntity } from './database/entities/team.entity';
 import { TeamMemberEntity } from './database/entities/team-member.entity';
+import { TeacherAvailabilityModule } from './teacher-availability/teacher-availability.module';
+import { ClassScheduleProfileEntity } from './database/entities/class-schedule-profile.entity';
+import { ClassPlanningModule } from './class-planning/class-planning.module';
+import { ClassCourseEntity } from './database/entities/class-course.entity';
+import { ClassCourseSubjectEntity } from './database/entities/class-course-subject.entity';
+import { ClassSessionEntity } from './database/entities/class-session.entity';
 
 @Module({
   imports: [
@@ -67,6 +73,10 @@ import { TeamMemberEntity } from './database/entities/team-member.entity';
             AuditLogEntity,
             TeamEntity,
             TeamMemberEntity,
+            ClassScheduleProfileEntity,
+            ClassCourseEntity,
+            ClassCourseSubjectEntity,
+            ClassSessionEntity,
           ],
           synchronize: false,
         };
@@ -83,6 +93,8 @@ import { TeamMemberEntity } from './database/entities/team-member.entity';
     NotificationsModule,
     AuditLogsModule,
     TeamsModule,
+    TeacherAvailabilityModule,
+    ClassPlanningModule,
   ],
   controllers: [AppController],
   providers: [AppService],

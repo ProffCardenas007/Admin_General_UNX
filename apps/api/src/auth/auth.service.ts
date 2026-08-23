@@ -27,9 +27,8 @@ export class AuthService {
     } else {
       const demoPassword = this.configService.get<string>(
         'AUTH_DEMO_PASSWORD',
-        '123456',
       );
-      if (dto.password === demoPassword) {
+      if (demoPassword && dto.password === demoPassword) {
         isValid = true;
         const newHash = await hash(dto.password, 10);
         await this.usersService.setPasswordHash(user.id, newHash);

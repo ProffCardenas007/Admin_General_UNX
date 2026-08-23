@@ -181,6 +181,7 @@ export class DashboardService {
       .createQueryBuilder('task')
       .select('task.assignee_id', 'userId')
       .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'hoursWorked')
+      .addSelect('COALESCE(SUM(task.active_seconds), 0)', 'activeSecondsWorked')
       .addSelect('COUNT(task.id)', 'tasksCount')
       .where('task.assignee_id IS NOT NULL')
       .groupBy('task.assignee_id')
@@ -211,6 +212,7 @@ export class DashboardService {
       return qb.getRawMany<{
         userId: string;
         hoursWorked: string;
+        activeSecondsWorked: string;
         tasksCount: string;
       }>();
     } catch (error) {

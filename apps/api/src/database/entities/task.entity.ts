@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
+export type TaskStatus = 'todo' | 'doing' | 'paused' | 'blocked' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskActivityType =
   | 'revision'
@@ -67,7 +67,7 @@ export class TaskEntity {
 
   @Column({
     type: 'enum',
-    enum: ['todo', 'doing', 'blocked', 'done'],
+    enum: ['todo', 'doing', 'paused', 'blocked', 'done'],
     enumName: 'task_status',
     default: 'todo',
   })
@@ -89,6 +89,12 @@ export class TaskEntity {
 
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt?: Date | null;
+
+  @Column({ name: 'active_seconds', type: 'int', default: 0 })
+  activeSeconds: number;
+
+  @Column({ name: 'timer_started_at', type: 'timestamptz', nullable: true })
+  timerStartedAt?: Date | null;
 
   @Column({
     name: 'estimated_hours',

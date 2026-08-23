@@ -14,8 +14,8 @@ export class UpdateTaskDto {
   assigneeId?: string;
 
   @IsOptional()
-  @IsIn(['todo', 'doing', 'blocked', 'done'])
-  status?: 'todo' | 'doing' | 'blocked' | 'done';
+  @IsIn(['todo', 'doing', 'paused', 'blocked', 'done'])
+  status?: 'todo' | 'doing' | 'paused' | 'blocked' | 'done';
 
   @IsOptional()
   @IsIn(['low', 'medium', 'high', 'urgent'])

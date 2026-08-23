@@ -1,5 +1,6 @@
 import {
   IsIn,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -51,16 +52,16 @@ export class CreateTaskDto {
   teamId?: string;
 
   @IsOptional()
-  @IsIn(['todo', 'doing', 'blocked', 'done'])
-  status?: 'todo' | 'doing' | 'blocked' | 'done';
+  @IsIn(['todo', 'doing', 'paused', 'blocked', 'done'])
+  status?: 'todo' | 'doing' | 'paused' | 'blocked' | 'done';
 
   @IsOptional()
   @IsIn(['low', 'medium', 'high', 'urgent'])
   priority?: 'low' | 'medium' | 'high' | 'urgent';
 
-  @IsOptional()
   @IsString()
-  dueDate?: string;
+  @IsNotEmpty()
+  dueDate: string;
 
   @IsOptional()
   @IsNumber()

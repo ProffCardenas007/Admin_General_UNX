@@ -46,8 +46,8 @@ class CreateTaskChainStepDto {
   description: string;
 
   @IsOptional()
-  @IsIn(['todo', 'doing', 'blocked', 'done'])
-  status?: 'todo' | 'doing' | 'blocked' | 'done';
+  @IsIn(['todo', 'doing', 'blocked', 'paused', 'done'])
+  status?: 'todo' | 'doing' | 'blocked' | 'paused' | 'done';
 
   @IsOptional()
   @IsIn(['low', 'medium', 'high', 'urgent'])

@@ -55,6 +55,14 @@ export class UserEntity {
   })
   specialties?: LeadSpecialty[] | null;
 
+  @Column({
+    name: 'class_subjects',
+    type: 'varchar',
+    array: true,
+    nullable: true,
+  })
+  classSubjects?: string[] | null;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
