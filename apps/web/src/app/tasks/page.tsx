@@ -59,6 +59,8 @@ type TaskUpdateRow = {
 
 const UNASSIGNED_SENTINEL = "__unassigned__";
 
+const normalizeAcademy = (value: string) => value.trim().toLocaleLowerCase("es");
+
 type HalfMonth = "first" | "second";
 
 const toDateKey = (date: Date) => {
@@ -641,7 +643,9 @@ export default function TasksPage() {
       if (canManagePlanning) {
         const project = projects.find((item) => item.id === task.projectId);
         const bySpecialty = selectedSpecialty.length === 0 || project?.scope === selectedSpecialty;
-        const byAcademy = selectedAcademy.length === 0 || project?.code === selectedAcademy;
+        const byAcademy =
+          selectedAcademy.length === 0 ||
+          (!!project && normalizeAcademy(project.code) === selectedAcademy);
         const byProject = selectedProjectId.length === 0 || task.projectId === selectedProjectId;
         const byAssignee =
           selectedAssigneeId.length === 0 ||
@@ -683,17 +687,28 @@ export default function TasksPage() {
   ]);
 
   const availableAcademies = useMemo(
-    () =>
-      [...new Set(
-        projects
-          .filter(
-            (project) =>
-              project.status === "active" &&
-              selectedSpecialty.length > 0 &&
-              project.scope === selectedSpecialty,
-          )
-          .map((project) => project.code),
-      )].sort((left, right) => left.localeCompare(right, "es")),
+    () => {
+      const academyLabels = new Map<string, string>();
+      projects
+        .filter(
+          (project) =>
+            project.status === "active" &&
+            selectedSpecialty.length > 0 &&
+            project.scope === selectedSpecialty,
+        )
+        .forEach((project) => {
+          const label = project.code.trim();
+          const key = normalizeAcademy(label);
+          const currentLabel = academyLabels.get(key);
+          if (!currentLabel || (currentLabel === currentLabel.toUpperCase() && label !== label.toUpperCase())) {
+            academyLabels.set(key, label);
+          }
+        });
+
+      return [...academyLabels.entries()]
+        .map(([key, label]) => ({ key, label }))
+        .sort((left, right) => left.label.localeCompare(right.label, "es"));
+    },
     [projects, selectedSpecialty],
   );
 
@@ -703,7 +718,7 @@ export default function TasksPage() {
         (project) =>
           project.status === "active" &&
           (selectedSpecialty.length === 0 || project.scope === selectedSpecialty) &&
-          (selectedAcademy.length === 0 || project.code === selectedAcademy),
+          (selectedAcademy.length === 0 || normalizeAcademy(project.code) === selectedAcademy),
       ),
     [projects, selectedSpecialty, selectedAcademy],
   );
@@ -1714,20 +1729,20 @@ export default function TasksPage() {
                   </button>
                   {availableAcademies.map((academy) => (
                     <button
-                      key={academy}
+                      key={academy.key}
                       type="button"
                       onClick={() => {
-                        setSelectedAcademy((current) => (current === academy ? "" : academy));
+                        setSelectedAcademy((current) => (current === academy.key ? "" : academy.key));
                         setSelectedProjectId("");
                         setSelectedAssigneeId("");
                       }}
                       className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        selectedAcademy === academy
+                        selectedAcademy === academy.key
                           ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
                           : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
                       }`}
                     >
-                      {academy}
+                      {academy.label}
                     </button>
                   ))}
                 </div>
