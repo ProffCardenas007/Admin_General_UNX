@@ -7,11 +7,12 @@ import {
   IsArray,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { LEAD_SPECIALTY_INPUTS } from '../../common/specialties';
+import { SPECIALTY_CODE_PATTERN } from '../../common/specialties';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -31,8 +32,8 @@ export class UpdateUserDto {
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   )
-  @IsIn(LEAD_SPECIALTY_INPUTS)
-  specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number] | null;
+  @Matches(SPECIALTY_CODE_PATTERN)
+  specialty?: string | null;
 
   @IsOptional()
   @Transform(({ value }) => {
@@ -47,8 +48,8 @@ export class UpdateUserDto {
   @IsArray()
   @ArrayUnique()
   @ArrayMaxSize(2)
-  @IsIn(LEAD_SPECIALTY_INPUTS, { each: true })
-  specialties?: Array<(typeof LEAD_SPECIALTY_INPUTS)[number]> | null;
+  @Matches(SPECIALTY_CODE_PATTERN, { each: true })
+  specialties?: string[] | null;
 
   @IsOptional()
   @IsBoolean()

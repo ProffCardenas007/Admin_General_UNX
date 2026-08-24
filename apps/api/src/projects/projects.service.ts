@@ -15,6 +15,7 @@ import { AuditLogEntity } from '../database/entities/audit-log.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
+import { SpecialtyEntity } from '../database/entities/specialty.entity';
 
 @Injectable()
 export class ProjectsService {
@@ -29,6 +30,8 @@ export class ProjectsService {
     private readonly usersRepository: Repository<UserEntity>,
     @InjectRepository(AuditLogEntity)
     private readonly auditLogsRepository: Repository<AuditLogEntity>,
+    @InjectRepository(SpecialtyEntity)
+    private readonly specialtiesRepository: Repository<SpecialtyEntity>,
   ) {}
 
   private async recordManagerAudit(input: {
@@ -184,6 +187,13 @@ export class ProjectsService {
       }
     } else if (!resolvedScope) {
       throw new BadRequestException('Project scope is required');
+    }
+
+    const specialtyExists = await this.specialtiesRepository.exists({
+      where: { code: resolvedScope ?? '', isActive: true },
+    });
+    if (!specialtyExists) {
+      throw new BadRequestException('Project specialty does not exist');
     }
 
     const existingByNameAndScope = await this.projectsRepository

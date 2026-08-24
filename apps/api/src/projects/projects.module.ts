@@ -6,6 +6,7 @@ import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { AuditLogEntity } from '../database/entities/audit-log.entity';
+import { SpecialtyEntity } from '../database/entities/specialty.entity';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AuditLogEntity } from '../database/entities/audit-log.entity';
       TaskEntity,
       UserEntity,
       AuditLogEntity,
+      SpecialtyEntity,
     ]),
   ],
   controllers: [ProjectsController],

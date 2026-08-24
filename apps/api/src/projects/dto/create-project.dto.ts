@@ -1,5 +1,5 @@
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-import { PROJECT_SCOPES } from '../../common/specialties';
+import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { SPECIALTY_CODE_PATTERN } from '../../common/specialties';
 
 export class CreateProjectDto {
   @IsString()
@@ -20,8 +20,8 @@ export class CreateProjectDto {
   ownerTeamId?: string;
 
   @IsOptional()
-  @IsIn(PROJECT_SCOPES)
-  scope?: (typeof PROJECT_SCOPES)[number];
+  @Matches(SPECIALTY_CODE_PATTERN)
+  scope?: string;
 
   @IsOptional()
   @IsIn(['planned', 'active', 'on_hold', 'done', 'cancelled'])

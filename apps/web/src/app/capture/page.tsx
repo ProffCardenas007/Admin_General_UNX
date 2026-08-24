@@ -12,7 +12,6 @@ import {
   getStoredToken,
 } from "../../lib/api";
 import {
-  LEAD_SPECIALTIES,
   normalizeLeadSpecialtiesInput,
   normalizeLeadSpecialtyInput,
   specialtyLabels,
@@ -40,6 +39,12 @@ type TeamOption = {
   id: string;
   name: string;
   memberCount?: number;
+};
+
+type SpecialtyOption = {
+  code: string;
+  name: string;
+  isActive: boolean;
 };
 
 type TaskOption = {
@@ -138,21 +143,25 @@ export default function CapturePage() {
   };
   const [role, setRole] = useState("");
   const [specialties, setSpecialties] = useState<LeadSpecialty[]>([]);
-  const [captureMode, setCaptureMode] = useState<"" | "project" | "task" | "task-chain">("");
+  const [captureMode, setCaptureMode] = useState<"" | "project" | "task" | "task-chain" | "specialty">("");
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [teams, setTeams] = useState<TeamOption[]>([]);
   const [tasks, setTasks] = useState<TaskOption[]>([]);
+  const [specialtyOptions, setSpecialtyOptions] = useState<SpecialtyOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const projectCodeLabel = role === "manager" || role === "lead" ? "Academia" : "Código";
+
+  const getSpecialtyLabel = (code: string) =>
+    specialtyOptions.find((item) => item.code === code)?.name ?? specialtyLabels[code];
 
   const projectTaskSpecialtyLabel = (project?: ProjectOption) => {
     if (!project?.scope) {
       return "";
     }
 
-    return specialtyLabels[project.scope];
+    return getSpecialtyLabel(project.scope);
   };
 
   const [projectForm, setProjectForm] = useState({
@@ -163,6 +172,8 @@ export default function CapturePage() {
     startDate: "",
     endDate: "",
   });
+
+  const [specialtyForm, setSpecialtyForm] = useState({ name: "" });
 
   const [taskForm, setTaskForm] = useState({
     projectId: "",
@@ -246,17 +257,19 @@ export default function CapturePage() {
     try {
       setLoading(true);
       const headers = authHeaders();
-      const [projectResponse, userResponse, taskResponse, teamsResponse] = await Promise.all([
+      const [projectResponse, userResponse, taskResponse, teamsResponse, specialtiesResponse] = await Promise.all([
         axios.get(`${API_URL}/projects`, { headers }),
         axios.get(`${API_URL}/users`, { headers }),
         axios.get(`${API_URL}/tasks`, { headers }),
         axios.get(`${API_URL}/teams`, { headers }),
+        axios.get(`${API_URL}/specialties`, { headers }),
       ]);
 
       setProjects(projectResponse.data as ProjectOption[]);
       setUsers(userResponse.data as UserOption[]);
       setTasks(taskResponse.data as TaskOption[]);
       setTeams(teamsResponse.data as TeamOption[]);
+      setSpecialtyOptions(specialtiesResponse.data as SpecialtyOption[]);
 
       const currentRole = getStoredRole();
       const currentEmail = getStoredEmail().toLowerCase();
@@ -348,7 +361,7 @@ export default function CapturePage() {
     }
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     const requestedProjectId = new URLSearchParams(window.location.search).get("projectId");
-    if (requestedMode === "project" || requestedMode === "task" || requestedMode === "task-chain") {
+    if (requestedMode === "project" || requestedMode === "task" || requestedMode === "task-chain" || (requestedMode === "specialty" && savedRole === "manager")) {
       setCaptureMode(requestedMode);
     }
     if (requestedProjectId) {
@@ -358,6 +371,37 @@ export default function CapturePage() {
 
     void loadLookups();
   }, [router]);
+
+  const submitSpecialty = async () => {
+    setMessage("");
+    const name = specialtyForm.name.trim();
+    if (name.length < 2) {
+      setMessage("No se pudo crear la especialidad: escribe un nombre válido.");
+      return;
+    }
+
+    try {
+      const response = await axios.post<SpecialtyOption>(
+        `${API_URL}/specialties`,
+        { name },
+        { headers: authHeaders() },
+      );
+      setSpecialtyForm({ name: "" });
+      setProjectForm((current) => ({ ...current, scope: response.data.code }));
+      setMessage(`Especialidad ${response.data.name} creada.`);
+      await loadLookups();
+    } catch (caughtError) {
+      const rawMessage = axios.isAxiosError(caughtError)
+        ? caughtError.response?.data?.message
+        : undefined;
+      const backendMessage = Array.isArray(rawMessage) ? rawMessage.join(". ") : rawMessage;
+      setMessage(
+        typeof backendMessage === "string"
+          ? `No se pudo crear la especialidad: ${backendMessage}`
+          : "No se pudo crear la especialidad.",
+      );
+    }
+  };
 
   const submitProject = async () => {
     setMessage("");
@@ -822,10 +866,50 @@ export default function CapturePage() {
           >
             Crear tarea completa
           </button>
+          {role === "manager" ? (
+            <button
+              onClick={() => setCaptureMode("specialty")}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                captureMode === "specialty"
+                  ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                  : "border border-[var(--line)] bg-white hover:bg-[var(--background)]"
+              }`}
+            >
+              Crear especialidad
+            </button>
+          ) : null}
         </div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {captureMode === "specialty" && role === "manager" ? (
+        <article className="kpi-card fade-up p-5 md:col-span-2">
+          <h2 className="text-lg font-semibold">Nueva especialidad</h2>
+          <p className="mt-1 text-sm text-[var(--ink-muted)]">
+            Se habilitará para proyectos y para asignarla a líderes.
+          </p>
+          <div className="mt-5 space-y-3">
+            <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+              Nombre de la especialidad
+              <input
+                className="mt-2 w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]"
+                value={specialtyForm.name}
+                onChange={(event) => setSpecialtyForm({ name: event.target.value })}
+                placeholder="Ej. Bachillerato"
+                maxLength={120}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void submitSpecialty()}
+              className="ui-btn ui-btn-primary w-full"
+            >
+              Crear especialidad
+            </button>
+          </div>
+        </article>
+        ) : null}
+
         {captureMode === "project" ? (
         <article className="kpi-card fade-up p-5">
           <h2 className="text-lg font-semibold">Nuevo proyecto</h2>
@@ -843,7 +927,7 @@ export default function CapturePage() {
                 <option value="">Especialidad del proyecto</option>
                 {specialties.map((item) => (
                   <option key={item} value={item}>
-                    {specialtyLabels[item]}
+                    {getSpecialtyLabel(item)}
                   </option>
                 ))}
               </select>
@@ -854,9 +938,9 @@ export default function CapturePage() {
                 onChange={(event) => setProjectForm({ ...projectForm, scope: event.target.value })}
               >
                 <option value="">Especialidad del proyecto</option>
-                {LEAD_SPECIALTIES.map((item) => (
-                  <option key={item} value={item}>
-                    {specialtyLabels[item]}
+                {specialtyOptions.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.name}
                   </option>
                 ))}
               </select>
@@ -1215,11 +1299,11 @@ export default function CapturePage() {
                   Especialidades del lider (max 2)
                 </p>
                 <div className="grid gap-2 md:grid-cols-2">
-                  {LEAD_SPECIALTIES.map((item) => {
-                    const checked = userForm.specialties.includes(item);
+                  {specialtyOptions.map((item) => {
+                    const checked = userForm.specialties.includes(item.code);
 
                     return (
-                      <label key={item} className="flex items-center gap-2 text-sm">
+                      <label key={item.code} className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
                           checked={checked}
@@ -1232,18 +1316,18 @@ export default function CapturePage() {
 
                                 return {
                                   ...current,
-                                  specialties: [...current.specialties, item],
+                                  specialties: [...current.specialties, item.code],
                                 };
                               }
 
                               return {
                                 ...current,
-                                specialties: current.specialties.filter((specialtyItem) => specialtyItem !== item),
+                                specialties: current.specialties.filter((specialtyItem) => specialtyItem !== item.code),
                               };
                             });
                           }}
                         />
-                        {specialtyLabels[item]}
+                        {item.name}
                       </label>
                     );
                   })}

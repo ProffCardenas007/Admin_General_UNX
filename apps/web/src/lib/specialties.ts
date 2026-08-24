@@ -6,9 +6,9 @@ export const LEAD_SPECIALTIES = [
   'modulos',
 ] as const;
 
-export type LeadSpecialty = (typeof LEAD_SPECIALTIES)[number];
+export type LeadSpecialty = string;
 
-export const specialtyLabels: Record<LeadSpecialty, string> = {
+const defaultSpecialtyLabels: Record<string, string> = {
   paa: 'PAA',
   exani_ii: 'EXANI-II',
   piense: 'PIENSE',
@@ -16,13 +16,13 @@ export const specialtyLabels: Record<LeadSpecialty, string> = {
   modulos: 'Módulos',
 };
 
-const leadSpecialtyAliases: Record<string, LeadSpecialty> = {
-  paa: 'paa',
-  exani_ii: 'exani_ii',
-  piense: 'piense',
-  unam: 'unam',
-  modulos: 'modulos',
-};
+export const specialtyLabels: Record<string, string> = new Proxy(defaultSpecialtyLabels, {
+  get(target, property: string) {
+    return target[property] ?? property.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  },
+});
+
+const specialtyCodePattern = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 export function normalizeLeadSpecialtyInput(value?: string | null): LeadSpecialty | "" {
   if (!value) {
@@ -30,7 +30,7 @@ export function normalizeLeadSpecialtyInput(value?: string | null): LeadSpecialt
   }
 
   const normalized = value.trim().toLowerCase();
-  return leadSpecialtyAliases[normalized] ?? "";
+  return specialtyCodePattern.test(normalized) ? normalized : "";
 }
 
 export function normalizeLeadSpecialtiesInput(values?: Array<string | null | undefined> | string | null): LeadSpecialty[] {

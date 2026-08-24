@@ -38,18 +38,16 @@ export class UserEntity {
 
   @Column({
     name: 'specialty',
-    type: 'enum',
-    enum: ['paa', 'exani_ii', 'piense', 'unam', 'modulos'],
-    enumName: 'lead_specialty',
+    type: 'varchar',
+    length: 60,
     nullable: true,
   })
   specialty?: LeadSpecialty | null;
 
   @Column({
     name: 'specialties',
-    type: 'enum',
-    enum: ['paa', 'exani_ii', 'piense', 'unam', 'modulos'],
-    enumName: 'lead_specialty',
+    type: 'varchar',
+    length: 60,
     array: true,
     nullable: true,
   })

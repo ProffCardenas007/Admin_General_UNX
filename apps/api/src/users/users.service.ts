@@ -13,6 +13,7 @@ import { TeamMemberEntity } from '../database/entities/team-member.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { normalizeLeadSpecialties } from '../common/specialties';
+import { SpecialtyEntity } from '../database/entities/specialty.entity';
 
 @Injectable()
 export class UsersService {
@@ -23,7 +24,24 @@ export class UsersService {
     private readonly teamsRepository: Repository<TeamEntity>,
     @InjectRepository(TeamMemberEntity)
     private readonly teamMembersRepository: Repository<TeamMemberEntity>,
+    @InjectRepository(SpecialtyEntity)
+    private readonly specialtiesRepository: Repository<SpecialtyEntity>,
   ) {}
+
+  private async ensureSpecialtiesExist(codes: string[]) {
+    if (codes.length === 0) {
+      return;
+    }
+
+    const specialties = await this.specialtiesRepository.find({
+      where: { code: In(codes), isActive: true },
+    });
+    const foundCodes = new Set(specialties.map((item) => item.code));
+
+    if (codes.some((code) => !foundCodes.has(code))) {
+      throw new BadRequestException('One or more specialties do not exist');
+    }
+  }
 
   private normalizeTeamIdsInput(
     teamIds?: string[] | null,
@@ -150,6 +168,7 @@ export class UsersService {
     if (dto.role === 'lead' && normalizedSpecialties.length === 0) {
       throw new BadRequestException('Lead specialty is required');
     }
+    await this.ensureSpecialtiesExist(normalizedSpecialties);
 
     const passwordHash = await hash(dto.password, 10);
 
@@ -208,6 +227,7 @@ export class UsersService {
           ? dto.specialties
           : dto.specialty,
       );
+      await this.ensureSpecialtiesExist(normalizedSpecialties);
       user.specialties =
         normalizedSpecialties.length > 0 ? normalizedSpecialties : null;
       user.specialty = normalizedSpecialties[0] ?? null;

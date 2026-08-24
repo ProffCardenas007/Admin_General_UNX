@@ -17,26 +17,6 @@ BEGIN
         CREATE TYPE user_role AS ENUM ('manager', 'lead', 'worker');
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'lead_specialty') THEN
-        CREATE TYPE lead_specialty AS ENUM (
-            'paa',
-            'exani_ii',
-            'piense',
-            'unam',
-            'modulos'
-        );
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_scope') THEN
-        CREATE TYPE project_scope AS ENUM (
-            'paa',
-            'exani_ii',
-            'piense',
-            'unam',
-            'modulos'
-        );
-    END IF;
-
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_status') THEN
         CREATE TYPE project_status AS ENUM ('planned', 'active', 'on_hold', 'done', 'cancelled');
     END IF;
@@ -59,12 +39,28 @@ BEGIN
 END;
 $$;
 
+CREATE TABLE IF NOT EXISTS specialties (
+    code VARCHAR(60) PRIMARY KEY,
+    name VARCHAR(120) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO specialties (code, name)
+VALUES
+    ('paa', 'PAA'),
+    ('exani_ii', 'EXANI-II'),
+    ('piense', 'PIENSE'),
+    ('unam', 'UNAM'),
+    ('modulos', 'Módulos')
+ON CONFLICT (code) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     full_name VARCHAR(120) NOT NULL,
     email VARCHAR(180) NOT NULL UNIQUE,
     role user_role NOT NULL,
-    specialty lead_specialty,
+    specialty VARCHAR(60) REFERENCES specialties(code),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -73,7 +69,7 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE IF EXISTS users
     ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
 ALTER TABLE IF EXISTS users
-    ADD COLUMN IF NOT EXISTS specialty lead_specialty;
+    ADD COLUMN IF NOT EXISTS specialty VARCHAR(60) REFERENCES specialties(code);
 
 CREATE TABLE IF NOT EXISTS teams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -97,7 +93,7 @@ CREATE TABLE IF NOT EXISTS projects (
     client_name VARCHAR(160),
     owner_team_id UUID REFERENCES teams(id),
     created_by UUID REFERENCES users(id),
-    scope project_scope,
+    scope VARCHAR(60) REFERENCES specialties(code),
     status project_status NOT NULL DEFAULT 'planned',
     start_date DATE,
     end_date DATE,
@@ -106,7 +102,7 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 ALTER TABLE IF EXISTS projects
-    ADD COLUMN IF NOT EXISTS scope project_scope;
+    ADD COLUMN IF NOT EXISTS scope VARCHAR(60) REFERENCES specialties(code);
 ALTER TABLE IF EXISTS projects
     ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id);
 
@@ -276,7 +272,7 @@ ALTER TABLE IF EXISTS tasks
 
 -- Lead multi-specialty support
 ALTER TABLE IF EXISTS users
-    ADD COLUMN IF NOT EXISTS specialties lead_specialty[];
+    ADD COLUMN IF NOT EXISTS specialties VARCHAR(60)[];
 
 -- Subjects a user (teacher) is qualified to teach
 ALTER TABLE IF EXISTS users

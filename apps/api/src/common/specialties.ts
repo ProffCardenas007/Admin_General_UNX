@@ -8,11 +8,13 @@ export const LEAD_SPECIALTIES = [
 
 export const LEAD_SPECIALTY_INPUTS = LEAD_SPECIALTIES;
 
-export type LeadSpecialty = (typeof LEAD_SPECIALTIES)[number];
-export type LeadSpecialtyInput = (typeof LEAD_SPECIALTY_INPUTS)[number];
+export type LeadSpecialty = string;
+export type LeadSpecialtyInput = string;
 
 export const PROJECT_SCOPES = LEAD_SPECIALTIES;
 export type ProjectScope = LeadSpecialty;
+
+export const SPECIALTY_CODE_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 export function normalizeLeadSpecialty(
   value?: string | null,
@@ -22,8 +24,8 @@ export function normalizeLeadSpecialty(
   }
 
   const normalized = value.trim().toLowerCase();
-  if ((LEAD_SPECIALTIES as readonly string[]).includes(normalized)) {
-    return normalized as LeadSpecialty;
+  if (SPECIALTY_CODE_PATTERN.test(normalized)) {
+    return normalized;
   }
 
   return undefined;

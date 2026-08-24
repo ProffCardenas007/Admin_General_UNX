@@ -36,9 +36,8 @@ export class ProjectEntity {
 
   @Column({
     name: 'scope',
-    type: 'enum',
-    enum: ['paa', 'exani_ii', 'piense', 'unam', 'modulos'],
-    enumName: 'project_scope',
+    type: 'varchar',
+    length: 60,
     nullable: true,
   })
   scope?: ProjectScope | null;

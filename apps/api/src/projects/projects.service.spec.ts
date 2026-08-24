@@ -1,5 +1,5 @@
 import { ProjectsService } from './projects.service';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
@@ -7,6 +7,7 @@ describe('ProjectsService', () => {
   let tasksRepository: any;
   let projectsQb: any;
   let tasksQb: any;
+  let specialtiesRepository: any;
 
   beforeEach(() => {
     projectsQb = {
@@ -36,11 +37,16 @@ describe('ProjectsService', () => {
       createQueryBuilder: jest.fn().mockReturnValue(tasksQb),
     };
 
+    specialtiesRepository = {
+      exists: jest.fn().mockResolvedValue(true),
+    };
+
     service = new ProjectsService(
       projectsRepository,
       tasksRepository,
       { findOne: jest.fn() } as any,
       { create: jest.fn(), save: jest.fn() } as any,
+      specialtiesRepository,
     );
   });
 
@@ -67,6 +73,19 @@ describe('ProjectsService', () => {
         { id: 'manager-1', role: 'manager' },
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(projectsRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a project specialty that is not in the catalog', async () => {
+    specialtiesRepository.exists.mockResolvedValue(false);
+
+    await expect(
+      service.create(
+        { code: 'NEW-1', name: 'Nuevo', scope: 'no_existe' },
+        { id: 'manager-1', role: 'manager' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(projectsRepository.save).not.toHaveBeenCalled();
   });

@@ -4,13 +4,14 @@ import {
   IsEmail,
   IsArray,
   IsIn,
+  Matches,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { LEAD_SPECIALTY_INPUTS } from '../../common/specialties';
+import { SPECIALTY_CODE_PATTERN } from '../../common/specialties';
 
 export class CreateUserDto {
   @IsString()
@@ -27,8 +28,8 @@ export class CreateUserDto {
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   )
-  @IsIn(LEAD_SPECIALTY_INPUTS)
-  specialty?: (typeof LEAD_SPECIALTY_INPUTS)[number];
+  @Matches(SPECIALTY_CODE_PATTERN)
+  specialty?: string;
 
   @IsOptional()
   @Transform(({ value }) => {
@@ -43,8 +44,8 @@ export class CreateUserDto {
   @IsArray()
   @ArrayUnique()
   @ArrayMaxSize(2)
-  @IsIn(LEAD_SPECIALTY_INPUTS, { each: true })
-  specialties?: Array<(typeof LEAD_SPECIALTY_INPUTS)[number]>;
+  @Matches(SPECIALTY_CODE_PATTERN, { each: true })
+  specialties?: string[];
 
   @IsString()
   @MinLength(6)

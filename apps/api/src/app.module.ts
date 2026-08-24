@@ -30,6 +30,8 @@ import { ClassPlanningModule } from './class-planning/class-planning.module';
 import { ClassCourseEntity } from './database/entities/class-course.entity';
 import { ClassCourseSubjectEntity } from './database/entities/class-course-subject.entity';
 import { ClassSessionEntity } from './database/entities/class-session.entity';
+import { SpecialtyEntity } from './database/entities/specialty.entity';
+import { SpecialtiesModule } from './specialties/specialties.module';
 
 @Module({
   imports: [
@@ -77,6 +79,7 @@ import { ClassSessionEntity } from './database/entities/class-session.entity';
             ClassCourseEntity,
             ClassCourseSubjectEntity,
             ClassSessionEntity,
+            SpecialtyEntity,
           ],
           synchronize: false,
         };
@@ -95,6 +98,7 @@ import { ClassSessionEntity } from './database/entities/class-session.entity';
     TeamsModule,
     TeacherAvailabilityModule,
     ClassPlanningModule,
+    SpecialtiesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

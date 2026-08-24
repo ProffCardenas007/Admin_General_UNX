@@ -1,17 +1,11 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 
-const SPECIALTY_ALIAS: Record<string, string> = {
-  paa: "paa",
-  exani_ii: "exani_ii",
-  piense: "piense",
-  unam: "unam",
-  modulos: "modulos",
-};
+const SPECIALTY_CODE_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 function normalizeStoredSpecialty(value: string) {
   const normalized = value.trim().toLowerCase();
-  return SPECIALTY_ALIAS[normalized] ?? "";
+  return SPECIALTY_CODE_PATTERN.test(normalized) ? normalized : "";
 }
 
 function normalizeStoredSpecialties(values: Array<string | null | undefined>) {
