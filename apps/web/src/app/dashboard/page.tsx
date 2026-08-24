@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -19,12 +19,6 @@ type WorkloadRow = {
   userId: string;
   hoursWorked: string;
   activeSecondsWorked?: string;
-  tasksCount: string;
-};
-
-type TrendRow = {
-  weekStart: string;
-  hoursWorked: string;
   tasksCount: string;
 };
 
@@ -140,8 +134,36 @@ const roleLabels: Record<UserOption["role"], string> = {
   worker: "colaborador",
 };
 
+const toLocalDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentFortnight = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const startDay = today.getDate() <= 15 ? 1 : 16;
+  const endDay = startDay === 1 ? 15 : new Date(year, month + 1, 0).getDate();
+  const startDate = new Date(year, month, startDay);
+  const endDate = new Date(year, month, endDay);
+  const monthAndYear = endDate.toLocaleDateString("es-MX", {
+    month: "long",
+    year: "numeric",
+  });
+
+  return {
+    startKey: toLocalDateKey(startDate),
+    endKey: toLocalDateKey(endDate),
+    label: `${startDay} al ${endDay} de ${monthAndYear}`,
+  };
+};
+
 export default function DashboardPage() {
   const router = useRouter();
+  const fortnightCardsRef = useRef<HTMLDivElement>(null);
   const getTodayDate = () => new Date().toISOString().slice(0, 10);
   const [role, setRole] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
@@ -150,7 +172,6 @@ export default function DashboardPage() {
   const [info, setInfo] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [workload, setWorkload] = useState<WorkloadRow[]>([]);
-  const [trends, setTrends] = useState<TrendRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -167,8 +188,6 @@ export default function DashboardPage() {
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [assignedHoursExpanded, setAssignedHoursExpanded] = useState(false);
   const [actualHoursExpanded, setActualHoursExpanded] = useState(false);
-  const [trendWeekFrom, setTrendWeekFrom] = useState("");
-  const [trendWeekTo, setTrendWeekTo] = useState("");
   const [selectedDashboardUserId, setSelectedDashboardUserId] = useState("");
   const [overloadThresholdHours, setOverloadThresholdHours] = useState(40);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -202,63 +221,6 @@ export default function DashboardPage() {
       1,
     );
   }, [workload]);
-
-  const weekInputToDateKey = (weekValue: string) => {
-    const match = /^(\d{4})-W(\d{2})$/.exec(weekValue);
-    if (!match) {
-      return "";
-    }
-
-    const year = Number(match[1]);
-    const week = Number(match[2]);
-
-    const jan4 = new Date(Date.UTC(year, 0, 4));
-    const jan4Day = jan4.getUTCDay() || 7;
-    const mondayWeek1 = new Date(jan4);
-    mondayWeek1.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
-
-    const target = new Date(mondayWeek1);
-    target.setUTCDate(mondayWeek1.getUTCDate() + (week - 1) * 7);
-
-    const yyyy = target.getUTCFullYear();
-    const mm = String(target.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(target.getUTCDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  const normalizeDateKey = (dateValue: string) => {
-    const date = new Date(dateValue);
-    const yyyy = date.getUTCFullYear();
-    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(date.getUTCDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  const trendWeekRangeInvalid =
-    trendWeekFrom.length > 0 && trendWeekTo.length > 0 && trendWeekFrom > trendWeekTo;
-
-  const filteredTrends = useMemo(() => {
-    if (trendWeekRangeInvalid) {
-      return [];
-    }
-
-    const fromDateKey = trendWeekFrom ? weekInputToDateKey(trendWeekFrom) : "";
-    const toDateKey = trendWeekTo ? weekInputToDateKey(trendWeekTo) : "";
-
-    return trends.filter((item) => {
-      const itemDateKey = normalizeDateKey(item.weekStart);
-      const byFrom = fromDateKey.length === 0 || itemDateKey >= fromDateKey;
-      const byTo = toDateKey.length === 0 || itemDateKey <= toDateKey;
-      return byFrom && byTo;
-    });
-  }, [trendWeekFrom, trendWeekRangeInvalid, trendWeekTo, trends]);
-
-  const trendsMax = useMemo(() => {
-    if (filteredTrends.length === 0) {
-      return 1;
-    }
-    return Math.max(...filteredTrends.map((item) => Number(item.hoursWorked || 0)), 1);
-  }, [filteredTrends]);
 
   const getRiskLevel = (project: ProjectRow, progress?: ProjectProgress): RiskLevel => {
     if (project.status === "cancelled") {
@@ -418,6 +380,55 @@ export default function DashboardPage() {
     return Object.fromEntries(users.map((user) => [user.id, user]));
   }, [users]);
 
+  const currentFortnight = useMemo(() => getCurrentFortnight(), []);
+
+  const currentFortnightCards = useMemo(() => {
+    return users
+      .filter((user) => user.role !== "manager" && user.isActive !== false)
+      .map((user) => {
+        const activities = tasks
+          .filter((task) => {
+            const dueDateKey = task.dueDate?.slice(0, 10) ?? "";
+            return (
+              task.assigneeId === user.id &&
+              dueDateKey >= currentFortnight.startKey &&
+              dueDateKey <= currentFortnight.endKey
+            );
+          })
+          .sort((first, second) => {
+            const byDate = (first.dueDate ?? "").localeCompare(second.dueDate ?? "");
+            return byDate || first.title.localeCompare(second.title, "es");
+          });
+        const totalHours = activities.reduce((sum, task) => {
+          const hours = Number(task.estimatedHours ?? 0);
+          return sum + (Number.isFinite(hours) ? hours : 0);
+        }, 0);
+
+        return { user, activities, totalHours };
+      })
+      .sort((first, second) => {
+        if (first.totalHours !== second.totalHours) {
+          return second.totalHours - first.totalHours;
+        }
+        if (first.user.role !== second.user.role) {
+          return first.user.role === "lead" ? -1 : 1;
+        }
+        return first.user.fullName.localeCompare(second.user.fullName, "es");
+      });
+  }, [currentFortnight, tasks, users]);
+
+  const scrollFortnightCards = (direction: -1 | 1) => {
+    const viewport = fortnightCardsRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollBy({
+      left: direction * Math.min(viewport.clientWidth * 0.85, 380),
+      behavior: "smooth",
+    });
+  };
+
   const openTasks = useMemo(() => tasks.filter((task) => task.status !== "done"), [tasks]);
 
   const taskProjectOptions = useMemo(() => {
@@ -548,10 +559,9 @@ export default function DashboardPage() {
     const loadDashboard = async () => {
       try {
         const headers = authHeaders();
-        const [summaryResponse, workloadResponse, trendsResponse, projectsResponse, teamsResponse] = await Promise.all([
+        const [summaryResponse, workloadResponse, projectsResponse, teamsResponse] = await Promise.all([
           axios.get(`${API_URL}/dashboard/summary`, { headers }),
           axios.get(`${API_URL}/dashboard/workload`, { headers }),
-          axios.get(`${API_URL}/dashboard/trends`, { headers }),
           axios.get(`${API_URL}/projects`, { headers }),
           axios.get(`${API_URL}/teams`, { headers }),
         ]);
@@ -588,7 +598,6 @@ export default function DashboardPage() {
 
         setSummary(summaryResponse.data as Summary);
         setWorkload(workloadResponse.data as WorkloadRow[]);
-        setTrends(trendsResponse.data as TrendRow[]);
         setTasks(loadedTasks);
         setUsers(loadedUsers);
         setSelectedDashboardUserId((current) => {
@@ -1243,81 +1252,6 @@ export default function DashboardPage() {
               ) : null}
             </div>
 
-            <div>
-              <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Tendencia semanal de horas asignadas
-              </p>
-              <div className="mb-3 grid gap-2 md:grid-cols-[minmax(130px,170px),minmax(130px,170px),auto]">
-                <label className="text-xs text-[var(--ink-muted)]">
-                  Semana desde
-                  <input
-                    type="week"
-                    value={trendWeekFrom}
-                    onChange={(event) => setTrendWeekFrom(event.target.value)}
-                    className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
-                  />
-                </label>
-                <label className="text-xs text-[var(--ink-muted)]">
-                  Semana hasta
-                  <input
-                    type="week"
-                    value={trendWeekTo}
-                    onChange={(event) => setTrendWeekTo(event.target.value)}
-                    className="mt-1 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
-                  />
-                </label>
-                <div className="flex items-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTrendWeekFrom("");
-                      setTrendWeekTo("");
-                    }}
-                    className="ui-btn ui-btn-secondary ui-btn-sm"
-                  >
-                    Limpiar filtro
-                  </button>
-                </div>
-              </div>
-              {trendWeekRangeInvalid ? (
-                <p className="text-sm text-[var(--danger)]">El rango de semanas es inválido.</p>
-              ) : null}
-              {filteredTrends.length === 0 ? (
-                <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
-              ) : (
-                filteredTrends.map((row) => {
-                  const hours = Number(row.hoursWorked || 0);
-                  const pct = Math.min((hours / trendsMax) * 100, 100);
-                  const date = new Date(row.weekStart);
-                  return (
-                    <div key={row.weekStart} className="mb-3">
-                      <div className="mb-1 flex items-center justify-between gap-3">
-                        <p className="font-mono text-xs">
-                          {date.toLocaleDateString("es-ES", {
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "numeric",
-                          })}
-                        </p>
-                        <p className="text-sm text-[var(--ink-muted)]">
-                          {hours.toFixed(2)} h ({row.tasksCount} tareas)
-                        </p>
-                      </div>
-                      <div className="bar-track">
-                        <div
-                          className="bar-fill"
-                          style={{
-                            width: `${pct}%`,
-                            background:
-                              "linear-gradient(90deg, var(--accent-2), #f0b85a)",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
           </div>
         </article>
       </section>
@@ -1411,6 +1345,105 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      </section>
+      ) : null}
+
+      {role === "manager" || role === "lead" ? (
+      <section className="kpi-card fade-up p-5" style={{ animationDelay: "360ms" }}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">Actividades de la quincena actual</h2>
+            <p className="mt-1 text-sm text-[var(--ink-muted)]">
+              {currentFortnight.label} · horas asignadas en todos los estados
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => scrollFortnightCards(-1)}
+              className="ui-btn ui-btn-secondary ui-btn-sm h-9 w-9 p-0 text-lg"
+              aria-label="Ver tarjetas anteriores"
+              title="Anterior"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollFortnightCards(1)}
+              className="ui-btn ui-btn-secondary ui-btn-sm h-9 w-9 p-0 text-lg"
+              aria-label="Ver tarjetas siguientes"
+              title="Siguiente"
+            >
+              →
+            </button>
+          </div>
+        </div>
+
+        {currentFortnightCards.length === 0 ? (
+          <p className="mt-4 text-sm text-[var(--ink-muted)]">
+            No hay lideres o colaboradores activos para mostrar.
+          </p>
+        ) : (
+          <div
+            ref={fortnightCardsRef}
+            className="mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3"
+            aria-label="Tarjetas de actividades de la quincena"
+          >
+            {currentFortnightCards.map(({ user, activities, totalHours }) => (
+              <article
+                key={user.id}
+                className="flex h-[360px] w-full max-w-[360px] shrink-0 snap-start flex-col rounded-2xl border border-[var(--line)] bg-white p-4"
+              >
+                <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] pb-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-semibold" title={user.fullName}>
+                      {user.fullName}
+                    </p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                      {roleLabels[user.role]}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-xl font-semibold text-[var(--accent)]">{totalHours.toFixed(2)} h</p>
+                    <p className="text-xs text-[var(--ink-muted)]">
+                      {activities.length} {activities.length === 1 ? "actividad" : "actividades"}
+                    </p>
+                  </div>
+                </div>
+
+                {activities.length === 0 ? (
+                  <div className="flex flex-1 items-center justify-center text-center text-sm text-[var(--ink-muted)]">
+                    Sin actividades asignadas en esta quincena.
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                    {activities.map((task) => {
+                      const taskHours = Number(task.estimatedHours ?? 0);
+                      return (
+                        <div key={task.id} className="border-b border-[var(--line)] py-3 last:border-b-0">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="break-words text-sm font-semibold">{task.title}</p>
+                              <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                                {projectsById[task.projectId]?.name ?? "Sin proyecto"} · {task.activityType}
+                              </p>
+                            </div>
+                            <p className="shrink-0 text-sm font-semibold">
+                              {(Number.isFinite(taskHours) ? taskHours : 0).toFixed(2)} h
+                            </p>
+                          </div>
+                          <p className="mt-2 text-xs font-semibold text-[var(--ink-muted)]">
+                            {taskStatusLabel(task)} · vence {task.dueDate}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
       </section>
       ) : null}
 
