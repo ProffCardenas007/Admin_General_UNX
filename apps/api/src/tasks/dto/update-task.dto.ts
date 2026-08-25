@@ -14,8 +14,27 @@ export class UpdateTaskDto {
   description?: string;
 
   @IsOptional()
+  @IsIn([
+    'revision',
+    'edicion',
+    'creacion',
+    'presentaciones',
+    'grabacion',
+    'plataforma',
+    'administrativo',
+  ])
+  activityType?:
+    | 'revision'
+    | 'edicion'
+    | 'creacion'
+    | 'presentaciones'
+    | 'grabacion'
+    | 'plataforma'
+    | 'administrativo';
+
+  @IsOptional()
   @IsString()
-  assigneeId?: string;
+  assigneeId?: string | null;
 
   @IsOptional()
   @IsIn(['todo', 'doing', 'paused', 'blocked', 'done'])
@@ -27,7 +46,7 @@ export class UpdateTaskDto {
 
   @IsOptional()
   @IsString()
-  dueDate?: string;
+  dueDate?: string | null;
 
   @IsOptional()
   @IsNumber()

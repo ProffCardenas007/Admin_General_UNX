@@ -104,6 +104,66 @@ describe('TasksService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('blocks worker editing task planning fields', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      projectId: 'project-1',
+      assigneeId: 'worker-1',
+    });
+
+    await expect(
+      service.update(
+        'task-1',
+        { priority: 'urgent' },
+        { id: 'worker-1', role: 'worker' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(tasksRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('allows worker updating the status of their own task', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      projectId: 'project-1',
+      assigneeId: 'worker-1',
+      status: 'todo',
+      priority: 'medium',
+      title: 'Task 1',
+    });
+    tasksRepository.save.mockResolvedValue({ id: 'task-1', status: 'doing' });
+
+    const result = await service.update(
+      'task-1',
+      { status: 'doing' },
+      { id: 'worker-1', role: 'worker' },
+    );
+
+    expect(result).toEqual({ id: 'task-1', status: 'doing' });
+    expect(tasksRepository.save).toHaveBeenCalled();
+  });
+
+  it('allows lead editing planning fields on an assigned task', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      projectId: 'project-1',
+      assigneeId: 'lead-1',
+      status: 'todo',
+      priority: 'medium',
+      title: 'Old title',
+    });
+    tasksRepository.save.mockImplementation(async (task) => task);
+
+    const result = await service.update(
+      'task-1',
+      { title: 'New title', priority: 'high' },
+      { id: 'lead-1', role: 'lead' },
+    );
+
+    expect(result.title).toBe('New title');
+    expect(result.priority).toBe('high');
+  });
+
   it('allows manager updating any task', async () => {
     tasksRepository.findOne.mockResolvedValue({
       id: 'task-1',

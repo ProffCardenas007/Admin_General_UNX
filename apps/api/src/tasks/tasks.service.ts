@@ -544,13 +544,18 @@ export class TasksService {
     if (
       actor.role === 'worker' &&
       (
+        dto.projectId !== undefined ||
+        dto.title !== undefined ||
         dto.description !== undefined ||
+        dto.activityType !== undefined ||
+        dto.assigneeId !== undefined ||
+        dto.priority !== undefined ||
         dto.dueDate !== undefined ||
         dto.estimatedHours !== undefined
       )
     ) {
       throw new ForbiddenException(
-        'Workers cannot edit task description, due date, or estimated hours',
+        'Workers cannot edit task planning fields',
       );
     }
 
