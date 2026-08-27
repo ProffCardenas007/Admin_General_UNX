@@ -44,6 +44,9 @@ export class ClassSessionEntity {
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy?: string | null;
 
+  @Column({ name: 'import_key', type: 'varchar', length: 64, nullable: true, unique: true })
+  importKey?: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

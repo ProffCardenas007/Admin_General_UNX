@@ -8,6 +8,10 @@ import { UserEntity } from '../database/entities/user.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
+import { ClassScheduleProfileEntity } from '../database/entities/class-schedule-profile.entity';
+import { ClassCourseEntity } from '../database/entities/class-course.entity';
+import { ClassCourseSubjectEntity } from '../database/entities/class-course-subject.entity';
+import { ClassSessionEntity } from '../database/entities/class-session.entity';
 
 @Module({
   imports: [
@@ -18,6 +22,10 @@ import { TaskUpdateEntity } from '../database/entities/task-update.entity';
       ProjectEntity,
       TaskEntity,
       TaskUpdateEntity,
+      ClassScheduleProfileEntity,
+      ClassCourseEntity,
+      ClassCourseSubjectEntity,
+      ClassSessionEntity,
     ]),
   ],
   controllers: [ImportsController],

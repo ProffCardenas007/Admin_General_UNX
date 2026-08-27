@@ -68,6 +68,32 @@ type TimeBlock = {
   endTime: string;
 };
 
+type TeacherImportResult = {
+  fileName: string;
+  totalRows: number;
+  updatedUsers: number;
+  skippedRows: number;
+  availabilityProfiles: number;
+  unchangedRows: number;
+  parsedSessions: number;
+  createdCourses: number;
+  createdSessions: number;
+  updatedSessions: number;
+  unchangedSessions: number;
+  removedSessions: number;
+  removedCourses: number;
+  scheduleWarnings: string[];
+  failedRows: number;
+  rows: Array<{
+    fullName: string;
+    matched: boolean;
+    changed: boolean;
+    email?: string;
+    subjects: string[];
+  }>;
+  errors: Array<{ rowNumber: number; message: string }>;
+};
+
 const CLASSROOM_OPTIONS = Array.from({ length: 10 }, (_, index) => `Aula ${index + 1}`);
 const VIRTUAL_ROOM_OPTIONS = Array.from({ length: 11 }, (_, index) => `Sala ${index + 1}`);
 
@@ -149,6 +175,10 @@ export default function ClassPlanningPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [courses, setCourses] = useState<CourseRow[]>([]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [planningFile, setPlanningFile] = useState<File | null>(null);
+  const [importingTeachers, setImportingTeachers] = useState(false);
+  const [resettingPlanning, setResettingPlanning] = useState(false);
+  const [teacherImportResult, setTeacherImportResult] = useState<TeacherImportResult | null>(null);
 
   const [courseCode, setCourseCode] = useState<(typeof CLASS_TYPE_OPTIONS)[number]>("Curso");
   const [courseSectionCode, setCourseSectionCode] = useState("");
@@ -260,6 +290,46 @@ export default function ClassPlanningPage() {
     window.localStorage.removeItem("sistema_mvp_specialty");
     window.localStorage.removeItem("sistema_mvp_specialties");
     router.replace("/");
+  };
+
+  const onImportTeachers = async () => {
+    if (!planningFile) {
+      setError("Selecciona el archivo de programación en formato XLSX o XLSM.");
+      return;
+    }
+
+    setError("");
+    setInfo("");
+    setTeacherImportResult(null);
+    setImportingTeachers(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", planningFile);
+      const response = await axios.post<TeacherImportResult>(
+        `${API_URL}/imports/class-planning`,
+        formData,
+        { headers: authHeaders() },
+      );
+      setTeacherImportResult(response.data);
+      setInfo(
+        `Importación terminada: ${response.data.createdSessions} sesiones creadas, ${response.data.updatedSessions} actualizadas y ${response.data.unchangedSessions} sin cambios.`,
+      );
+      await loadData();
+    } catch (error) {
+      if (isApiErrorStatus(error, 401)) {
+        setError("Tu sesión expiró. Inicia sesión nuevamente.");
+        clearSessionAndGoLogin();
+        return;
+      }
+      if (isApiErrorStatus(error, 403)) {
+        setError("No tienes permisos de gerencia para importar profesores.");
+        return;
+      }
+      setError(getApiErrorMessage(error, "No se pudo leer el archivo de programación."));
+    } finally {
+      setImportingTeachers(false);
+    }
   };
 
   const loadData = async () => {
@@ -894,6 +964,46 @@ export default function ClassPlanningPage() {
     }
   };
 
+  const onResetPlanning = async () => {
+    const confirmed = window.confirm(
+      "¿Reiniciar toda la programación? Se eliminarán cursos, materias asignadas y sesiones. Los usuarios y sus disponibilidades se conservarán.",
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setInfo("");
+    setResettingPlanning(true);
+
+    try {
+      const response = await axios.delete<{
+        deletedCourses: number;
+        deletedSubjects: number;
+        deletedSessions: number;
+      }>(`${API_URL}/class-planning/reset`, { headers: authHeaders() });
+
+      setSelectedCourseId("");
+      setSessionCourseId("");
+      setCoverageBySession({});
+      setInfo(
+        `Programación reiniciada: ${response.data.deletedCourses} cursos, ${response.data.deletedSubjects} materias y ${response.data.deletedSessions} sesiones eliminadas.`,
+      );
+      await loadData();
+    } catch (error) {
+      if (isApiErrorStatus(error, 401)) {
+        setError("Tu sesión expiró. Inicia sesión nuevamente.");
+        clearSessionAndGoLogin();
+        return;
+      }
+      if (isApiErrorStatus(error, 403)) {
+        setError("No tienes permisos de gerencia para reiniciar la programación.");
+        return;
+      }
+      setError(getApiErrorMessage(error, "No se pudo reiniciar la programación."));
+    } finally {
+      setResettingPlanning(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto flex w-full max-w-[1320px] flex-1 items-center justify-center px-4 py-8 md:px-6">
@@ -911,6 +1021,15 @@ export default function ClassPlanningPage() {
           Crea cursos, asigna profesores por materia y programa sesiones de clase.
         </p>
 
+        <button
+          type="button"
+          onClick={() => void onResetPlanning()}
+          disabled={resettingPlanning || courses.length === 0}
+          className="mt-4 h-9 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 text-sm text-[var(--danger)] hover:border-[var(--danger)]/60 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {resettingPlanning ? "Reiniciando..." : "Reiniciar programación"}
+        </button>
+
         {error ? (
           <p className="mt-3 rounded-xl border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-2 text-sm text-[var(--danger)]">
             {error}
@@ -922,6 +1041,119 @@ export default function ClassPlanningPage() {
           </p>
         ) : null}
       </header>
+
+      <section className="glass-panel fade-up p-4 md:p-5" style={{ animationDelay: "60ms" }}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
+              Importar programación
+            </p>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">
+              Sincroniza profesores, disponibilidad, cursos y sesiones programadas del archivo de Excel.
+            </p>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+            <input
+              type="file"
+              accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12"
+              onChange={(event) => {
+                setPlanningFile(event.target.files?.[0] ?? null);
+                setTeacherImportResult(null);
+              }}
+              className="ui-control min-w-0 flex-1 text-sm lg:w-[360px]"
+            />
+            <button
+              type="button"
+              onClick={() => void onImportTeachers()}
+              disabled={!planningFile || importingTeachers}
+              className="ui-btn ui-btn-primary h-10 shrink-0 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {importingTeachers ? "Leyendo y programando..." : "Importar y programar"}
+            </button>
+          </div>
+        </div>
+
+        {teacherImportResult ? (
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <div className="grid gap-2 sm:grid-cols-5">
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Filas: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.totalRows}</span>
+              </p>
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Usuarios actualizados: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.updatedUsers}</span>
+              </p>
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Disponibilidades: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.availabilityProfiles}</span>
+              </p>
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Sin cambios: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.unchangedRows}</span>
+              </p>
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Sin cuenta: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.skippedRows}</span>
+              </p>
+            </div>
+
+            <div className="mt-2 grid gap-2 sm:grid-cols-4">
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Cursos nuevos: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.createdCourses ?? 0}</span>
+              </p>
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Sesiones nuevas: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.createdSessions ?? 0}</span>
+              </p>
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Sesiones actualizadas: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.updatedSessions ?? 0}</span>
+              </p>
+              <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-[var(--ink-soft)]">
+                Sesiones sin cambios: <span className="font-semibold text-[var(--foreground)]">{teacherImportResult.unchangedSessions ?? 0}</span>
+              </p>
+            </div>
+
+            {teacherImportResult.scheduleWarnings?.length > 0 ? (
+              <p className="mt-2 text-xs text-amber-700">
+                {teacherImportResult.scheduleWarnings.length} asignaciones requieren revisión. Primera: {teacherImportResult.scheduleWarnings[0]}
+              </p>
+            ) : null}
+
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
+                <thead className="text-[var(--ink-muted)]">
+                  <tr>
+                    <th className="px-2 py-1.5 font-semibold">Profesor</th>
+                    <th className="px-2 py-1.5 font-semibold">Correo</th>
+                    <th className="px-2 py-1.5 font-semibold">Materia</th>
+                    <th className="px-2 py-1.5 font-semibold">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teacherImportResult.rows.map((row, index) => (
+                    <tr key={`${row.fullName}-${index}`} className="border-t border-white/8 text-[var(--ink-soft)]">
+                      <td className={`px-2 py-1.5 ${row.matched ? "text-[var(--foreground)]" : "text-[var(--danger)]"}`}>
+                        {row.fullName}
+                      </td>
+                      <td className="px-2 py-1.5 font-mono">
+                        {row.email && !row.email.endsWith("@profesores.unx.mx") ? row.email : "N/A"}
+                      </td>
+                      <td className="px-2 py-1.5">{row.subjects.join(", ")}</td>
+                      <td className="px-2 py-1.5">
+                        {!row.matched ? "Sin cuenta" : row.changed ? "Actualizado" : "Sin cambios"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                Las filas marcadas "Profesor N/A" no tienen usuario registrado en la plataforma; créalos desde Usuarios y vuelve a importar para vincularlos.
+              </p>
+            </div>
+
+            {teacherImportResult.errors.length > 0 ? (
+              <p className="mt-3 text-xs text-[var(--danger)]">
+                {teacherImportResult.failedRows} filas no se importaron. Primera incidencia: fila {teacherImportResult.errors[0].rowNumber}, {teacherImportResult.errors[0].message}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="glass-panel fade-up p-4 md:p-5">

@@ -43,6 +43,9 @@ export class ClassCourseEntity {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ name: 'import_key', type: 'varchar', length: 64, nullable: true, unique: true })
+  importKey?: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

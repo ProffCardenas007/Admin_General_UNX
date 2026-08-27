@@ -21,6 +21,12 @@ export class ClassPlanningController {
     return this.classPlanningService.findCourses();
   }
 
+  @Delete('reset')
+  @Roles('manager')
+  resetPlanning() {
+    return this.classPlanningService.resetPlanning();
+  }
+
   @Post('courses')
   @Roles('manager')
   createCourse(@Body() dto: CreateClassCourseDto) {
@@ -101,13 +107,24 @@ export class ClassPlanningController {
     });
   }
 
-  @Get('my-sessions')
-  @Roles('manager', 'lead', 'worker')
-  findMySessions(
-    @Req() req: { user: { id: string } },
+  @Get('session-hours')
+  @Roles('manager', 'lead')
+  getSessionHours(
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    return this.classPlanningService.findMySessions(req.user.id, { from, to });
+    return this.classPlanningService.getSessionHours({ from, to });
+  }
+
+  @Get('my-sessions')
+  @Roles('manager', 'lead', 'worker')
+  findMySessions(
+    @Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker' } },
+    @Query('userId') userId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const targetUserId = req.user.role === 'manager' && userId ? userId : req.user.id;
+    return this.classPlanningService.findMySessions(targetUserId, { from, to });
   }
 }

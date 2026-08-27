@@ -22,6 +22,12 @@ type WorkloadRow = {
   tasksCount: string;
 };
 
+type ClassHoursRow = {
+  userId: string;
+  classHours: number;
+  sessionsCount: number;
+};
+
 type TaskRow = {
   id: string;
   createdBy?: string | null;
@@ -153,11 +159,22 @@ const getCurrentFortnight = () => {
     month: "long",
     year: "numeric",
   });
+  let businessDays = 0;
+  const cursor = new Date(startDate);
+  while (cursor <= endDate) {
+    const day = cursor.getDay();
+    if (day >= 1 && day <= 5) {
+      businessDays += 1;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
 
   return {
     startKey: toLocalDateKey(startDate),
     endKey: toLocalDateKey(endDate),
     label: `${startDay} al ${endDay} de ${monthAndYear}`,
+    businessDays,
+    targetHours: businessDays * 9,
   };
 };
 
@@ -172,6 +189,7 @@ export default function DashboardPage() {
   const [info, setInfo] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [workload, setWorkload] = useState<WorkloadRow[]>([]);
+  const [classHours, setClassHours] = useState<ClassHoursRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -381,6 +399,10 @@ export default function DashboardPage() {
   }, [users]);
 
   const currentFortnight = useMemo(() => getCurrentFortnight(), []);
+  const classHoursByUserId = useMemo(
+    () => Object.fromEntries(classHours.map((row) => [row.userId, row])),
+    [classHours],
+  );
 
   const currentFortnightCards = useMemo(() => {
     return users
@@ -399,12 +421,26 @@ export default function DashboardPage() {
             const byDate = (first.dueDate ?? "").localeCompare(second.dueDate ?? "");
             return byDate || first.title.localeCompare(second.title, "es");
           });
-        const totalHours = activities.reduce((sum, task) => {
+        const activityHours = activities.reduce((sum, task) => {
           const hours = Number(task.estimatedHours ?? 0);
           return sum + (Number.isFinite(hours) ? hours : 0);
         }, 0);
+        const classSummary = classHoursByUserId[user.id];
+        const classHoursTotal = Number(classSummary?.classHours ?? 0);
+        const totalHours = activityHours + classHoursTotal;
+        const remainingHours = Math.max(currentFortnight.targetHours - totalHours, 0);
+        const exceededHours = Math.max(totalHours - currentFortnight.targetHours, 0);
 
-        return { user, activities, totalHours };
+        return {
+          user,
+          activities,
+          activityHours,
+          classHours: classHoursTotal,
+          classSessions: classSummary?.sessionsCount ?? 0,
+          totalHours,
+          remainingHours,
+          exceededHours,
+        };
       })
       .sort((first, second) => {
         if (first.totalHours !== second.totalHours) {
@@ -415,7 +451,7 @@ export default function DashboardPage() {
         }
         return first.user.fullName.localeCompare(second.user.fullName, "es");
       });
-  }, [currentFortnight, tasks, users]);
+  }, [classHoursByUserId, currentFortnight, tasks, users]);
 
   const scrollFortnightCards = (direction: -1 | 1) => {
     const viewport = fortnightCardsRef.current;
@@ -559,11 +595,20 @@ export default function DashboardPage() {
     const loadDashboard = async () => {
       try {
         const headers = authHeaders();
-        const [summaryResponse, workloadResponse, projectsResponse, teamsResponse] = await Promise.all([
+        const [summaryResponse, workloadResponse, projectsResponse, teamsResponse, classHoursResponse] = await Promise.all([
           axios.get(`${API_URL}/dashboard/summary`, { headers }),
           axios.get(`${API_URL}/dashboard/workload`, { headers }),
           axios.get(`${API_URL}/projects`, { headers }),
           axios.get(`${API_URL}/teams`, { headers }),
+          savedRole === "manager" || savedRole === "lead"
+            ? axios.get(`${API_URL}/class-planning/session-hours`, {
+                headers,
+                params: {
+                  from: currentFortnight.startKey,
+                  to: currentFortnight.endKey,
+                },
+              })
+            : Promise.resolve({ data: [] }),
         ]);
 
         let loadedTasks: TaskRow[] = [];
@@ -598,6 +643,7 @@ export default function DashboardPage() {
 
         setSummary(summaryResponse.data as Summary);
         setWorkload(workloadResponse.data as WorkloadRow[]);
+        setClassHours(classHoursResponse.data as ClassHoursRow[]);
         setTasks(loadedTasks);
         setUsers(loadedUsers);
         setSelectedDashboardUserId((current) => {
@@ -1354,7 +1400,7 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-lg font-semibold">Actividades de la quincena actual</h2>
             <p className="mt-1 text-sm text-[var(--ink-muted)]">
-              {currentFortnight.label} · horas asignadas en todos los estados
+              {currentFortnight.label} · meta de {currentFortnight.targetHours} h ({currentFortnight.businessDays} días hábiles × 9 h)
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
@@ -1389,10 +1435,10 @@ export default function DashboardPage() {
             className="mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3"
             aria-label="Tarjetas de actividades de la quincena"
           >
-            {currentFortnightCards.map(({ user, activities, totalHours }) => (
+            {currentFortnightCards.map(({ user, activities, activityHours, classHours: userClassHours, classSessions, totalHours, remainingHours, exceededHours }) => (
               <article
                 key={user.id}
-                className="flex h-[360px] w-full max-w-[360px] shrink-0 snap-start flex-col rounded-2xl border border-[var(--line)] bg-white p-4"
+                className="flex h-[430px] w-full max-w-[380px] shrink-0 snap-start flex-col rounded-2xl border border-[var(--line)] bg-white p-4"
               >
                 <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] pb-3">
                   <div className="min-w-0">
@@ -1405,15 +1451,45 @@ export default function DashboardPage() {
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-xl font-semibold text-[var(--accent)]">{totalHours.toFixed(2)} h</p>
-                    <p className="text-xs text-[var(--ink-muted)]">
-                      {activities.length} {activities.length === 1 ? "actividad" : "actividades"}
+                    <p className="text-xs text-[var(--ink-muted)]">de {currentFortnight.targetHours} h</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 border-b border-[var(--line)] py-3 text-center">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-[var(--ink-muted)]">Actividades</p>
+                    <p className="mt-1 text-sm font-semibold">{activityHours.toFixed(2)} h</p>
+                  </div>
+                  <div className="border-x border-[var(--line)] px-1">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-[var(--ink-muted)]">Clases</p>
+                    <p className="mt-1 text-sm font-semibold">{userClassHours.toFixed(2)} h</p>
+                    <p className="text-[10px] text-[var(--ink-muted)]">{classSessions} sesiones</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-[var(--ink-muted)]">
+                      {exceededHours > 0 ? "Exceso" : "Disponible"}
+                    </p>
+                    <p className={`mt-1 text-sm font-semibold ${exceededHours > 0 ? "text-[var(--danger)]" : "text-emerald-700"}`}>
+                      {(exceededHours > 0 ? exceededHours : remainingHours).toFixed(2)} h
                     </p>
                   </div>
                 </div>
 
+                <div className="py-3">
+                  <div className="h-2 overflow-hidden rounded-full bg-[var(--background)]">
+                    <div
+                      className={`h-full rounded-full ${exceededHours > 0 ? "bg-[var(--danger)]" : "bg-[var(--accent)]"}`}
+                      style={{ width: `${Math.min((totalHours / currentFortnight.targetHours) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-right text-[10px] text-[var(--ink-muted)]">
+                    {Math.round((totalHours / currentFortnight.targetHours) * 100)}% ocupado
+                  </p>
+                </div>
+
                 {activities.length === 0 ? (
                   <div className="flex flex-1 items-center justify-center text-center text-sm text-[var(--ink-muted)]">
-                    Sin actividades asignadas en esta quincena.
+                    Sin actividades adicionales en esta quincena.
                   </div>
                 ) : (
                   <div className="min-h-0 flex-1 overflow-y-auto pr-1">

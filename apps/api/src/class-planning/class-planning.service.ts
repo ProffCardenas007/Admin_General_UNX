@@ -74,6 +74,21 @@ export class ClassPlanningService {
     }));
   }
 
+  async resetPlanning() {
+    return this.coursesRepository.manager.transaction(async (manager) => {
+      const coursesRepository = manager.getRepository(ClassCourseEntity);
+      const subjectsRepository = manager.getRepository(ClassCourseSubjectEntity);
+      const sessionsRepository = manager.getRepository(ClassSessionEntity);
+      const deletedCourses = await coursesRepository.count();
+      const deletedSubjects = await subjectsRepository.count();
+      const deletedSessions = await sessionsRepository.count();
+
+      await coursesRepository.createQueryBuilder().delete().execute();
+
+      return { deletedCourses, deletedSubjects, deletedSessions };
+    });
+  }
+
   async createCourse(dto: CreateClassCourseDto) {
     const code = this.normalizeCourseType(dto.code);
     const sectionCode = this.normalizeSectionCode(dto.sectionCode);
@@ -331,6 +346,45 @@ export class ClassPlanningService {
     return this.enrichSessions(sessions);
   }
 
+  async getSessionHours(filters?: { from?: string; to?: string }) {
+    const qb = this.sessionsRepository.createQueryBuilder('session');
+
+    if (filters?.from) {
+      qb.andWhere('session.class_date >= :fromDate', {
+        fromDate: filters.from.slice(0, 10),
+      });
+    }
+
+    if (filters?.to) {
+      qb.andWhere('session.class_date <= :toDate', {
+        toDate: filters.to.slice(0, 10),
+      });
+    }
+
+    const sessions = await qb.getMany();
+    const totals = new Map<string, { classHours: number; sessionsCount: number }>();
+
+    sessions.forEach((session) => {
+      const userId = session.coverTeacherUserId ?? session.teacherUserId;
+      const durationHours = Math.max(
+        0,
+        (this.timeToMinutes(session.endTime) - this.timeToMinutes(session.startTime)) / 60,
+      );
+      const current = totals.get(userId) ?? { classHours: 0, sessionsCount: 0 };
+      current.classHours += durationHours;
+      current.sessionsCount += 1;
+      totals.set(userId, current);
+    });
+
+    return [...totals.entries()]
+      .map(([userId, total]) => ({
+        userId,
+        classHours: Number(total.classHours.toFixed(2)),
+        sessionsCount: total.sessionsCount,
+      }))
+      .sort((left, right) => right.classHours - left.classHours);
+  }
+
   async assignSessionCoverage(
     sessionId: string,
     dto: AssignSessionCoverageDto,
@@ -397,6 +451,11 @@ export class ClassPlanningService {
     const saved = await this.sessionsRepository.save(session);
     const [enriched] = await this.enrichSessions([saved]);
     return enriched;
+  }
+
+  private timeToMinutes(value: string) {
+    const [hours, minutes] = value.split(':').map(Number);
+    return hours * 60 + minutes;
   }
 
   async updateCourse(courseId: string, dto: UpdateClassCourseDto) {

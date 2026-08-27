@@ -29,6 +29,12 @@ type AvailabilityRegistryEntry = {
   incidences: IncidenceRow[];
   updatedAt: string;
 };
+type ScheduleUser = {
+  id: string;
+  fullName: string;
+  role: "manager" | "lead" | "worker";
+  isActive: boolean;
+};
 type ClassSection = "availability" | "incidences" | "assigned";
 type AssignedClassRow = {
   id: string;
@@ -42,6 +48,7 @@ type AssignedClassRow = {
   coverTeacherName?: string;
   effectiveTeacherName?: string;
   isCovered?: boolean;
+  classroom?: string;
   notes?: string | null;
 };
 
@@ -67,6 +74,47 @@ const STATUS_META: Record<AvailabilityStatus, { label: string; symbol: string; c
 };
 
 const STATUS_FLOW: AvailabilityStatus[] = ["full", "confirm", "busy"];
+const DAY_IN_MS = 86_400_000;
+const EVENT_STYLES = [
+  "border-cyan-300/35 bg-cyan-300/10",
+  "border-emerald-300/35 bg-emerald-300/10",
+  "border-amber-300/35 bg-amber-300/10",
+  "border-rose-300/35 bg-rose-300/10",
+];
+
+function dateFromKey(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+function dateKey(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(value: Date, days: number) {
+  return new Date(value.getTime() + days * DAY_IN_MS);
+}
+
+function mondayKey(value: string) {
+  const date = dateFromKey(value);
+  const dayOffset = (date.getDay() + 6) % 7;
+  return dateKey(addDays(date, -dayOffset));
+}
+
+function formatCalendarDate(value: Date) {
+  return new Intl.DateTimeFormat("es-MX", {
+    day: "numeric",
+    month: "short",
+  }).format(value);
+}
+
+function eventStyle(value: string) {
+  const seed = [...value].reduce((total, character) => total + character.charCodeAt(0), 0);
+  return EVENT_STYLES[seed % EVENT_STYLES.length];
+}
 
 function normalizeAvailability(raw: unknown) {
   if (!raw || typeof raw !== "object") {
@@ -171,7 +219,7 @@ export default function ClassSchedulePage() {
   const [availability, setAvailability] = useState<AvailabilityMap>({});
   const [incidences, setIncidences] = useState<IncidenceRow[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
-  const [activeSection, setActiveSection] = useState<ClassSection>("availability");
+  const [activeSection, setActiveSection] = useState<ClassSection>("assigned");
   const [incidenceDate, setIncidenceDate] = useState("");
   const [incidenceStartTime, setIncidenceStartTime] = useState("07:00");
   const [incidenceEndTime, setIncidenceEndTime] = useState("07:30");
@@ -180,6 +228,10 @@ export default function ClassSchedulePage() {
   const [hasPendingAvailabilityChanges, setHasPendingAvailabilityChanges] = useState(false);
   const [currentRole, setCurrentRole] = useState("");
   const [assignedClasses, setAssignedClasses] = useState<AssignedClassRow[]>([]);
+  const [scheduleUsers, setScheduleUsers] = useState<ScheduleUser[]>([]);
+  const [selectedScheduleUserId, setSelectedScheduleUserId] = useState("all");
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [selectedWeekStart, setSelectedWeekStart] = useState("");
 
   useEffect(() => {
     const token = getStoredToken();
@@ -193,14 +245,30 @@ export default function ClassSchedulePage() {
 
     const loadData = async () => {
       try {
-        const [availabilityResponse, assignedResponse] = await Promise.all([
+        const [availabilityResponse, assignedResponse, usersResponse] = await Promise.all([
           axios.get(`${API_URL}/teacher-availability/me`, {
             headers: authHeaders(),
           }),
-          axios.get(`${API_URL}/class-planning/my-sessions`, {
-            headers: authHeaders(),
-          }),
+          axios.get(
+            role === "manager"
+              ? `${API_URL}/class-planning/sessions`
+              : `${API_URL}/class-planning/my-sessions`,
+            {
+              headers: authHeaders(),
+            },
+          ),
+          role === "manager"
+            ? axios.get(`${API_URL}/users`, { headers: authHeaders() })
+            : Promise.resolve({ data: [] }),
         ]);
+
+        const users = (usersResponse.data as ScheduleUser[])
+          .filter((user) => user.isActive)
+          .sort((left, right) => left.fullName.localeCompare(right.fullName));
+        setScheduleUsers(users);
+        if (role === "manager") {
+          setSelectedScheduleUserId("all");
+        }
 
         const payload = normalizeSavedPayload(availabilityResponse.data as unknown);
         setAvailability(payload.availability);
@@ -210,14 +278,82 @@ export default function ClassSchedulePage() {
         setAvailability({});
         setIncidences([]);
         setAssignedClasses([]);
+        setScheduleUsers([]);
       }
     };
 
     void loadData();
   }, [router]);
 
+  useEffect(() => {
+    if (currentRole !== "manager") return;
+
+    const loadSelectedSchedule = async () => {
+      setLoadingSchedule(true);
+      try {
+        const endpoint =
+          selectedScheduleUserId === "all"
+            ? `${API_URL}/class-planning/sessions`
+            : `${API_URL}/class-planning/my-sessions?userId=${encodeURIComponent(selectedScheduleUserId)}`;
+        const response = await axios.get(endpoint, {
+            headers: authHeaders(),
+        });
+        setAssignedClasses(response.data as AssignedClassRow[]);
+      } catch {
+        setAssignedClasses([]);
+      } finally {
+        setLoadingSchedule(false);
+      }
+    };
+
+    void loadSelectedSchedule();
+  }, [currentRole, selectedScheduleUserId]);
+
   const timeSlots = useMemo(() => buildTimeSlots(), []);
+  const availableWeekStarts = useMemo(
+    () =>
+      [...new Set(assignedClasses.map((assignedClass) => mondayKey(assignedClass.classDate)))].sort(),
+    [assignedClasses],
+  );
+  const selectedWeekDates = useMemo(() => {
+    if (!selectedWeekStart) return [];
+    const monday = dateFromKey(selectedWeekStart);
+    return WEEK_DAYS.map((day, index) => ({
+      day,
+      date: addDays(monday, index),
+      key: dateKey(addDays(monday, index)),
+    }));
+  }, [selectedWeekStart]);
+  const classesByDate = useMemo(() => {
+    const grouped = new Map<string, AssignedClassRow[]>();
+    assignedClasses.forEach((assignedClass) => {
+      const current = grouped.get(assignedClass.classDate) ?? [];
+      current.push(assignedClass);
+      grouped.set(assignedClass.classDate, current);
+    });
+    grouped.forEach((classes) =>
+      classes.sort((left, right) => left.startTime.localeCompare(right.startTime)),
+    );
+    return grouped;
+  }, [assignedClasses]);
+  const selectedWeekIndex = availableWeekStarts.indexOf(selectedWeekStart);
+  const selectedWeekClassCount = selectedWeekDates.reduce(
+    (total, day) => total + (classesByDate.get(day.key)?.length ?? 0),
+    0,
+  );
   const canDeleteIncidences = currentRole === "manager";
+
+  useEffect(() => {
+    if (availableWeekStarts.length === 0) {
+      setSelectedWeekStart("");
+      return;
+    }
+    if (availableWeekStarts.includes(selectedWeekStart)) return;
+
+    const currentWeek = mondayKey(dateKey(new Date()));
+    const nextWeek = availableWeekStarts.find((week) => week >= currentWeek);
+    setSelectedWeekStart(nextWeek ?? availableWeekStarts.at(-1) ?? "");
+  }, [availableWeekStarts, selectedWeekStart]);
 
   const buildAvailabilitySnapshot = (source: AvailabilityMap) => {
     const snapshot: AvailabilityMap = {};
@@ -385,7 +521,7 @@ export default function ClassSchedulePage() {
                     : "border-white/15 bg-white/5 text-[var(--ink-soft)] hover:border-white/30"
                 }`}
               >
-                Clases Asignadas
+                Mi horario
               </button>
             </div>
 
@@ -578,33 +714,162 @@ export default function ClassSchedulePage() {
 
         {activeSection === "assigned" ? (
           <div className="px-4 py-3 md:px-5">
-            <div className="rounded-xl border border-white/12 bg-white/[0.03] p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
-                Clases asignadas
-              </p>
-              <div className="mt-2 space-y-1.5">
-                {assignedClasses.length === 0 ? (
+            <div className="rounded-lg border border-white/12 bg-white/[0.03] p-3">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
+                    Mi horario
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                    {selectedWeekClassCount} clases en la semana seleccionada
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  {currentRole === "manager" ? (
+                    <label className="flex min-w-[230px] flex-col gap-1 text-xs text-[var(--ink-soft)]">
+                      Persona
+                      <select
+                        value={selectedScheduleUserId}
+                        onChange={(event) => setSelectedScheduleUserId(event.target.value)}
+                        className="ui-control"
+                      >
+                        <option value="all">Todos los horarios</option>
+                        {scheduleUsers.map((user) => (
+                          <option key={user.id} value={user.id}>
+                            {user.fullName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  <label className="flex min-w-[210px] flex-col gap-1 text-xs text-[var(--ink-soft)]">
+                    Semana
+                    <select
+                      value={selectedWeekStart}
+                      onChange={(event) => setSelectedWeekStart(event.target.value)}
+                      className="ui-control"
+                      disabled={availableWeekStarts.length === 0}
+                    >
+                      {availableWeekStarts.map((weekStart) => {
+                        const monday = dateFromKey(weekStart);
+                        return (
+                          <option key={weekStart} value={weekStart}>
+                            {formatCalendarDate(monday)} - {formatCalendarDate(addDays(monday, 6))}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  <div className="flex h-9 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedWeekStart(availableWeekStarts[selectedWeekIndex - 1])}
+                      disabled={selectedWeekIndex <= 0}
+                      className="ui-btn h-9 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="Semana anterior"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedWeekStart(availableWeekStarts[selectedWeekIndex + 1])}
+                      disabled={selectedWeekIndex < 0 || selectedWeekIndex >= availableWeekStarts.length - 1}
+                      className="ui-btn h-9 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="Semana siguiente"
+                    >
+                      Siguiente
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4">
+                {loadingSchedule ? (
+                  <p className="text-sm text-[var(--ink-soft)]">Cargando horario...</p>
+                ) : assignedClasses.length === 0 ? (
                   <p className="text-sm text-[var(--ink-soft)]">Aún no tienes clases programadas.</p>
                 ) : (
-                  assignedClasses.map((assignedClass) => (
-                    <div
-                      key={assignedClass.id}
-                      className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2 text-xs"
-                    >
-                      <p className="font-semibold text-[var(--foreground)]">
-                        {assignedClass.classDate} · {assignedClass.startTime.slice(0, 5)} - {assignedClass.endTime.slice(0, 5)}
-                      </p>
-                      <p className="text-[var(--ink-soft)]">
-                        {assignedClass.courseCode} · {assignedClass.courseName}
-                      </p>
-                      <p className="text-[var(--ink-soft)]">
-                        {assignedClass.subjectName}
-                        {assignedClass.isCovered
-                          ? ` · Cobertura: ${assignedClass.effectiveTeacherName || assignedClass.coverTeacherName || "Asignada"}`
-                          : ""}
-                      </p>
+                  <>
+                    <div className="hidden overflow-x-auto pb-2 md:block">
+                      <div className="grid min-w-[980px] grid-cols-7 gap-px overflow-hidden rounded-lg border border-white/10 bg-white/10">
+                        {selectedWeekDates.map((day) => (
+                          <div key={`${day.key}-heading`} className="bg-[var(--surface-strong)] px-2 py-2 text-center">
+                            <p className="text-[10px] font-semibold uppercase text-[var(--ink-muted)]">{day.day}</p>
+                            <p className="mt-0.5 text-xs font-semibold text-[var(--foreground)]">{formatCalendarDate(day.date)}</p>
+                          </div>
+                        ))}
+                        {selectedWeekDates.map((day) => {
+                          const dayClasses = classesByDate.get(day.key) ?? [];
+                          return (
+                            <div key={day.key} className="min-h-56 space-y-1.5 bg-[var(--surface)] p-1.5">
+                              {dayClasses.length === 0 ? (
+                                <p className="py-6 text-center text-[10px] text-[var(--ink-muted)]">Sin clases</p>
+                              ) : (
+                                dayClasses.map((assignedClass) => (
+                                  <article
+                                    key={assignedClass.id}
+                                    className={`min-h-24 overflow-hidden rounded-md border p-2 text-[10px] ${eventStyle(`${assignedClass.courseName}-${assignedClass.subjectName}`)}`}
+                                  >
+                                    <p className="font-mono font-semibold text-[var(--accent)]">
+                                      {assignedClass.startTime.slice(0, 5)} - {assignedClass.endTime.slice(0, 5)}
+                                    </p>
+                                    <p className="mt-1 break-words text-xs font-semibold leading-tight text-[var(--foreground)]">
+                                      {assignedClass.courseName}
+                                    </p>
+                                    <p className="mt-1 break-words leading-tight text-[var(--ink-soft)]">{assignedClass.subjectName}</p>
+                                    <p className="mt-1 break-words leading-tight text-[var(--ink-muted)]">
+                                      {assignedClass.classroom || "Sin aula"}
+                                    </p>
+                                    {currentRole === "manager" || assignedClass.isCovered ? (
+                                      <p className="mt-1 break-words leading-tight text-[var(--ink-muted)]">
+                                        {assignedClass.effectiveTeacherName || assignedClass.teacherName}
+                                      </p>
+                                    ) : null}
+                                  </article>
+                                ))
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  ))
+
+                    <div className="space-y-3 md:hidden">
+                      {selectedWeekDates.map((day) => {
+                        const dayClasses = classesByDate.get(day.key) ?? [];
+                        return (
+                          <section key={day.key} className="border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <h2 className="text-xs font-semibold text-[var(--foreground)]">{day.day}</h2>
+                              <span className="text-[10px] text-[var(--ink-muted)]">{formatCalendarDate(day.date)}</span>
+                            </div>
+                            {dayClasses.length === 0 ? (
+                              <p className="mt-1 text-xs text-[var(--ink-muted)]">Sin clases</p>
+                            ) : (
+                              <div className="mt-1.5 space-y-1.5">
+                                {dayClasses.map((assignedClass) => (
+                                  <article
+                                    key={assignedClass.id}
+                                    className={`grid grid-cols-[72px_1fr] gap-2 rounded-md border p-2 text-xs ${eventStyle(`${assignedClass.courseName}-${assignedClass.subjectName}`)}`}
+                                  >
+                                    <p className="font-mono text-[10px] font-semibold text-[var(--accent)]">
+                                      {assignedClass.startTime.slice(0, 5)}<br />{assignedClass.endTime.slice(0, 5)}
+                                    </p>
+                                    <div className="min-w-0">
+                                      <p className="break-words font-semibold text-[var(--foreground)]">{assignedClass.courseName}</p>
+                                      <p className="break-words text-[var(--ink-soft)]">{assignedClass.subjectName} · {assignedClass.classroom || "Sin aula"}</p>
+                                      {currentRole === "manager" || assignedClass.isCovered ? (
+                                        <p className="break-words text-[var(--ink-muted)]">{assignedClass.effectiveTeacherName || assignedClass.teacherName}</p>
+                                      ) : null}
+                                    </div>
+                                  </article>
+                                ))}
+                              </div>
+                            )}
+                          </section>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
             </div>

@@ -41,6 +41,20 @@ export class ImportsController {
     };
   }
 
+  @Post('class-planning')
+  @Roles('manager')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadClassPlanningExcel(@UploadedFile() file: any) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    return this.importsService.processClassPlanningUpload({
+      fileName: file.originalname,
+      fileBuffer: file.buffer,
+    });
+  }
+
   @Get(':importId')
   @Roles('manager', 'lead', 'worker')
   getImportById(@Param('importId') importId: string) {

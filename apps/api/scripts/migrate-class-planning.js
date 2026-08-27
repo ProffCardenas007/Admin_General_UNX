@@ -166,6 +166,28 @@ async function run() {
     `);
 
     await client.query(`
+      ALTER TABLE class_courses
+      ADD COLUMN IF NOT EXISTS import_key VARCHAR(64) NULL
+    `);
+
+    await client.query(`
+      ALTER TABLE class_sessions
+      ADD COLUMN IF NOT EXISTS import_key VARCHAR(64) NULL
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_class_courses_import_key
+      ON class_courses(import_key)
+      WHERE import_key IS NOT NULL
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_class_sessions_import_key
+      ON class_sessions(import_key)
+      WHERE import_key IS NOT NULL
+    `);
+
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_class_course_subjects_course_id
       ON class_course_subjects(course_id)
     `);
