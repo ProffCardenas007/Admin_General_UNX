@@ -1,10 +1,15 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
+import { normalizeLeadSpecialties } from '../common/specialties';
 import type { TaskActivityType } from '../database/entities/task.entity';
 
 const ACTIVITY_WEIGHTS: Record<TaskActivityType, number> = {
@@ -211,12 +216,33 @@ export class ReportsService {
 
   async buildTasksCsv(
     filters: { projectId?: string; status?: string },
-    actor: { id: string; role: 'manager' | 'lead' | 'worker' },
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: string | null;
+      specialties?: string[] | null;
+    },
   ) {
     const qb = this.tasksRepository.createQueryBuilder('task');
+    const leadSpecialties = normalizeLeadSpecialties(
+      actor.specialties ?? actor.specialty,
+    );
 
     if (actor.role === 'worker') {
       qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
+    } else if (actor.role === 'lead') {
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
+
+      qb.innerJoin(
+        ProjectEntity,
+        'project_scope',
+        'project_scope.id = task.project_id',
+      );
+      qb.andWhere('project_scope.scope IN (:...scopes)', {
+        scopes: leadSpecialties,
+      });
     }
 
     if (filters.projectId) {

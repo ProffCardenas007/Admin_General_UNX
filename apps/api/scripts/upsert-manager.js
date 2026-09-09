@@ -28,12 +28,15 @@ async function main() {
     throw new Error('Missing database configuration. Set DATABASE_URL or PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD.');
   }
 
-  const email = (process.env.MANAGER_EMAIL || 'gerente@unx.mx').trim().toLowerCase();
-  const fullName = (process.env.MANAGER_NAME || 'Gerente').trim();
-  const plainPassword = (process.env.MANAGER_PASSWORD || '123456').trim();
+  const email = (process.env.MANAGER_EMAIL || '').trim().toLowerCase();
+  const fullName = (process.env.MANAGER_NAME || '').trim();
+  const plainPassword = (process.env.MANAGER_PASSWORD || '').trim();
 
   if (!email) {
     throw new Error('MANAGER_EMAIL is required.');
+  }
+  if (!fullName) {
+    throw new Error('MANAGER_NAME is required.');
   }
   if (plainPassword.length < 6) {
     throw new Error('MANAGER_PASSWORD must have at least 6 characters.');

@@ -747,9 +747,17 @@ export default function TasksPage() {
         (project) =>
           project.status === "active" &&
           (selectedSpecialty.length === 0 || project.scope === selectedSpecialty) &&
-          (selectedAcademy.length === 0 || normalizeAcademy(project.code) === selectedAcademy),
+          (selectedAcademy.length === 0 || normalizeAcademy(project.code) === selectedAcademy) &&
+          (selectedAssigneeId.length === 0 ||
+            tasks.some(
+              (task) =>
+                task.projectId === project.id &&
+                (selectedAssigneeId === UNASSIGNED_SENTINEL
+                  ? !task.assigneeId
+                  : task.assigneeId === selectedAssigneeId),
+            )),
       ),
-    [projects, selectedSpecialty, selectedAcademy],
+    [projects, tasks, selectedSpecialty, selectedAcademy, selectedAssigneeId],
   );
 
   const peopleForSelectedProject = useMemo(() => {
@@ -788,6 +796,47 @@ export default function TasksPage() {
 
     return people;
   }, [tasks, users, selectedProjectId]);
+
+  const peopleWithTaskCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    let unassignedCount = 0;
+
+    tasks.forEach((task) => {
+      const project = projects.find((item) => item.id === task.projectId);
+      if (selectedSpecialty.length > 0 && project?.scope !== selectedSpecialty) {
+        return;
+      }
+      if (
+        selectedAcademy.length > 0 &&
+        (!project || normalizeAcademy(project.code) !== selectedAcademy)
+      ) {
+        return;
+      }
+
+      if (!task.assigneeId) {
+        unassignedCount += 1;
+        return;
+      }
+      counts.set(task.assigneeId, (counts.get(task.assigneeId) ?? 0) + 1);
+    });
+
+    const people = [...counts.entries()]
+      .map(([userId, count]) => {
+        const user = users.find((item) => item.id === userId);
+        return {
+          id: userId,
+          count,
+          label: user ? `${user.fullName} (${roleLabels[user.role] ?? user.role})` : userId.slice(0, 8),
+        };
+      })
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "es"));
+
+    if (unassignedCount > 0) {
+      people.push({ id: UNASSIGNED_SENTINEL, count: unassignedCount, label: "Sin asignar" });
+    }
+
+    return people;
+  }, [tasks, projects, users, selectedSpecialty, selectedAcademy]);
 
   const projectById = useMemo(
     () => Object.fromEntries(projects.map((project) => [project.id, project])),
@@ -1851,6 +1900,50 @@ export default function TasksPage() {
                 >
                   Quitar
                 </button>
+              </div>
+            ) : null}
+
+            {role === "manager" ? (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  Personas
+                </p>
+                {peopleWithTaskCounts.length === 0 ? (
+                  <p className="ui-empty px-4 py-3 text-sm">
+                    No hay personas con tareas para los filtros actuales.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAssigneeId("")}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        selectedAssigneeId === ""
+                          ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                          : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                      }`}
+                    >
+                      Todas las personas
+                    </button>
+                    {peopleWithTaskCounts.map((person) => (
+                      <button
+                        key={person.id}
+                        type="button"
+                        onClick={() => {
+                          selectAssignee(person.id);
+                          setSelectedProjectId("");
+                        }}
+                        className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                          selectedAssigneeId === person.id
+                            ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                            : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                        }`}
+                      >
+                        {person.label} ({person.count})
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : null}
 

@@ -189,9 +189,10 @@ export class TasksService {
   private async buildGeneratedCode(
     projectId: string,
     activityType: CreateTaskDto['activityType'],
+    tasksRepository: Repository<TaskEntity> = this.tasksRepository,
   ) {
     const prefix = this.activityCodePrefix(activityType);
-    const rows = await this.tasksRepository
+    const rows = await tasksRepository
       .createQueryBuilder('task')
       .select('task.code', 'code')
       .where('task.project_id = :projectId', { projectId })
@@ -253,20 +254,22 @@ export class TasksService {
       activatedAt?: Date;
     },
     maxAttempts = 5,
+    tasksRepository: Repository<TaskEntity> = this.tasksRepository,
   ) {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const generatedCode = await this.buildGeneratedCode(
         input.projectId,
         input.activityType,
+        tasksRepository,
       );
 
-      const task = this.tasksRepository.create({
+      const task = tasksRepository.create({
         ...input,
         code: generatedCode,
       });
 
       try {
-        return await this.tasksRepository.save(task);
+        return await tasksRepository.save(task);
       } catch (error) {
         if (this.isTaskCodeConflict(error) && attempt < maxAttempts - 1) {
           continue;
@@ -333,51 +336,60 @@ export class TasksService {
       throw new BadRequestException('One or more assignees are invalid or inactive');
     }
 
-    const chainId = randomUUID();
-    const chainTasks: TaskEntity[] = [];
+    return this.tasksRepository.manager.transaction(async (manager) => {
+      const transactionalTasksRepository = manager.getRepository(TaskEntity);
+      const transactionalNotificationsRepository =
+        manager.getRepository(NotificationEntity);
+      const chainId = randomUUID();
+      const chainTasks: TaskEntity[] = [];
 
-    for (let index = 0; index < dto.steps.length; index += 1) {
-      const step = dto.steps[index];
-      const isFirst = index === 0;
-      const previousTask = chainTasks[chainTasks.length - 1];
-      const createdTask = await this.createTaskWithGeneratedCode({
-        projectId: dto.projectId,
-        parentTaskId: isFirst ? undefined : previousTask?.id,
+      for (let index = 0; index < dto.steps.length; index += 1) {
+        const step = dto.steps[index];
+        const isFirst = index === 0;
+        const previousTask = chainTasks[chainTasks.length - 1];
+        const createdTask = await this.createTaskWithGeneratedCode(
+          {
+            projectId: dto.projectId,
+            parentTaskId: isFirst ? undefined : previousTask?.id,
+            chainId,
+            chainOrder: index + 1,
+            activityType: step.activityType,
+            title: step.title.trim(),
+            description: step.description.trim(),
+            assigneeId: step.assigneeId,
+            createdBy: actor.id,
+            status: isFirst ? 'todo' : 'blocked',
+            priority: step.priority ?? dto.priority ?? 'medium',
+            dueDate: step.dueDate ?? dto.dueDate,
+            estimatedHours: String(step.estimatedHours ?? 0),
+            activatedAt: isFirst ? new Date() : undefined,
+          },
+          5,
+          transactionalTasksRepository,
+        );
+
+        chainTasks.push(createdTask);
+      }
+
+      const firstTask = chainTasks[0];
+      if (firstTask.assigneeId) {
+        const firstNotification = transactionalNotificationsRepository.create({
+          userId: firstTask.assigneeId,
+          taskId: firstTask.id,
+          title: 'Nueva tarea de flujo asignada',
+          message: `Se te asigno ${firstTask.title}. Es el primer paso de un flujo de ${chainTasks.length} tareas.`,
+          isRead: false,
+        });
+        await transactionalNotificationsRepository.save(firstNotification);
+      }
+
+      return {
         chainId,
-        chainOrder: index + 1,
-        activityType: step.activityType,
-        title: step.title.trim(),
-        description: step.description.trim(),
-        assigneeId: step.assigneeId,
-        createdBy: actor.id,
-        status: isFirst ? 'todo' : 'blocked',
-        priority: step.priority ?? dto.priority ?? 'medium',
-        dueDate: step.dueDate ?? dto.dueDate,
-        estimatedHours: String(step.estimatedHours ?? 0),
-        activatedAt: isFirst ? new Date() : undefined,
-      });
-
-      chainTasks.push(createdTask);
-    }
-
-    const firstTask = chainTasks[0];
-    if (firstTask.assigneeId) {
-      const firstNotification = this.notificationsRepository.create({
-        userId: firstTask.assigneeId,
-        taskId: firstTask.id,
-        title: 'Nueva tarea de flujo asignada',
-        message: `Se te asigno ${firstTask.title}. Es el primer paso de un flujo de ${chainTasks.length} tareas.`,
-        isRead: false,
-      });
-      await this.notificationsRepository.save(firstNotification);
-    }
-
-    return {
-      chainId,
-      projectId: dto.projectId,
-      totalSteps: chainTasks.length,
-      tasks: chainTasks,
-    };
+        projectId: dto.projectId,
+        totalSteps: chainTasks.length,
+        tasks: chainTasks,
+      };
+    });
   }
 
   async create(

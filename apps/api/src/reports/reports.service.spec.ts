@@ -11,6 +11,7 @@ describe('ReportsService', () => {
   beforeEach(() => {
     qb = {
       andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([
         {
@@ -73,6 +74,27 @@ describe('ReportsService', () => {
       {
         actorId: 'manager-1',
       },
+    );
+  });
+
+  it('adds lead specialty scope filter for CSV exports', async () => {
+    await service.buildTasksCsv(
+      {},
+      {
+        id: 'lead-1',
+        role: 'lead',
+        specialties: ['sig'],
+      },
+    );
+
+    expect(qb.innerJoin).toHaveBeenCalledWith(
+      expect.any(Function),
+      'project_scope',
+      'project_scope.id = task.project_id',
+    );
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      'project_scope.scope IN (:...scopes)',
+      { scopes: ['sig'] },
     );
   });
 

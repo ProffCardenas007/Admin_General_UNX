@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -25,7 +26,7 @@ import {
 type UploadInput = {
   fileName: string;
   fileBuffer: Buffer;
-  userId?: string;
+  actorId?: string;
 };
 
 type ParsedRow = {
@@ -456,13 +457,17 @@ export class ImportsService {
   }
 
   async processUpload(input: UploadInput) {
-    const actor = input.userId
-      ? await this.usersRepository.findOne({ where: { id: input.userId } })
-      : await this.usersRepository.findOne({ where: { role: 'manager' } });
-
-    if (!actor) {
+    const actorId = input.actorId;
+    if (!actorId) {
       throw new BadRequestException(
-        'No user found. Create at least one user before importing.',
+        'Authentication is required to import files.',
+      );
+    }
+
+    const actor = await this.usersRepository.findOne({ where: { id: actorId } });
+    if (!actor || actor.role !== 'manager') {
+      throw new ForbiddenException(
+        'Only managers can import Excel files.',
       );
     }
 

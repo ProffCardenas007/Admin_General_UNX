@@ -115,6 +115,18 @@ const IconChevronRight = () => (
   </svg>
 );
 
+const IconMenu = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M3 5h12M3 9h12M3 13h12" strokeLinecap="round" />
+  </svg>
+);
+
+const IconClose = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M4.5 4.5l9 9M13.5 4.5l-9 9" strokeLinecap="round" />
+  </svg>
+);
+
 type NavItem = {
   label: string;
   href: string;
@@ -148,6 +160,7 @@ export default function AppNav() {
   const [email, setEmail] = useState("");
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -180,8 +193,16 @@ export default function AppNav() {
 
   const visibleMain = MAIN_NAV.filter((item) => !(isWorker && item.workerHidden));
 
+  const toggleNavigation = () => {
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      setMobileOpen((open) => !open);
+      return;
+    }
+    setCollapsed((current) => !current);
+  };
+
   return (
-    <aside className={`app-sidebar${collapsed ? " app-sidebar--collapsed" : ""}`} aria-label="Navegación principal">
+    <aside className={`app-sidebar${collapsed ? " app-sidebar--collapsed" : ""}${mobileOpen ? " app-sidebar--mobile-open" : ""}`} aria-label="Navegación principal">
       {/* ── Marca ── */}
       <div className="app-sidebar-brand">
         <div className="app-sidebar-brand-mark" aria-hidden="true">U</div>
@@ -190,21 +211,30 @@ export default function AppNav() {
           <p className="app-sidebar-brand-sub">Sistema de Proyectos</p>
         </div>
         <button
-          onClick={() => setCollapsed((c) => !c)}
+          type="button"
+          onClick={toggleNavigation}
           className="app-sidebar-collapse-btn"
-          aria-label={collapsed ? "Expandir menú" : "Colapsar menú"}
+          aria-label={mobileOpen ? "Cerrar menú" : "Alternar menú de navegación"}
+          aria-expanded={mobileOpen}
+          aria-controls="app-navigation-sections"
           title={collapsed ? "Expandir" : "Colapsar"}
         >
-          {collapsed ? <IconChevronRight /> : <IconChevronLeft />}
+          <span className="app-sidebar-desktop-toggle">
+            {collapsed ? <IconChevronRight /> : <IconChevronLeft />}
+          </span>
+          <span className="app-sidebar-mobile-toggle">
+            {mobileOpen ? <IconClose /> : <IconMenu />}
+          </span>
         </button>
       </div>
 
       {/* ── Navegación principal ── */}
-      <nav className="app-sidebar-nav" aria-label="Secciones">
+      <nav id="app-navigation-sections" className="app-sidebar-nav" aria-label="Secciones">
         {visibleMain.map((item) => (
           <Link
             key={item.href}
             href={item.href}
+            onClick={() => setMobileOpen(false)}
             className={`app-sidebar-item${isActive(item.href) ? " app-sidebar-item--active" : ""}`}
             title={collapsed ? item.label : undefined}
           >
@@ -219,6 +249,7 @@ export default function AppNav() {
         {!isWorker && (
           <Link
             href="/capture"
+            onClick={() => setMobileOpen(false)}
             className={`app-sidebar-item app-sidebar-item--cta${isActive("/capture") ? " app-sidebar-item--active" : ""}`}
             title={collapsed ? "Cargar datos" : undefined}
           >
@@ -235,6 +266,7 @@ export default function AppNav() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => setMobileOpen(false)}
                 className={`app-sidebar-item${isActive(item.href) ? " app-sidebar-item--active" : ""}`}
                 title={collapsed ? item.label : undefined}
               >
@@ -245,6 +277,14 @@ export default function AppNav() {
           </>
         )}
       </nav>
+
+      <button
+        type="button"
+        className="app-sidebar-backdrop"
+        onClick={() => setMobileOpen(false)}
+        aria-label="Cerrar menú"
+        tabIndex={mobileOpen ? 0 : -1}
+      />
 
       {/* ── Footer usuario ── */}
       <div className="app-sidebar-footer">

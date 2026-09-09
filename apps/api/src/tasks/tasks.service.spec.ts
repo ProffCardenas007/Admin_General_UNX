@@ -466,5 +466,6 @@ describe('TasksService', () => {
 
     expect(result.tasks[0].parentTaskId).toBeUndefined();
     expect(result.tasks[1].parentTaskId).toBe('task-1');
+    expect(tasksRepository.manager.transaction).toHaveBeenCalledTimes(1);
   });
 });
