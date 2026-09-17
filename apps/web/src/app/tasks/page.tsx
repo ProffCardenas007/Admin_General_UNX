@@ -2280,8 +2280,9 @@ export default function TasksPage() {
                     <p className="mt-2 text-xs text-[var(--danger)]">{exportError}</p>
                   ) : (
                     <p className="mt-2 text-xs text-[var(--ink-muted)]">
-                      Descarga un Excel con fecha, proyecto, tarea, tipo de actividad y horas de{" "}
-                      {assigneeLabel(selectedAssigneeId)} en el rango elegido.
+                      Descarga un Excel con todas las tareas (principales y consecuentes, finalizadas y no
+                      completadas) de {assigneeLabel(selectedAssigneeId)} con fecha límite o de cierre en el
+                      rango elegido, incluyendo tipo de actividad, estado, resultado y horas.
                     </p>
                   )}
                 </div>

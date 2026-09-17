@@ -44,6 +44,13 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   done: 'Finalizada',
 };
 
+const TASK_PRIORITY_LABELS: Record<string, string> = {
+  low: 'Baja',
+  medium: 'Media',
+  high: 'Alta',
+  urgent: 'Urgente',
+};
+
 @Injectable()
 export class ReportsService {
   constructor(
@@ -358,28 +365,18 @@ export class ReportsService {
       throw new NotFoundException('User not found');
     }
 
-    const qb = this.taskUpdatesRepository
-      .createQueryBuilder('update')
-      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
-      .innerJoin(ProjectEntity, 'project', 'project.id = task.project_id')
-      .where('update.user_id = :userId', { userId })
-      .andWhere('update.update_date >= :from AND update.update_date <= :to', {
-        from,
-        to,
-      })
-      .orderBy('update.update_date', 'ASC')
-      .addOrderBy('update.created_at', 'ASC')
-      .select('update.update_date', 'updateDate')
-      .addSelect('update.worked_hours', 'workedHours')
-      .addSelect('update.progress_percent', 'progressPercent')
-      .addSelect('update.blocker_reason', 'blockerReason')
-      .addSelect('update.comments', 'comments')
-      .addSelect('task.code', 'taskCode')
-      .addSelect('task.title', 'taskTitle')
-      .addSelect('task.activity_type', 'activityType')
-      .addSelect('task.status', 'taskStatus')
-      .addSelect('project.code', 'projectCode')
-      .addSelect('project.name', 'projectName');
+    const tasksQb = this.tasksRepository
+      .createQueryBuilder('task')
+      .where('task.assignee_id = :userId', { userId })
+      .andWhere(
+        `(
+          (task.due_date >= :from AND task.due_date <= :to)
+          OR (task.completed_at::date >= :from AND task.completed_at::date <= :to)
+        )`,
+        { from, to },
+      )
+      .orderBy('task.due_date', 'ASC')
+      .addOrderBy('task.created_at', 'ASC');
 
     if (actor.role === 'lead') {
       const leadSpecialties = normalizeLeadSpecialties(
@@ -388,69 +385,137 @@ export class ReportsService {
       if (leadSpecialties.length === 0) {
         throw new ForbiddenException('Lead specialty is required');
       }
-      qb.andWhere('project.scope IN (:...scopes)', {
-        scopes: leadSpecialties,
-      });
+      tasksQb
+        .innerJoin(
+          ProjectEntity,
+          'project_scope',
+          'project_scope.id = task.project_id',
+        )
+        .andWhere('project_scope.scope IN (:...scopes)', {
+          scopes: leadSpecialties,
+        });
     }
 
-    const rows = await qb.getRawMany<{
-      updateDate: string;
-      workedHours: string;
-      progressPercent: string;
-      blockerReason: string | null;
-      comments: string | null;
-      taskCode: string;
-      taskTitle: string;
-      activityType: TaskActivityType;
-      taskStatus: TaskStatus;
-      projectCode: string;
-      projectName: string;
-    }>();
+    const tasks = await tasksQb.getMany();
+
+    const projectIds = [...new Set(tasks.map((task) => task.projectId))];
+    const projects = projectIds.length
+      ? await this.projectsRepository.find({ where: { id: In(projectIds) } })
+      : [];
+    const projectById = new Map(
+      projects.map((project) => [project.id, project]),
+    );
+
+    const parentTaskIds = [
+      ...new Set(
+        tasks
+          .map((task) => task.parentTaskId)
+          .filter((value): value is string => !!value),
+      ),
+    ];
+    const parentTasks = parentTaskIds.length
+      ? await this.tasksRepository.find({ where: { id: In(parentTaskIds) } })
+      : [];
+    const parentCodeById = new Map(
+      parentTasks.map((task) => [task.id, task.code]),
+    );
+
+    const taskIds = tasks.map((task) => task.id);
+    const workedHoursByTask = new Map<string, number>();
+    if (taskIds.length > 0) {
+      const workedRows = await this.taskUpdatesRepository
+        .createQueryBuilder('update')
+        .select('update.task_id', 'taskId')
+        .addSelect('COALESCE(SUM(update.worked_hours), 0)', 'workedHours')
+        .where('update.task_id IN (:...taskIds)', { taskIds })
+        .andWhere('update.user_id = :userId', { userId })
+        .groupBy('update.task_id')
+        .getRawMany<{ taskId: string; workedHours: string }>();
+
+      for (const row of workedRows) {
+        workedHoursByTask.set(row.taskId, Number(row.workedHours || 0));
+      }
+    }
 
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Actividades');
+    const sheet = workbook.addWorksheet('Tareas');
     sheet.columns = [
-      { header: 'Fecha', key: 'date', width: 14 },
+      { header: 'Fecha límite', key: 'dueDate', width: 14 },
       { header: 'Proyecto', key: 'project', width: 30 },
-      { header: 'Código tarea', key: 'code', width: 16 },
+      { header: 'Código', key: 'code', width: 14 },
       { header: 'Tarea', key: 'task', width: 36 },
+      { header: 'Tipo de tarea', key: 'taskKind', width: 16 },
+      { header: 'Tarea principal', key: 'parentCode', width: 16 },
       { header: 'Tipo de actividad', key: 'activityType', width: 20 },
-      { header: 'Horas trabajadas', key: 'hours', width: 16 },
-      { header: 'Avance %', key: 'progress', width: 12 },
-      { header: 'Estado de la tarea', key: 'status', width: 18 },
-      { header: 'Bloqueo', key: 'blocker', width: 30 },
-      { header: 'Comentarios', key: 'comments', width: 40 },
+      { header: 'Prioridad', key: 'priority', width: 12 },
+      { header: 'Estado', key: 'status', width: 16 },
+      { header: 'Resultado', key: 'outcome', width: 16 },
+      { header: 'Horas estimadas', key: 'estimatedHours', width: 16 },
+      { header: 'Horas trabajadas', key: 'workedHours', width: 16 },
+      { header: 'Fecha de finalización', key: 'completedAt', width: 18 },
     ];
     sheet.getRow(1).font = { bold: true };
 
-    let totalHours = 0;
-    for (const row of rows) {
-      const hours = Number(row.workedHours || 0);
-      totalHours += hours;
+    let totalEstimatedHours = 0;
+    let totalWorkedHours = 0;
+    let completedCount = 0;
+    let notCompletedCount = 0;
+
+    for (const task of tasks) {
+      const project = projectById.get(task.projectId);
+      const estimatedHours = Number(task.estimatedHours || 0);
+      const workedHours = workedHoursByTask.get(task.id) ?? 0;
+      totalEstimatedHours += estimatedHours;
+      totalWorkedHours += workedHours;
+
+      const outcome =
+        task.status === 'done'
+          ? task.completionOutcome === 'not_completed'
+            ? 'No completada'
+            : 'Completada'
+          : 'En proceso';
+      if (task.status === 'done') {
+        if (task.completionOutcome === 'not_completed') {
+          notCompletedCount += 1;
+        } else {
+          completedCount += 1;
+        }
+      }
+
       sheet.addRow({
-        date: row.updateDate,
-        project: `${row.projectCode} · ${row.projectName}`,
-        code: row.taskCode,
-        task: row.taskTitle,
-        activityType: ACTIVITY_TYPE_LABELS[row.activityType] ?? row.activityType,
-        hours,
-        progress: Number(row.progressPercent || 0),
-        status: TASK_STATUS_LABELS[row.taskStatus] ?? row.taskStatus,
-        blocker: row.blockerReason ?? '',
-        comments: row.comments ?? '',
+        dueDate: task.dueDate ?? '',
+        project: project ? `${project.code} · ${project.name}` : '',
+        code: task.code,
+        task: task.title,
+        taskKind: task.parentTaskId ? 'Consecuente' : 'Principal',
+        parentCode: task.parentTaskId
+          ? (parentCodeById.get(task.parentTaskId) ?? '')
+          : '',
+        activityType:
+          ACTIVITY_TYPE_LABELS[task.activityType] ?? task.activityType,
+        priority: TASK_PRIORITY_LABELS[task.priority] ?? task.priority,
+        status: TASK_STATUS_LABELS[task.status] ?? task.status,
+        outcome,
+        estimatedHours,
+        workedHours,
+        completedAt: task.completedAt
+          ? new Date(task.completedAt).toISOString().slice(0, 10)
+          : '',
       });
     }
 
     sheet.addRow({});
-    const totalsRow = sheet.addRow({
-      date: 'Total',
-      hours: Number(totalHours.toFixed(2)),
+    const summaryRow = sheet.addRow({
+      dueDate: 'Total',
+      task: `${tasks.length} tarea(s) · ${completedCount} completada(s) · ${notCompletedCount} no completada(s)`,
+      estimatedHours: Number(totalEstimatedHours.toFixed(2)),
+      workedHours: Number(totalWorkedHours.toFixed(2)),
     });
-    totalsRow.font = { bold: true };
+    summaryRow.font = { bold: true };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const safeName = user.fullName.replace(/[^a-z0-9]+/gi, '_');
-    const fileName = `actividades_${safeName}_${from}_a_${to}.xlsx`;
+    const fileName = `tareas_${safeName}_${from}_a_${to}.xlsx`;
 
     return { buffer, fileName };
   }
