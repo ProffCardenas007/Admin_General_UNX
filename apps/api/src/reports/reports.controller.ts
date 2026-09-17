@@ -1,4 +1,12 @@
-import { Controller, Get, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -38,5 +46,40 @@ export class ReportsController {
       'attachment; filename="tasks-report.csv"',
     );
     return res.send(csv);
+  }
+
+  @Get('users/:userId/activity.xlsx')
+  @Roles('manager', 'lead', 'worker')
+  async downloadUserActivityExcel(
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: string | null;
+        specialties?: string[] | null;
+      };
+    },
+    @Param('userId') userId: string,
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { buffer, fileName } =
+      await this.reportsService.buildUserActivityExcel(
+        userId,
+        { from, to },
+        req.user,
+      );
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName}"`,
+    );
+    return res.send(buffer);
   }
 }

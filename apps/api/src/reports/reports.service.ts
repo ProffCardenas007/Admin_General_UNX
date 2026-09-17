@@ -2,15 +2,17 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as ExcelJS from 'exceljs';
 import { In, Repository } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 import { normalizeLeadSpecialties } from '../common/specialties';
-import type { TaskActivityType } from '../database/entities/task.entity';
+import type { TaskActivityType, TaskStatus } from '../database/entities/task.entity';
 
 const ACTIVITY_WEIGHTS: Record<TaskActivityType, number> = {
   creacion: 10,
@@ -23,6 +25,24 @@ const ACTIVITY_WEIGHTS: Record<TaskActivityType, number> = {
 };
 
 const ACTIVITY_TYPES = Object.keys(ACTIVITY_WEIGHTS) as TaskActivityType[];
+
+const ACTIVITY_TYPE_LABELS: Record<TaskActivityType, string> = {
+  creacion: 'Creación',
+  grabacion: 'Grabación',
+  presentaciones: 'Presentaciones',
+  edicion: 'Edición',
+  revision: 'Revisión',
+  plataforma: 'Plataforma',
+  administrativo: 'Administrativo',
+};
+
+const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: 'Por hacer',
+  doing: 'En curso',
+  paused: 'Pausada',
+  blocked: 'Bloqueada',
+  done: 'Finalizada',
+};
 
 @Injectable()
 export class ReportsService {
@@ -306,6 +326,133 @@ export class ReportsService {
     });
 
     return [header.join(','), ...lines].join('\n');
+  }
+
+  async buildUserActivityExcel(
+    userId: string,
+    filters: { from?: string; to?: string },
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: string | null;
+      specialties?: string[] | null;
+    },
+  ) {
+    const from = this.validateDate(filters.from, 'from');
+    const to = this.validateDate(filters.to, 'to');
+    if (!from || !to) {
+      throw new BadRequestException('Both from and to are required');
+    }
+    if (from > to) {
+      throw new BadRequestException('from must be before or equal to to');
+    }
+
+    if (actor.role === 'worker' && actor.id !== userId) {
+      throw new ForbiddenException(
+        'Workers can only export their own activity',
+      );
+    }
+
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const qb = this.taskUpdatesRepository
+      .createQueryBuilder('update')
+      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
+      .innerJoin(ProjectEntity, 'project', 'project.id = task.project_id')
+      .where('update.user_id = :userId', { userId })
+      .andWhere('update.update_date >= :from AND update.update_date <= :to', {
+        from,
+        to,
+      })
+      .orderBy('update.update_date', 'ASC')
+      .addOrderBy('update.created_at', 'ASC')
+      .select('update.update_date', 'updateDate')
+      .addSelect('update.worked_hours', 'workedHours')
+      .addSelect('update.progress_percent', 'progressPercent')
+      .addSelect('update.blocker_reason', 'blockerReason')
+      .addSelect('update.comments', 'comments')
+      .addSelect('task.code', 'taskCode')
+      .addSelect('task.title', 'taskTitle')
+      .addSelect('task.activity_type', 'activityType')
+      .addSelect('task.status', 'taskStatus')
+      .addSelect('project.code', 'projectCode')
+      .addSelect('project.name', 'projectName');
+
+    if (actor.role === 'lead') {
+      const leadSpecialties = normalizeLeadSpecialties(
+        actor.specialties ?? actor.specialty,
+      );
+      if (leadSpecialties.length === 0) {
+        throw new ForbiddenException('Lead specialty is required');
+      }
+      qb.andWhere('project.scope IN (:...scopes)', {
+        scopes: leadSpecialties,
+      });
+    }
+
+    const rows = await qb.getRawMany<{
+      updateDate: string;
+      workedHours: string;
+      progressPercent: string;
+      blockerReason: string | null;
+      comments: string | null;
+      taskCode: string;
+      taskTitle: string;
+      activityType: TaskActivityType;
+      taskStatus: TaskStatus;
+      projectCode: string;
+      projectName: string;
+    }>();
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Actividades');
+    sheet.columns = [
+      { header: 'Fecha', key: 'date', width: 14 },
+      { header: 'Proyecto', key: 'project', width: 30 },
+      { header: 'Código tarea', key: 'code', width: 16 },
+      { header: 'Tarea', key: 'task', width: 36 },
+      { header: 'Tipo de actividad', key: 'activityType', width: 20 },
+      { header: 'Horas trabajadas', key: 'hours', width: 16 },
+      { header: 'Avance %', key: 'progress', width: 12 },
+      { header: 'Estado de la tarea', key: 'status', width: 18 },
+      { header: 'Bloqueo', key: 'blocker', width: 30 },
+      { header: 'Comentarios', key: 'comments', width: 40 },
+    ];
+    sheet.getRow(1).font = { bold: true };
+
+    let totalHours = 0;
+    for (const row of rows) {
+      const hours = Number(row.workedHours || 0);
+      totalHours += hours;
+      sheet.addRow({
+        date: row.updateDate,
+        project: `${row.projectCode} · ${row.projectName}`,
+        code: row.taskCode,
+        task: row.taskTitle,
+        activityType: ACTIVITY_TYPE_LABELS[row.activityType] ?? row.activityType,
+        hours,
+        progress: Number(row.progressPercent || 0),
+        status: TASK_STATUS_LABELS[row.taskStatus] ?? row.taskStatus,
+        blocker: row.blockerReason ?? '',
+        comments: row.comments ?? '',
+      });
+    }
+
+    sheet.addRow({});
+    const totalsRow = sheet.addRow({
+      date: 'Total',
+      hours: Number(totalHours.toFixed(2)),
+    });
+    totalsRow.font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const safeName = user.fullName.replace(/[^a-z0-9]+/gi, '_');
+    const fileName = `actividades_${safeName}_${from}_a_${to}.xlsx`;
+
+    return { buffer, fileName };
   }
 
   private escapeCsv(value: string) {

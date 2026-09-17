@@ -401,6 +401,10 @@ export default function TasksPage() {
     () => getQuincenaRange(activityYearMonth, activityHalfMonth),
     [activityHalfMonth, activityYearMonth],
   );
+  const [exportFromDate, setExportFromDate] = useState("");
+  const [exportToDate, setExportToDate] = useState("");
+  const [exportingActivity, setExportingActivity] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [showDoneTasks, setShowDoneTasks] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -652,6 +656,63 @@ export default function TasksPage() {
 
     return () => window.clearTimeout(timeoutId);
   }, [centerNoticeMessage]);
+
+  useEffect(() => {
+    setExportError("");
+    if (!selectedAssigneeId || selectedAssigneeId === UNASSIGNED_SENTINEL) {
+      return;
+    }
+    const range = getQuincenaRange(activityYearMonth, activityHalfMonth);
+    setExportFromDate(range?.startKey ?? "");
+    setExportToDate(range?.endKey ?? "");
+  }, [selectedAssigneeId]);
+
+  const onExportUserActivity = async () => {
+    if (!selectedAssigneeId || selectedAssigneeId === UNASSIGNED_SENTINEL) {
+      return;
+    }
+
+    if (!exportFromDate || !exportToDate) {
+      setExportError("Selecciona la fecha inicial y la fecha final.");
+      return;
+    }
+
+    if (exportFromDate > exportToDate) {
+      setExportError("La fecha inicial no puede ser posterior a la fecha final.");
+      return;
+    }
+
+    setExportError("");
+    setExportingActivity(true);
+
+    try {
+      const response = await axios.get(
+        `${API_URL}/reports/users/${selectedAssigneeId}/activity.xlsx`,
+        {
+          headers: authHeaders(),
+          params: { from: exportFromDate, to: exportToDate },
+          responseType: "blob",
+        },
+      );
+
+      const disposition = response.headers["content-disposition"] as string | undefined;
+      const fileNameMatch = disposition?.match(/filename="?([^"]+)"?/);
+      const fileName = fileNameMatch?.[1] ?? `actividades_${exportFromDate}_a_${exportToDate}.xlsx`;
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setExportError("No se pudieron exportar las actividades.");
+    } finally {
+      setExportingActivity(false);
+    }
+  };
 
   const selectAssignee = (assigneeId: string) => {
     const nextAssigneeId = selectedAssigneeId === assigneeId ? "" : assigneeId;
@@ -2112,6 +2173,7 @@ export default function TasksPage() {
             ) : null}
 
             {selectedAssigneeId ? (
+              <>
               <div className="border-t border-[var(--line)] pt-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
                   Periodo de actividades
@@ -2180,6 +2242,51 @@ export default function TasksPage() {
                       : "Selecciona un mes valido."}
                 </p>
               </div>
+
+              {selectedAssigneeId !== UNASSIGNED_SENTINEL ? (
+                <div className="border-t border-[var(--line)] pt-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                    Exportar actividades
+                  </p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="text-xs text-[var(--ink-muted)]">
+                      Desde
+                      <input
+                        type="date"
+                        value={exportFromDate}
+                        onChange={(event) => setExportFromDate(event.target.value)}
+                        className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-[var(--ink-muted)]">
+                      Hasta
+                      <input
+                        type="date"
+                        value={exportToDate}
+                        onChange={(event) => setExportToDate(event.target.value)}
+                        className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={onExportUserActivity}
+                      disabled={exportingActivity}
+                      className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {exportingActivity ? "Exportando…" : "Exportar a Excel"}
+                    </button>
+                  </div>
+                  {exportError ? (
+                    <p className="mt-2 text-xs text-[var(--danger)]">{exportError}</p>
+                  ) : (
+                    <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                      Descarga un Excel con fecha, proyecto, tarea, tipo de actividad y horas de{" "}
+                      {assigneeLabel(selectedAssigneeId)} en el rango elegido.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+              </>
             ) : null}
           </div>
         ) : (
