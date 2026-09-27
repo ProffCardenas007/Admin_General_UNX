@@ -311,25 +311,42 @@ function parseWeekdayGrid(
           return;
         }
 
-        const dayOffsets = findAssignedWeekdays(
+        const assignedDays = findAssignedWeekdays(
           week,
           block,
+          classroom,
           assignment,
           calendarEntries,
         );
-        if (dayOffsets.length === 0) {
+        if (assignedDays.length === 0) {
           warnings.push(`Día no reconocido: ${block.sourceText} (semana ${week})`);
           return;
         }
 
-        dayOffsets.forEach((dayOffset) => {
+        assignedDays.forEach(({ dayOffset, calendarText }) => {
+          // When the grid and the teacher's own sheet name the activity
+          // differently, the teacher's sheet wins.
+          const calendarActivity = calendarText
+            ? calendarActivityName(calendarText)
+            : '';
+          const calendarAssignment = calendarActivity
+            ? parseAssignment(
+                `${calendarActivity} ${assignment.teacher.fullName}`,
+                [assignment.teacher],
+              )
+            : null;
           sessions.push(
             buildSession(
               monday,
               dayOffset,
-              block,
+              calendarAssignment
+                ? {
+                    ...block,
+                    sourceText: `${calendarActivity} ${assignment.teacher.fullName}`,
+                  }
+                : block,
               classroom,
-              assignment,
+              calendarAssignment ?? assignment,
             ),
           );
         });
@@ -439,9 +456,10 @@ function groupGridBlocks(
 function findAssignedWeekdays(
   week: number,
   block: GridBlock,
+  classroom: string,
   assignment: ParsedAssignment,
   calendarEntries: CalendarEntry[],
-) {
+): Array<{ dayOffset: number; calendarText?: string }> {
   const candidates = calendarEntries.filter(
     (entry) =>
       entry.week === week &&
@@ -450,7 +468,7 @@ function findAssignedWeekdays(
   );
   const sourceTokens = meaningfulTokens(block.sourceText);
 
-  return [
+  const similarDays = [
     ...new Set(
       candidates
         .filter(
@@ -461,6 +479,34 @@ function findAssignedWeekdays(
         .map((candidate) => candidate.dayOffset),
     ),
   ];
+  if (similarDays.length > 0) {
+    return similarDays.map((dayOffset) => ({ dayOffset }));
+  }
+
+  // Same teacher, week, time and classroom but a different activity name
+  // (e.g. "Asesorías Temáticas" in the grid vs "Taller de Ejercicios PAA" in
+  // the teacher's sheet): trust the classroom match.
+  const classroomDays = new Map<number, string>();
+  candidates
+    .filter((candidate) => candidate.classroom === classroom)
+    .forEach((candidate) => {
+      if (!classroomDays.has(candidate.dayOffset)) {
+        classroomDays.set(candidate.dayOffset, candidate.sourceText);
+      }
+    });
+  return [...classroomDays].map(([dayOffset, calendarText]) => ({
+    dayOffset,
+    calendarText,
+  }));
+}
+
+function calendarActivityName(sourceText: string) {
+  return cleanWhitespace(
+    sourceText.replace(
+      /(?:^|\s)(?:(?:presencial|virtual)\s+)?(?:aula|sala|área|area)\s*\d+(?:\s.*)?$/i,
+      '',
+    ),
+  );
 }
 
 function parseAssignment(
