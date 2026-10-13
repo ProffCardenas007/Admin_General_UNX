@@ -406,7 +406,7 @@ export default function DashboardPage() {
 
   const currentFortnightCards = useMemo(() => {
     return users
-      .filter((user) => user.role !== "manager" && user.isActive !== false)
+      .filter((user) => user.isActive !== false)
       .map((user) => {
         const activities = tasks
           .filter((task) => {
@@ -447,7 +447,12 @@ export default function DashboardPage() {
           return second.totalHours - first.totalHours;
         }
         if (first.user.role !== second.user.role) {
-          return first.user.role === "lead" ? -1 : 1;
+          const roleOrder: Record<UserOption["role"], number> = {
+            lead: 0,
+            manager: 1,
+            worker: 2,
+          };
+          return roleOrder[first.user.role] - roleOrder[second.user.role];
         }
         return first.user.fullName.localeCompare(second.user.fullName, "es");
       });
@@ -1427,7 +1432,7 @@ export default function DashboardPage() {
 
         {currentFortnightCards.length === 0 ? (
           <p className="mt-4 text-sm text-[var(--ink-muted)]">
-            No hay lideres o colaboradores activos para mostrar.
+            No hay usuarios activos para mostrar.
           </p>
         ) : (
           <div
