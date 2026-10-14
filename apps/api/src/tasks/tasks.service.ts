@@ -134,6 +134,40 @@ export class TasksService {
     );
   }
 
+  /**
+   * Tells each assignee about tasks given to them by someone else. Self-assigned
+   * tasks do not notify. Runs on the caller's repository so it can share a
+   * transaction with the task writes.
+   */
+  private async notifyAssignees(
+    tasks: TaskEntity[],
+    actorId: string,
+    notificationsRepository: Repository<NotificationEntity> = this
+      .notificationsRepository,
+    kind: 'assigned' | 'reassigned' = 'assigned',
+  ) {
+    const recipients = tasks.filter(
+      (task) => task.assigneeId && task.assigneeId !== actorId,
+    );
+    if (recipients.length === 0) {
+      return;
+    }
+
+    await notificationsRepository.save(
+      recipients.map((task) =>
+        notificationsRepository.create({
+          userId: task.assigneeId as string,
+          taskId: task.id,
+          title: kind === 'assigned' ? 'Nueva tarea asignada' : 'Tarea reasignada',
+          message:
+            `${kind === 'assigned' ? 'Se te asigno' : 'Se te reasigno'} ${task.code} - ${task.title}.` +
+            (task.dueDate ? ` Vence ${task.dueDate}.` : ''),
+          isRead: false,
+        }),
+      ),
+    );
+  }
+
   private async hasLoggedTime(task: TaskEntity) {
     if ((task.activeSeconds ?? 0) > 0 || task.timerStartedAt) {
       return true;
@@ -338,7 +372,9 @@ export class TasksService {
       });
 
       try {
-        return await tasksRepository.save(task);
+        return await tasksRepository.manager.transaction((manager) =>
+          manager.getRepository(TaskEntity).save(task),
+        );
       } catch (error) {
         if (this.isTaskCodeConflict(error) && attempt < maxAttempts - 1) {
           continue;
@@ -526,22 +562,40 @@ export class TasksService {
         throw new BadRequestException('The selected team has no active members');
       }
 
-      const createdTasks: TaskEntity[] = [];
-      for (const member of activeMembers) {
-        const createdTask = await this.createTaskWithGeneratedCode({
-          projectId: dto.projectId,
-          activityType: dto.activityType,
-          title: dto.title,
-          description: dto.description,
-          assigneeId: member.id,
-          createdBy: actor.id,
-          status: dto.status ?? 'todo',
-          priority: dto.priority ?? 'medium',
-          dueDate: dto.dueDate,
-          estimatedHours: String(dto.estimatedHours ?? 0),
-        });
-        createdTasks.push(createdTask);
-      }
+      // All-or-nothing: a failure on the 3rd member must not leave 2 orphan tasks.
+      const createdTasks = await this.tasksRepository.manager.transaction(
+        async (manager) => {
+          const transactionalTasks = manager.getRepository(TaskEntity);
+          const created: TaskEntity[] = [];
+          for (const member of activeMembers) {
+            created.push(
+              await this.createTaskWithGeneratedCode(
+                {
+                  projectId: dto.projectId,
+                  activityType: dto.activityType,
+                  title: dto.title,
+                  description: dto.description,
+                  assigneeId: member.id,
+                  createdBy: actor.id,
+                  status: dto.status ?? 'todo',
+                  priority: dto.priority ?? 'medium',
+                  dueDate: dto.dueDate,
+                  estimatedHours: String(dto.estimatedHours ?? 0),
+                },
+                5,
+                transactionalTasks,
+              ),
+            );
+          }
+
+          await this.notifyAssignees(
+            created,
+            actor.id,
+            manager.getRepository(NotificationEntity),
+          );
+          return created;
+        },
+      );
 
       return {
         teamId: dto.teamId,
@@ -566,15 +620,41 @@ export class TasksService {
       estimatedHours: String(dto.estimatedHours ?? 0),
     };
 
-    if (dto.code?.trim().length) {
-      const task = this.tasksRepository.create({
-        ...taskPayload,
-        code: dto.code.trim(),
-      });
-      return this.tasksRepository.save(task);
-    }
+    return this.tasksRepository.manager.transaction(async (manager) => {
+      const transactionalTasks = manager.getRepository(TaskEntity);
+      let created: TaskEntity;
 
-    return this.createTaskWithGeneratedCode(taskPayload);
+      if (dto.code?.trim().length) {
+        try {
+          created = await transactionalTasks.save(
+            transactionalTasks.create({
+              ...taskPayload,
+              code: dto.code.trim(),
+            }),
+          );
+        } catch (error) {
+          if (this.isTaskCodeConflict(error)) {
+            throw new ConflictException(
+              'Ya existe una tarea con ese codigo en el proyecto. Usa otro o deja el campo vacio para generarlo.',
+            );
+          }
+          throw error;
+        }
+      } else {
+        created = await this.createTaskWithGeneratedCode(
+          taskPayload,
+          5,
+          transactionalTasks,
+        );
+      }
+
+      await this.notifyAssignees(
+        [created],
+        actor.id,
+        manager.getRepository(NotificationEntity),
+      );
+      return created;
+    });
   }
 
   async update(
@@ -698,15 +778,156 @@ export class TasksService {
       }
     }
 
-    const savedTask = await this.tasksRepository.save(task);
-    await this.recordTimerSeconds(
-      savedTask.id,
-      before.assigneeId,
-      stoppedTimerSeconds,
+    const completedNow = taskFields.status === 'done' && before.status !== 'done';
+    const reassignedTo =
+      taskFields.assigneeId && taskFields.assigneeId !== before.assigneeId
+        ? taskFields.assigneeId
+        : null;
+
+    // The task, its hours, the handoff task, the chain step and every
+    // notification commit together or not at all.
+    const savedTask = await this.tasksRepository.manager.transaction(
+      async (manager) => {
+        const transactionalTasks = manager.getRepository(TaskEntity);
+        const transactionalNotifications =
+          manager.getRepository(NotificationEntity);
+        const transactionalUpdates = manager.getRepository(TaskUpdateEntity);
+
+        const saved = await transactionalTasks.save(task);
+        await this.recordTimerSeconds(
+          saved.id,
+          before.assigneeId,
+          stoppedTimerSeconds,
+          transactionalUpdates,
+        );
+
+        if (reassignedTo) {
+          await this.notifyAssignees(
+            [saved],
+            actor.id,
+            transactionalNotifications,
+            'reassigned',
+          );
+        }
+
+        if (taskFields.status === 'done' && handoffToUserId) {
+          const consequentTask = await this.createTaskWithGeneratedCode(
+            {
+              projectId: task.projectId,
+              parentTaskId: task.parentTaskId ?? task.id,
+              activityType: nextActivityType ?? task.activityType,
+              title: nextTitle?.trim().length
+                ? nextTitle
+                : `Continuacion de ${task.title}`,
+              description: handoffMessage?.trim().length
+                ? handoffMessage
+                : `Actividad creada al finalizar ${task.code}.`,
+              assigneeId: handoffToUserId,
+              createdBy: actor.id,
+              status: 'todo',
+              priority: task.priority,
+              dueDate: nextDueDate ?? task.dueDate,
+              estimatedHours:
+                typeof nextEstimatedHours === 'number'
+                  ? String(nextEstimatedHours)
+                  : task.estimatedHours,
+            },
+            5,
+            transactionalTasks,
+          );
+
+          await transactionalNotifications.save(
+            transactionalNotifications.create({
+              userId: handoffToUserId,
+              taskId: consequentTask.id,
+              title: 'Nueva tarea subsecuente asignada',
+              message: `Se te asigno ${consequentTask.title} como continuidad de ${task.code}.`,
+              isRead: false,
+            }),
+          );
+
+          const today = todayKey();
+          const consequentAssigneeLabel = handoffToUserId.slice(0, 8);
+          const continuityComment = handoffMessage?.trim().length
+            ? `Tarea finalizada y derivada a ${consequentTask.code} para ${consequentAssigneeLabel}. Nota: ${handoffMessage}`
+            : `Tarea finalizada y derivada a ${consequentTask.code} para ${consequentAssigneeLabel}.`;
+
+          const existingContinuityUpdate = await transactionalUpdates.findOne({
+            where: { taskId: task.id, userId: actor.id, updateDate: today },
+          });
+
+          if (existingContinuityUpdate) {
+            // Keep the hours already logged today; only append the note.
+            const previousComments =
+              existingContinuityUpdate.comments?.trim() ?? '';
+            existingContinuityUpdate.progressPercent = '100';
+            existingContinuityUpdate.comments =
+              previousComments.length > 0
+                ? `${previousComments}\n${continuityComment}`
+                : continuityComment;
+            await transactionalUpdates.save(existingContinuityUpdate);
+          } else {
+            await transactionalUpdates.save(
+              transactionalUpdates.create({
+                taskId: task.id,
+                userId: actor.id,
+                updateDate: today,
+                workedHours: '0',
+                progressPercent: '100',
+                comments: continuityComment,
+              }),
+            );
+          }
+        }
+
+        if (completedNow && saved.chainId) {
+          const nextTask = await transactionalTasks.findOne({
+            where: {
+              chainId: saved.chainId,
+              chainOrder: (saved.chainOrder ?? 0) + 1,
+            },
+          });
+
+          if (nextTask && nextTask.status === 'blocked') {
+            nextTask.status = 'todo';
+            nextTask.activatedAt = new Date();
+            await transactionalTasks.save(nextTask);
+
+            if (nextTask.assigneeId) {
+              await transactionalNotifications.save(
+                transactionalNotifications.create({
+                  userId: nextTask.assigneeId,
+                  taskId: nextTask.id,
+                  title: 'Siguiente paso activado',
+                  message: `Ya puedes iniciar ${nextTask.title}. El paso anterior del flujo fue completado.`,
+                  isRead: false,
+                }),
+              );
+            }
+          }
+
+          if (!nextTask) {
+            const chainCreatorTask = await transactionalTasks.findOne({
+              where: { chainId: saved.chainId, chainOrder: 1 },
+            });
+
+            if (chainCreatorTask?.createdBy) {
+              await transactionalNotifications.save(
+                transactionalNotifications.create({
+                  userId: chainCreatorTask.createdBy,
+                  taskId: saved.id,
+                  title: 'Flujo completado',
+                  message: `La cadena ${saved.chainId.slice(0, 8)} se completo exitosamente.`,
+                  isRead: false,
+                }),
+              );
+            }
+          }
+        }
+
+        return saved;
+      },
     );
-    if (stoppedTimerSeconds > 0 || (taskFields.status === 'done' && before.status !== 'done')) {
-      await this.timeExtensionsService.flagOverrunIfNeeded(savedTask.id);
-    }
 
     if (actor.role === 'manager') {
       const changes: Record<string, { before: unknown; after: unknown }> = {};
@@ -775,120 +996,8 @@ export class TasksService {
       }
     }
 
-    if (taskFields.status === 'done' && handoffToUserId) {
-      const consequentActivityType = nextActivityType ?? task.activityType;
-      const consequentTask = await this.createTaskWithGeneratedCode({
-        projectId: task.projectId,
-        parentTaskId: task.parentTaskId ?? task.id,
-        activityType: consequentActivityType,
-        title: nextTitle?.trim().length
-          ? nextTitle
-          : `Continuacion de ${task.title}`,
-        description: handoffMessage?.trim().length
-          ? handoffMessage
-          : `Actividad creada al finalizar ${task.code}.`,
-        assigneeId: handoffToUserId,
-        createdBy: actor.id,
-        status: 'todo',
-        priority: task.priority,
-        dueDate: nextDueDate ?? task.dueDate,
-        estimatedHours:
-          typeof nextEstimatedHours === 'number'
-            ? String(nextEstimatedHours)
-            : task.estimatedHours,
-      });
-
-      const notification = this.notificationsRepository.create({
-        userId: handoffToUserId,
-        taskId: consequentTask.id,
-        title: 'Nueva tarea subsecuente asignada',
-        message: `Se te asigno ${consequentTask.title} como continuidad de ${task.code}.`,
-        isRead: false,
-      });
-
-      await this.notificationsRepository.save(notification);
-
-      const today = todayKey();
-      const consequentAssigneeLabel = handoffToUserId.slice(0, 8);
-      const continuityComment = handoffMessage?.trim().length
-        ? `Tarea finalizada y derivada a ${consequentTask.code} para ${consequentAssigneeLabel}. Nota: ${handoffMessage}`
-        : `Tarea finalizada y derivada a ${consequentTask.code} para ${consequentAssigneeLabel}.`;
-
-      const continuityUpdate = this.taskUpdatesRepository.create({
-        taskId: task.id,
-        userId: actor.id,
-        updateDate: today,
-        workedHours: '0',
-        progressPercent: '100',
-        comments: continuityComment,
-      });
-
-      const existingContinuityUpdate = await this.taskUpdatesRepository.findOne({
-        where: {
-          taskId: task.id,
-          userId: actor.id,
-          updateDate: today,
-        },
-      });
-
-      if (existingContinuityUpdate) {
-        const previousComments = existingContinuityUpdate.comments?.trim() ?? '';
-        existingContinuityUpdate.workedHours = '0';
-        existingContinuityUpdate.progressPercent = '100';
-        existingContinuityUpdate.comments = previousComments.length > 0
-          ? `${previousComments}\n${continuityComment}`
-          : continuityComment;
-
-        await this.taskUpdatesRepository.save(existingContinuityUpdate);
-      } else {
-        await this.taskUpdatesRepository.save(continuityUpdate);
-      }
-    }
-
-    if (before.status !== 'done' && savedTask.status === 'done' && savedTask.chainId) {
-      const nextTask = await this.tasksRepository.findOne({
-        where: {
-          chainId: savedTask.chainId,
-          chainOrder: (savedTask.chainOrder ?? 0) + 1,
-        },
-      });
-
-      if (nextTask && nextTask.status === 'blocked') {
-        nextTask.status = 'todo';
-        nextTask.activatedAt = new Date();
-        await this.tasksRepository.save(nextTask);
-
-        if (nextTask.assigneeId) {
-          const nextNotification = this.notificationsRepository.create({
-            userId: nextTask.assigneeId,
-            taskId: nextTask.id,
-            title: 'Siguiente paso activado',
-            message: `Ya puedes iniciar ${nextTask.title}. El paso anterior del flujo fue completado.`,
-            isRead: false,
-          });
-          await this.notificationsRepository.save(nextNotification);
-        }
-      }
-
-      if (!nextTask) {
-        const chainCreatorTask = await this.tasksRepository.findOne({
-          where: {
-            chainId: savedTask.chainId,
-            chainOrder: 1,
-          },
-        });
-
-        if (chainCreatorTask?.createdBy) {
-          const completionNotification = this.notificationsRepository.create({
-            userId: chainCreatorTask.createdBy,
-            taskId: savedTask.id,
-            title: 'Flujo completado',
-            message: `La cadena ${savedTask.chainId.slice(0, 8)} se completo exitosamente.`,
-            isRead: false,
-          });
-          await this.notificationsRepository.save(completionNotification);
-        }
-      }
+    if (stoppedTimerSeconds > 0 || completedNow) {
+      await this.timeExtensionsService.flagOverrunIfNeeded(savedTask.id);
     }
 
     return savedTask;
@@ -992,6 +1101,14 @@ export class TasksService {
           stoppedTimerSeconds,
           transactionalUpdatesRepository,
         );
+        if (reassignedUser) {
+          await this.notifyAssignees(
+            [saved],
+            actor.id,
+            manager.getRepository(NotificationEntity),
+            'reassigned',
+          );
+        }
         const existingUpdate = await transactionalUpdatesRepository.findOne({
           where: {
             taskId: task.id,

@@ -40,7 +40,9 @@ describe('TasksService', () => {
             getRepository: jest.fn((entity) =>
               entity.name === 'TaskEntity'
                 ? tasksRepository
-                : taskUpdatesRepository,
+                : entity.name === 'NotificationEntity'
+                  ? notificationsRepository
+                  : taskUpdatesRepository,
             ),
           }),
         ),
@@ -427,6 +429,192 @@ describe('TasksService', () => {
     });
   });
 
+  describe('assignment notifications', () => {
+    const baseDto = {
+      projectId: 'project-1',
+      activityType: 'edicion' as const,
+      title: 'Editar video',
+      assigneeId: 'worker-1',
+    };
+
+    beforeEach(() => {
+      tasksRepository.create.mockImplementation((input: any) => ({ ...input }));
+      tasksRepository.save.mockImplementation(async (task: any) => ({
+        id: 'task-new',
+        ...task,
+      }));
+    });
+
+    it('tells the assignee when a manager gives them a task', async () => {
+      await service.create(baseDto as any, { id: 'manager-1', role: 'manager' });
+
+      expect(notificationsRepository.save).toHaveBeenCalledTimes(1);
+      const [saved] = notificationsRepository.save.mock.calls[0][0];
+      expect(saved).toMatchObject({
+        userId: 'worker-1',
+        taskId: 'task-new',
+        title: 'Nueva tarea asignada',
+        isRead: false,
+      });
+    });
+
+    it('does not notify when someone assigns the task to themselves', async () => {
+      await service.create(baseDto as any, { id: 'worker-1', role: 'worker' });
+
+      expect(notificationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('creates team tasks in one transaction and notifies every member but the actor', async () => {
+      teamsRepository.findOne.mockResolvedValue({ id: 'team-1' });
+      teamMembersRepository.find.mockResolvedValue([
+        { userId: 'user-1' },
+        { userId: 'user-2' },
+        { userId: 'manager-1' },
+      ]);
+      usersRepository.find.mockResolvedValue([
+        { id: 'user-1' },
+        { id: 'user-2' },
+        { id: 'manager-1' },
+      ]);
+      tasksRepository.save.mockImplementation(async (task: any) => ({
+        id: `task-${task.assigneeId}`,
+        code: 'EDI-001',
+        ...task,
+      }));
+
+      const result = await service.create(
+        { ...baseDto, assigneeId: undefined, teamId: 'team-1' } as any,
+        { id: 'manager-1', role: 'manager' },
+      );
+
+      expect((result as any).createdCount).toBe(3);
+      const recipients = notificationsRepository.save.mock.calls[0][0].map(
+        (notification: any) => notification.userId,
+      );
+      expect(recipients).toEqual(['user-1', 'user-2']);
+    });
+
+    it('does not notify anyone if creating a team task fails midway', async () => {
+      teamsRepository.findOne.mockResolvedValue({ id: 'team-1' });
+      teamMembersRepository.find.mockResolvedValue([
+        { userId: 'user-1' },
+        { userId: 'user-2' },
+      ]);
+      usersRepository.find.mockResolvedValue([{ id: 'user-1' }, { id: 'user-2' }]);
+      tasksRepository.save
+        .mockResolvedValueOnce({ id: 'task-1', assigneeId: 'user-1' })
+        .mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        service.create(
+          { ...baseDto, assigneeId: undefined, teamId: 'team-1' } as any,
+          { id: 'manager-1', role: 'manager' },
+        ),
+      ).rejects.toThrow('db down');
+      expect(notificationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('turns a duplicated manual code into a clear 409 instead of a 500', async () => {
+      const { QueryFailedError } = jest.requireActual('typeorm');
+      const duplicate = Object.assign(
+        new QueryFailedError('INSERT', [], new Error('duplicate')),
+        { code: '23505', constraint: 'tasks_project_id_code_key' },
+      );
+      tasksRepository.save.mockRejectedValue(duplicate);
+
+      await expect(
+        service.create(
+          { ...baseDto, code: 'EDI-001' } as any,
+          { id: 'manager-1', role: 'manager' },
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('tells the new assignee when a task is reassigned', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-1',
+        code: 'EDI-001',
+        title: 'Editar',
+        projectId: 'project-1',
+        assigneeId: 'worker-1',
+        status: 'todo',
+      });
+      tasksRepository.save.mockImplementation(async (task: any) => task);
+
+      await service.update(
+        'task-1',
+        { assigneeId: 'worker-2' },
+        { id: 'manager-1', role: 'manager' },
+      );
+
+      const [saved] = notificationsRepository.save.mock.calls[0][0];
+      expect(saved).toMatchObject({
+        userId: 'worker-2',
+        title: 'Tarea reasignada',
+      });
+    });
+  });
+
+  describe('closing a task with a handoff', () => {
+    const doingTask = () => ({
+      id: 'task-1',
+      code: 'EDI-001',
+      title: 'Editar',
+      projectId: 'project-1',
+      assigneeId: 'worker-1',
+      activityType: 'edicion',
+      priority: 'medium',
+      estimatedHours: '2',
+      status: 'doing',
+      activeSeconds: 0,
+      timerStartedAt: null,
+    });
+
+    beforeEach(() => {
+      tasksRepository.save.mockImplementation(async (task: any) => ({
+        id: task.id ?? 'task-next',
+        ...task,
+      }));
+      tasksRepository.create.mockImplementation((input: any) => ({ ...input }));
+    });
+
+    it('runs the whole close-and-handoff inside one transaction', async () => {
+      tasksRepository.findOne.mockResolvedValue(doingTask());
+
+      await service.update(
+        'task-1',
+        { status: 'done', handoffToUserId: 'worker-2' },
+        { id: 'worker-1', role: 'worker' },
+      );
+
+      expect(tasksRepository.manager.transaction).toHaveBeenCalled();
+      const titles = notificationsRepository.save.mock.calls.map(
+        (call: any[]) => call[0].title,
+      );
+      expect(titles).toContain('Nueva tarea subsecuente asignada');
+    });
+
+    it('keeps the hours already logged today when it appends the handoff note', async () => {
+      tasksRepository.findOne.mockResolvedValue(doingTask());
+      const existing = {
+        workedHours: '2.5',
+        progressPercent: '60',
+        comments: 'Avance',
+      };
+      taskUpdatesRepository.findOne.mockResolvedValue(existing);
+
+      await service.update(
+        'task-1',
+        { status: 'done', handoffToUserId: 'worker-2', handoffMessage: 'Revisa audio' },
+        { id: 'worker-1', role: 'worker' },
+      );
+
+      expect(existing.workedHours).toBe('2.5');
+      expect(existing.progressPercent).toBe('100');
+      expect(existing.comments).toContain('Revisa audio');
+    });
+  });
+
   it('does not touch the ledger when no timer was running', async () => {
     tasksRepository.findOne.mockResolvedValue({
       id: 'task-1',
@@ -621,6 +809,6 @@ describe('TasksService', () => {
 
     expect(result.tasks[0].parentTaskId).toBeUndefined();
     expect(result.tasks[1].parentTaskId).toBe('task-1');
-    expect(tasksRepository.manager.transaction).toHaveBeenCalledTimes(1);
+    expect(tasksRepository.manager.transaction).toHaveBeenCalled();
   });
 });
