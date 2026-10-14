@@ -40,3 +40,51 @@ export const formatActiveDuration = (task: TimedTask, nowMs: number) => {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   return `${hours}h ${minutes}m`;
 };
+
+/** A timer left running this long is probably forgotten (e.g. overnight). */
+export const STALE_TIMER_HOURS = 10;
+
+export const isTimerStale = (
+  task: Pick<TaskRow, "timerStartedAt">,
+  nowMs: number,
+  hours = STALE_TIMER_HOURS,
+) =>
+  !!task.timerStartedAt &&
+  nowMs - new Date(task.timerStartedAt).getTime() > hours * 3_600_000;
+
+/** Time used against the authorized hours, for a progress bar. */
+export const timerProgress = (
+  task: TimedTask & Pick<TaskRow, "estimatedHours" | "authorizedExtraHours">,
+  nowMs: number,
+) => {
+  const limitSeconds = authorizedHoursFor(task) * 3600;
+  const usedSeconds = totalTimerSeconds(task, nowMs);
+  return {
+    usedSeconds,
+    limitSeconds,
+    percent: limitSeconds > 0 ? Math.min(100, Math.round((usedSeconds / limitSeconds) * 100)) : 0,
+    over: limitSeconds > 0 && usedSeconds > limitSeconds,
+  };
+};
+
+/** The person's own tasks that have a timer going or saved: running ones first. */
+export const pickMyActiveTasks = <T extends Pick<TaskRow, "assigneeId" | "status" | "title">>(
+  tasks: T[],
+  userId: string,
+) =>
+  tasks
+    .filter((task) => !!userId && task.assigneeId === userId && (task.status === "doing" || task.status === "paused"))
+    .sort(
+      (a, b) =>
+        Number(b.status === "doing") - Number(a.status === "doing") ||
+        a.title.localeCompare(b.title, "es"),
+    );
+
+export const summarizeActiveTasks = (
+  tasks: Array<TimedTask & Pick<TaskRow, "status">>,
+  nowMs: number,
+) => ({
+  running: tasks.filter((task) => task.status === "doing").length,
+  paused: tasks.filter((task) => task.status === "paused").length,
+  totalSeconds: tasks.reduce((sum, task) => sum + totalTimerSeconds(task, nowMs), 0),
+});

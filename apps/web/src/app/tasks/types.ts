@@ -26,6 +26,8 @@ export type TaskRow = {
   activeSeconds?: number;
   timerStartedAt?: string | null;
   completionOutcome?: "completed" | "not_completed" | null;
+  /** Only in the response to starting a task: the person's other tasks paused to start this one. */
+  pausedTasks?: TaskRow[];
 };
 
 export type TaskEditForm = {

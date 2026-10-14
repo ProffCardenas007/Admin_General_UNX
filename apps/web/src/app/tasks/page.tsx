@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import ActiveTasksPanel from "./ActiveTasksPanel";
 import ConsequenceModal from "./ConsequenceModal";
 import EditTaskModal from "./EditTaskModal";
 import ExtensionRequestModal from "./ExtensionRequestModal";
@@ -28,7 +29,7 @@ import {
   pickPriorityTasks,
   toDateKey,
 } from "./taskLogic";
-import { formatActiveDuration as formatDuration } from "./timer";
+import { formatActiveDuration as formatDuration, pickMyActiveTasks } from "./timer";
 import type { HalfMonth, ProjectRow, TaskDraft, TaskRow, TaskUpdateRow, UserRow } from "./types";
 
 export default function TasksPage() {
@@ -494,6 +495,8 @@ export default function TasksPage() {
     [filteredTasks, focusMode, todayIso],
   );
 
+  const myActiveTasks = useMemo(() => pickMyActiveTasks(tasks, currentUserId), [tasks, currentUserId]);
+
   const taskDueSemaforo = (task: TaskRow) => dueSemaforo(task, todayIso);
 
   const assigneeLabel = (assigneeId?: string) => {
@@ -653,10 +656,10 @@ export default function TasksPage() {
   const onTimerAction = async (
     taskId: string,
     targetStatus: "doing" | "paused" | "done",
-  ) => {
+  ): Promise<boolean> => {
     const task = tasks.find((item) => item.id === taskId);
     if (!task) {
-      return;
+      return false;
     }
 
     setInfo("");
@@ -664,46 +667,31 @@ export default function TasksPage() {
     setSavingTaskId(taskId);
 
     try {
-      if (targetStatus === "doing") {
-        const othersToPause = Object.keys(floatingTimers).filter((id) => {
-          if (id === taskId) {
-            return false;
-          }
-          const otherTask = tasks.find((item) => item.id === id);
-          return otherTask?.status === "doing";
-        });
-
-        for (const otherId of othersToPause) {
-          try {
-            const pausedResponse = await axios.patch(
-              `${API_URL}/tasks/${otherId}`,
-              { status: "paused" },
-              { headers: authHeaders() },
-            );
-            const pausedTask = pausedResponse.data as TaskRow;
-            setTasks((current) =>
-              current.map((item) => (item.id === otherId ? { ...item, ...pausedTask } : item)),
-            );
-            setTaskDrafts((current) => ({
-              ...current,
-              [otherId]: { ...current[otherId], status: pausedTask.status },
-            }));
-          } catch {
-            // best-effort: don't block starting the new task if pausing another one fails
-          }
-        }
-      }
-
       const updated = await axios.patch(
         `${API_URL}/tasks/${taskId}`,
         { status: targetStatus },
         { headers: authHeaders() },
       );
 
-      const updatedTask = updated.data as TaskRow;
+      const { pausedTasks, ...startedTask } = updated.data as TaskRow;
+      const updatedTask = startedTask as TaskRow;
       setTasks((current) =>
-        current.map((item) => (item.id === taskId ? { ...item, ...updatedTask } : item)),
+        current.map((item) => {
+          if (item.id === taskId) {
+            return { ...item, ...updatedTask };
+          }
+          const paused = pausedTasks?.find((candidate) => candidate.id === item.id);
+          return paused ? { ...item, ...paused } : item;
+        }),
       );
+      if (pausedTasks && pausedTasks.length > 0) {
+        setTaskDrafts((current) => ({
+          ...current,
+          ...Object.fromEntries(
+            pausedTasks.map((paused) => [paused.id, { ...current[paused.id], status: paused.status }]),
+          ),
+        }));
+      }
       setTaskDrafts((current) => ({
         ...current,
         [taskId]: {
@@ -756,14 +744,41 @@ export default function TasksPage() {
 
       const actionLabel =
         targetStatus === "doing" ? "iniciada" : targetStatus === "paused" ? "pausada" : "finalizada";
-      setInfo(`Tarea ${task.code} ${actionLabel}.`);
+      const pausedNote =
+        pausedTasks && pausedTasks.length > 0
+          ? ` Se pausó ${pausedTasks.map((paused) => paused.code).join(", ")} y su tiempo quedó guardado.`
+          : "";
+      setInfo(`Tarea ${task.code} ${actionLabel}.${pausedNote}`);
+      return true;
     } catch (caughtError) {
       setError(
         extractErrorMessage(caughtError, "No se pudo actualizar el estado de la tarea."),
       );
+      return false;
     } finally {
       setSavingTaskId("");
     }
+  };
+
+  // Closing a running timer must not leave it counting out of sight: pause it
+  // first so the time is saved, and only hide the widget if that worked.
+  const onCloseTimer = async (task: TaskRow) => {
+    if (task.status === "doing") {
+      const paused = await onTimerAction(task.id, "paused");
+      if (!paused) {
+        return;
+      }
+    }
+
+    setFloatingTimers((current) => {
+      if (!current[task.id]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[task.id];
+      return next;
+    });
+    setDismissedFloatingTimerIds((current) => new Set(current).add(task.id));
   };
 
   const formatActiveDuration = (task: TaskRow) => formatDuration(task, nowTick);
@@ -1038,6 +1053,16 @@ export default function TasksPage() {
             </p>
           </div>
         </div>
+
+        <ActiveTasksPanel
+          tasks={myActiveTasks}
+          projectLabel={projectLabel}
+          savingTaskId={savingTaskId}
+          onStart={(taskId) => void onTimerAction(taskId, "doing")}
+          onPause={(taskId) => void onTimerAction(taskId, "paused")}
+          onFinish={(taskId) => void onTimerAction(taskId, "done")}
+          onRequestExtension={setExtensionTask}
+        />
 
         <div className="mt-5 rounded-2xl border border-[var(--line)] bg-gradient-to-r from-white via-[var(--background)] to-white p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -2043,17 +2068,7 @@ export default function TasksPage() {
               },
             }))
           }
-          onClose={() => {
-            setFloatingTimers((current) => {
-              if (!current[floatingTask.id]) {
-                return current;
-              }
-              const next = { ...current };
-              delete next[floatingTask.id];
-              return next;
-            });
-            setDismissedFloatingTimerIds((current) => new Set(current).add(floatingTask.id));
-          }}
+          onClose={() => void onCloseTimer(floatingTask)}
           onStart={() => void onTimerAction(floatingTask.id, "doing")}
           onPause={() => void onTimerAction(floatingTask.id, "paused")}
           onFinish={() => void onTimerAction(floatingTask.id, "done")}
