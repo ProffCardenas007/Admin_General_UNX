@@ -7,8 +7,10 @@ import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import EditTaskModal from "./EditTaskModal";
 import ExtensionRequestModal from "./ExtensionRequestModal";
 import FloatingTimerWidget from "./FloatingTimerWidget";
+import NotCompletedModal from "./NotCompletedModal";
 import { UNASSIGNED_SENTINEL, activityTypeLabels, priorityLabels, roleLabels, statusLabels } from "./labels";
 import {
   buildDisplayTasks,
@@ -26,7 +28,7 @@ import {
   toDateKey,
 } from "./taskLogic";
 import { formatActiveDuration as formatDuration } from "./timer";
-import type { HalfMonth, ProjectRow, TaskEditForm, TaskRow, TaskUpdateRow, UserRow } from "./types";
+import type { HalfMonth, ProjectRow, TaskRow, TaskUpdateRow, UserRow } from "./types";
 
 export default function TasksPage() {
   const router = useRouter();
@@ -48,21 +50,7 @@ export default function TasksPage() {
   const [openedDescriptionTaskId, setOpenedDescriptionTaskId] = useState("");
   const [openedConsequenceTaskId, setOpenedConsequenceTaskId] = useState("");
   const [editingTaskId, setEditingTaskId] = useState("");
-  const [taskEditForm, setTaskEditForm] = useState<TaskEditForm>({
-    projectId: "",
-    title: "",
-    description: "",
-    activityType: "creacion",
-    assigneeId: "",
-    status: "todo",
-    priority: "medium",
-    dueDate: "",
-    estimatedHours: "",
-  });
   const [openedNotCompletedTaskId, setOpenedNotCompletedTaskId] = useState("");
-  const [notCompletedReason, setNotCompletedReason] = useState("");
-  const [notCompletedReassignToUserId, setNotCompletedReassignToUserId] = useState("");
-  const [notCompletedError, setNotCompletedError] = useState("");
   const [centerNoticeMessage, setCenterNoticeMessage] = useState("");
   const showCodeAndAssigneeColumns = role !== "worker";
   const isWorker = role === "worker";
@@ -547,82 +535,29 @@ export default function TasksPage() {
   };
 
   const onOpenTaskEdit = (task: TaskRow) => {
-    setTaskEditForm({
-      projectId: task.projectId,
-      title: task.title,
-      description: task.description ?? "",
-      activityType: task.activityType,
-      assigneeId: task.assigneeId ?? "",
-      status: task.status,
-      priority: task.priority,
-      dueDate: task.dueDate ?? "",
-      estimatedHours: task.estimatedHours ?? "",
-    });
     setEditingTaskId(task.id);
     setError("");
     setInfo("");
   };
 
-  const onSaveTaskEdit = async () => {
-    const task = tasks.find((item) => item.id === editingTaskId);
-
-    if (!task || !canManagePlanning) {
-      return;
-    }
-
-    if (!taskEditForm.title.trim()) {
-      setError("El título de la tarea es obligatorio.");
-      return;
-    }
-
-    setInfo("");
-    setError("");
-    setSavingTaskId(task.id);
-
-    try {
-      const updated = await axios.patch(
-        `${API_URL}/tasks/${task.id}`,
-        {
-          projectId: role === "manager" ? taskEditForm.projectId : undefined,
-          title: taskEditForm.title.trim(),
-          description: taskEditForm.description,
-          activityType: taskEditForm.activityType,
-          assigneeId: taskEditForm.assigneeId || null,
-          status: taskEditForm.status,
-          priority: taskEditForm.priority,
-          dueDate: taskEditForm.dueDate || null,
-          estimatedHours: taskEditForm.estimatedHours
-            ? Number(taskEditForm.estimatedHours)
-            : 0,
-        },
-        { headers: authHeaders() },
-      );
-
-      const updatedTask = updated.data as TaskRow;
-      setTasks((current) =>
-        current.map((item) =>
-          item.id === task.id ? { ...item, ...updatedTask } : item,
-        ),
-      );
-      setTaskDrafts((current) => ({
-        ...current,
-        [task.id]: {
-          ...current[task.id],
-          status: updatedTask.status,
-          priority: updatedTask.priority,
-          assigneeId: updatedTask.assigneeId ?? "",
-          description: updatedTask.description ?? "",
-          dueDate: updatedTask.dueDate ?? "",
-          estimatedHours: updatedTask.estimatedHours ?? "",
-        },
-      }));
-      setEditingTaskId("");
-      setInfo(`Tarea ${task.code} actualizada.`);
-    } catch (caughtError) {
-      setError(extractErrorMessage(caughtError, "No se pudo actualizar la tarea."));
-    } finally {
-      setSavingTaskId("");
-    }
+  const onTaskEdited = (updatedTask: TaskRow) => {
+    setTasks((current) =>
+      current.map((item) => (item.id === updatedTask.id ? { ...item, ...updatedTask } : item)),
+    );
+    setTaskDrafts((current) => ({
+      ...current,
+      [updatedTask.id]: {
+        ...current[updatedTask.id],
+        status: updatedTask.status,
+        priority: updatedTask.priority,
+        assigneeId: updatedTask.assigneeId ?? "",
+        description: updatedTask.description ?? "",
+        dueDate: updatedTask.dueDate ?? "",
+        estimatedHours: updatedTask.estimatedHours ?? "",
+      },
+    }));
+    setEditingTaskId("");
+    setInfo(`Tarea ${updatedTask.code} actualizada.`);
   };
 
   const onSaveTaskQuickEdit = async (taskId: string) => {
@@ -968,74 +903,40 @@ export default function TasksPage() {
 
   const closeNotCompletedModal = () => {
     setOpenedNotCompletedTaskId("");
-    setNotCompletedReason("");
-    setNotCompletedReassignToUserId("");
-    setNotCompletedError("");
   };
 
-  const onMarkTaskNotCompleted = async () => {
-    const task = tasks.find((item) => item.id === openedNotCompletedTaskId);
-    const reason = notCompletedReason.trim();
-    if (!task || !reason) {
-      setNotCompletedError("Escribe el motivo por el que la tarea no fue completada.");
-      return;
-    }
+  const onNotCompletedDone = (updatedTask: TaskRow, wasReassigned: boolean) => {
+    setTasks((current) =>
+      current.map((item) => (item.id === updatedTask.id ? { ...item, ...updatedTask } : item)),
+    );
+    setTaskDrafts((current) => ({
+      ...current,
+      [updatedTask.id]: {
+        ...current[updatedTask.id],
+        status: updatedTask.status,
+        assigneeId: updatedTask.assigneeId ?? "",
+      },
+    }));
+    setFloatingTimers((current) => {
+      if (!current[updatedTask.id]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[updatedTask.id];
+      return next;
+    });
+    setHistoryByTask((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([key]) => !key.startsWith(`${updatedTask.id}|`)),
+      ),
+    );
 
-    setInfo("");
-    setError("");
-    setNotCompletedError("");
-    setSavingTaskId(task.id);
-
-    try {
-      const response = await axios.patch(
-        `${API_URL}/tasks/${task.id}/not-completed`,
-        {
-          reason,
-          reassignToUserId: notCompletedReassignToUserId || undefined,
-        },
-        { headers: authHeaders() },
-      );
-      const updatedTask = response.data as TaskRow;
-
-      setTasks((current) =>
-        current.map((item) => (item.id === task.id ? { ...item, ...updatedTask } : item)),
-      );
-      setTaskDrafts((current) => ({
-        ...current,
-        [task.id]: {
-          ...current[task.id],
-          status: updatedTask.status,
-          assigneeId: updatedTask.assigneeId ?? "",
-        },
-      }));
-      setFloatingTimers((current) => {
-        if (!current[task.id]) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[task.id];
-        return next;
-      });
-      setHistoryByTask((current) =>
-        Object.fromEntries(
-          Object.entries(current).filter(([key]) => !key.startsWith(`${task.id}|`)),
-        ),
-      );
-
-      const wasReassigned = Boolean(notCompletedReassignToUserId);
-      closeNotCompletedModal();
-      setInfo(
-        wasReassigned
-          ? `Incumplimiento registrado y tarea ${task.code} reasignada.`
-          : `Tarea ${task.code} cerrada como no completada.`,
-      );
-    } catch (caughtError) {
-      setNotCompletedError(
-        extractErrorMessage(caughtError, "No se pudo registrar la tarea no completada."),
-      );
-    } finally {
-      setSavingTaskId("");
-    }
+    closeNotCompletedModal();
+    setInfo(
+      wasReassigned
+        ? `Incumplimiento registrado y tarea ${updatedTask.code} reasignada.`
+        : `Tarea ${updatedTask.code} cerrada como no completada.`,
+    );
   };
 
   const floatingTimerEntries = Object.entries(floatingTimers)
@@ -1048,7 +949,7 @@ export default function TasksPage() {
   const canPlanConsequence = role === "manager" || role === "lead" || role === "worker";
   const canMarkNotCompleted = role === "manager" || role === "lead";
   const notCompletedTask = tasks.find((item) => item.id === openedNotCompletedTaskId);
-  const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
+  const editingTask = tasks.find((item) => item.id === editingTaskId);  const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
   const consequenceDraft = openedConsequenceTaskId
     ? taskDrafts[openedConsequenceTaskId]
     : undefined;
@@ -1906,12 +1807,7 @@ export default function TasksPage() {
                             ) : null}
                             {canMarkNotCompleted && task.status !== "done" ? (
                               <button
-                                onClick={() => {
-                                  setOpenedNotCompletedTaskId(task.id);
-                                  setNotCompletedReason("");
-                                  setNotCompletedReassignToUserId("");
-                                  setNotCompletedError("");
-                                }}
+                                onClick={() => setOpenedNotCompletedTaskId(task.id)}
                                 className="ui-btn ui-btn-danger ui-btn-sm"
                               >
                                 Tarea no completada
@@ -2089,246 +1985,28 @@ export default function TasksPage() {
         </div>
       ) : null}
 
-      {editingTaskId && canManagePlanning ? (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 px-4 py-6"
-          onClick={() => setEditingTaskId("")}
-        >
-          <form
-            className="max-h-full w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--line)] bg-white p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-            onSubmit={(event) => {
-              event.preventDefault();
-              void onSaveTaskEdit();
-            }}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  Edición de tarea
-                </p>
-                <h3 className="mt-1 text-lg font-semibold">Modificar tarea</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingTaskId("")}
-                className="ui-btn ui-btn-secondary ui-btn-sm"
-              >
-                Cerrar
-              </button>
-            </div>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <label className="block text-xs text-[var(--ink-muted)] md:col-span-2">
-                Título
-                <input
-                  value={taskEditForm.title}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, title: event.target.value })}
-                  className="ui-control mt-1 block w-full"
-                  autoFocus
-                />
-              </label>
-              {role === "manager" ? (
-                <label className="block text-xs text-[var(--ink-muted)] md:col-span-2">
-                  Proyecto
-                  <select
-                    value={taskEditForm.projectId}
-                    onChange={(event) => setTaskEditForm({ ...taskEditForm, projectId: event.target.value })}
-                    className="ui-control mt-1 block w-full"
-                  >
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {projectLabel(project.id)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <label className="block text-xs text-[var(--ink-muted)]">
-                Actividad
-                <select
-                  value={taskEditForm.activityType}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, activityType: event.target.value as TaskRow["activityType"] })}
-                  className="ui-control mt-1 block w-full"
-                >
-                  {Object.entries(activityTypeLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-[var(--ink-muted)]">
-                Responsable
-                <select
-                  value={taskEditForm.assigneeId}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, assigneeId: event.target.value })}
-                  className="ui-control mt-1 block w-full"
-                >
-                  <option value="">Sin asignar</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName} ({roleLabels[user.role] ?? user.role})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-[var(--ink-muted)]">
-                Estado
-                <select
-                  value={taskEditForm.status}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, status: event.target.value as TaskRow["status"] })}
-                  className="ui-control mt-1 block w-full"
-                >
-                  {Object.entries(statusLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-[var(--ink-muted)]">
-                Prioridad
-                <select
-                  value={taskEditForm.priority}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, priority: event.target.value as TaskRow["priority"] })}
-                  className="ui-control mt-1 block w-full"
-                >
-                  {Object.entries(priorityLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-[var(--ink-muted)]">
-                Fecha fin
-                <input
-                  type="date"
-                  value={taskEditForm.dueDate}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, dueDate: event.target.value })}
-                  className="ui-control mt-1 block w-full"
-                />
-              </label>
-              <label className="block text-xs text-[var(--ink-muted)]">
-                Horas estimadas
-                <input
-                  type="number"
-                  min="0"
-                  step="0.25"
-                  value={taskEditForm.estimatedHours}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, estimatedHours: event.target.value })}
-                  className="ui-control mt-1 block w-full"
-                />
-              </label>
-              <label className="block text-xs text-[var(--ink-muted)] md:col-span-2">
-                Descripción
-                <textarea
-                  rows={4}
-                  value={taskEditForm.description}
-                  onChange={(event) => setTaskEditForm({ ...taskEditForm, description: event.target.value })}
-                  className="ui-control mt-1 block w-full resize-y"
-                />
-              </label>
-            </div>
-
-            <div className="mt-5 flex justify-end gap-3">
-              <button type="button" onClick={() => setEditingTaskId("")} className="ui-btn ui-btn-secondary">
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={savingTaskId === editingTaskId}
-                className="ui-btn ui-btn-primary disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {savingTaskId === editingTaskId ? "Guardando..." : "Guardar cambios"}
-              </button>
-            </div>
-          </form>
-        </div>
+      {editingTask && canManagePlanning ? (
+        <EditTaskModal
+          key={editingTask.id}
+          task={editingTask}
+          role={role}
+          projects={projects}
+          users={users}
+          projectLabel={projectLabel}
+          onClose={() => setEditingTaskId("")}
+          onSaved={onTaskEdited}
+        />
       ) : null}
 
       {canMarkNotCompleted && notCompletedTask ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4"
-          onClick={closeNotCompletedModal}
-        >
-          <form
-            className="w-full max-w-xl rounded-2xl border border-[var(--line)] bg-white p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-            onSubmit={(event) => {
-              event.preventDefault();
-              void onMarkTaskNotCompleted();
-            }}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--danger)]">
-                  Tarea no completada
-                </p>
-                <h3 className="mt-1 text-lg font-semibold">{notCompletedTask.title}</h3>
-                <p className="text-xs text-[var(--ink-muted)]">
-                  Responsable actual: {assigneeLabel(notCompletedTask.assigneeId)}
-                </p>
-              </div>
-              <button type="button" onClick={closeNotCompletedModal} className="ui-btn ui-btn-secondary ui-btn-sm">
-                Cerrar
-              </button>
-            </div>
-
-            <label className="mt-5 block text-sm font-semibold text-[var(--foreground)]">
-              Motivo
-              <textarea
-                value={notCompletedReason}
-                onChange={(event) => setNotCompletedReason(event.target.value)}
-                rows={4}
-                maxLength={1000}
-                className="mt-2 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-normal"
-                placeholder="Describe qué quedó pendiente o por qué no se completó"
-                autoFocus
-              />
-            </label>
-
-            <label className="mt-4 block text-sm font-semibold text-[var(--foreground)]">
-              Reasignar a otra persona (opcional)
-              <select
-                value={notCompletedReassignToUserId}
-                onChange={(event) => setNotCompletedReassignToUserId(event.target.value)}
-                className="mt-2 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-normal"
-              >
-                <option value="">No reasignar: cerrar la tarea</option>
-                {users
-                  .filter((user) => user.id !== notCompletedTask.assigneeId)
-                  .map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName} ({roleLabels[user.role] ?? user.role})
-                    </option>
-                  ))}
-              </select>
-            </label>
-
-            <p className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--ink-muted)]">
-              {notCompletedReassignToUserId
-                ? "Se registrará el incumplimiento del responsable actual y la tarea volverá a Por hacer con el nuevo responsable."
-                : "Se registrará el incumplimiento del responsable actual y la tarea quedará cerrada como No completada."}
-            </p>
-
-            {notCompletedError ? (
-              <p className="mt-3 text-sm text-[var(--danger)]">{notCompletedError}</p>
-            ) : null}
-
-            <div className="mt-5 flex flex-wrap justify-end gap-2">
-              <button type="button" onClick={closeNotCompletedModal} className="ui-btn ui-btn-secondary">
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={savingTaskId === notCompletedTask.id}
-                className="ui-btn ui-btn-danger disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {savingTaskId === notCompletedTask.id
-                  ? "Registrando..."
-                  : notCompletedReassignToUserId
-                    ? "Registrar y reasignar"
-                    : "Registrar y cerrar tarea"}
-              </button>
-            </div>
-          </form>
-        </div>
+        <NotCompletedModal
+          key={notCompletedTask.id}
+          task={notCompletedTask}
+          users={users}
+          assigneeLabel={assigneeLabel(notCompletedTask.assigneeId)}
+          onClose={closeNotCompletedModal}
+          onDone={onNotCompletedDone}
+        />
       ) : null}
 
       {canPlanConsequence && consequenceTask && consequenceDraft ? (
