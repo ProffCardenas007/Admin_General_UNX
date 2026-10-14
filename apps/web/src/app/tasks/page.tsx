@@ -7,326 +7,26 @@ import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
-
-type TaskRow = {
-  id: string;
-  code: string;
-  parentTaskId?: string | null;
-  activityType:
-    | "revision"
-    | "edicion"
-    | "creacion"
-    | "presentaciones"
-    | "grabacion"
-    | "plataforma"
-    | "administrativo";
-  title: string;
-  description?: string;
-  projectId: string;
-  assigneeId?: string;
-  createdBy?: string | null;
-  status: "todo" | "doing" | "paused" | "blocked" | "done";
-  priority: "low" | "medium" | "high" | "urgent";
-  dueDate?: string;
-  estimatedHours: string;
-  /** Extra hours approved by management on top of the original estimate. */
-  authorizedExtraHours?: string;
-  activeSeconds?: number;
-  timerStartedAt?: string | null;
-  completionOutcome?: "completed" | "not_completed" | null;
-};
-
-type TaskEditForm = {
-  projectId: string;
-  title: string;
-  description: string;
-  activityType: TaskRow["activityType"];
-  assigneeId: string;
-  status: TaskRow["status"];
-  priority: TaskRow["priority"];
-  dueDate: string;
-  estimatedHours: string;
-};
-
-type ProjectRow = {
-  id: string;
-  code: string;
-  name: string;
-  scope?: LeadSpecialty | null;
-  status?: "planned" | "active" | "on_hold" | "done" | "cancelled";
-};
-
-type UserRow = {
-  id: string;
-  fullName: string;
-  role: string;
-};
-
-type TaskUpdateRow = {
-  id: string;
-  taskId: string;
-  userId: string;
-  updateDate: string;
-  workedHours: string;
-  timerSeconds?: number;
-  progressPercent: string;
-  blockerReason?: string;
-  comments?: string;
-};
-
-const UNASSIGNED_SENTINEL = "__unassigned__";
-
-const normalizeAcademy = (value: string) => value.trim().toLocaleLowerCase("es");
-
-type HalfMonth = "first" | "second";
-
-const toDateKey = (date: Date) => {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-const getQuincenaRange = (yearMonth: string, half: HalfMonth) => {
-  const match = /^(\d{4})-(\d{2})$/.exec(yearMonth);
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const monthIndex = month - 1;
-
-  if (monthIndex < 0 || monthIndex > 11) {
-    return null;
-  }
-
-  const startDate = new Date(year, monthIndex, half === "first" ? 1 : 16);
-  const endDate = half === "first"
-    ? new Date(year, monthIndex, 15)
-    : new Date(year, monthIndex + 1, 0);
-
-  return {
-    startKey: toDateKey(startDate),
-    endKey: toDateKey(endDate),
-  };
-};
-
-const statusLabels: Record<string, string> = {
-  todo: "por hacer",
-  doing: "en curso",
-  paused: "pausada",
-  blocked: "bloqueada",
-  done: "finalizada",
-};
-
-const priorityLabels: Record<string, string> = {
-  low: "baja",
-  medium: "media",
-  high: "alta",
-  urgent: "urgente",
-};
-
-const activityTypeLabels: Record<string, string> = {
-  revision: "revision",
-  edicion: "edicion",
-  creacion: "creacion",
-  presentaciones: "presentaciones",
-  grabacion: "grabacion",
-  plataforma: "plataforma",
-  administrativo: "administrativo",
-};
-
-const roleLabels: Record<string, string> = {
-  manager: "gerencia",
-  lead: "líder",
-  worker: "colaborador",
-};
-
-const FLOATING_TIMER_WIDTH = 280;
-
-const formatClock = (totalSeconds: number) => {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const seconds = safeSeconds % 60;
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-};
-
-function FloatingTimerWidget({
-  task,
-  position,
-  minimized,
-  saving,
-  nowTick,
-  onDragPointerDown,
-  onDragPointerMove,
-  onDragPointerUp,
-  onToggleMinimize,
-  onClose,
-  onStart,
-  onPause,
-  onFinish,
-  onRequestExtension,
-}: {
-  task: TaskRow;
-  position: { x: number; y: number };
-  minimized: boolean;
-  saving: boolean;
-  nowTick: number;
-  onDragPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onDragPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onDragPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onToggleMinimize: () => void;
-  onClose: () => void;
-  onStart: () => void;
-  onPause: () => void;
-  onFinish: () => void;
-  onRequestExtension: () => void;
-}) {
-  const totalSeconds =
-    (task.activeSeconds ?? 0) +
-    (task.timerStartedAt
-      ? Math.max(0, Math.round((nowTick - new Date(task.timerStartedAt).getTime()) / 1000))
-      : 0);
-  const authorizedHours =
-    Number(task.estimatedHours ?? 0) + Number(task.authorizedExtraHours ?? 0);
-  const estimatedSeconds = authorizedHours * 3600;
-  const isOvertime = estimatedSeconds > 0 && totalSeconds > estimatedSeconds;
-
-  if (minimized) {
-    return (
-      <div
-        style={{ left: position.x, top: position.y }}
-        className={`fixed z-[70] flex items-center gap-2 rounded-full border px-3 py-2 shadow-xl select-none ${
-          isOvertime ? "border-red-300 bg-red-50" : "border-[var(--line)] bg-white"
-        }`}
-      >
-        <div
-          onPointerDown={onDragPointerDown}
-          onPointerMove={onDragPointerMove}
-          onPointerUp={onDragPointerUp}
-          className="cursor-grab text-[var(--ink-muted)] active:cursor-grabbing"
-          title="Mover"
-        >
-          ⠿
-        </div>
-        <button onClick={onToggleMinimize} className="flex items-center gap-2">
-          <span
-            className={`font-mono text-sm font-semibold ${
-              isOvertime ? "text-red-700" : "text-[var(--foreground)]"
-            }`}
-          >
-            {formatClock(totalSeconds)}
-          </span>
-          <span className="max-w-[120px] truncate text-xs text-[var(--ink-muted)]">{task.title}</span>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{ left: position.x, top: position.y, width: FLOATING_TIMER_WIDTH }}
-      className={`fixed z-[70] rounded-2xl border shadow-2xl select-none ${
-        isOvertime ? "border-red-300 bg-red-50" : "border-[var(--line)] bg-white"
-      }`}
-    >
-      <div
-        onPointerDown={onDragPointerDown}
-        onPointerMove={onDragPointerMove}
-        onPointerUp={onDragPointerUp}
-        className="flex cursor-grab items-center justify-between gap-2 rounded-t-2xl border-b border-[var(--line)] px-3 py-2 active:cursor-grabbing"
-      >
-        <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">
-          Cronómetro
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={onToggleMinimize}
-            className="rounded px-1.5 py-0.5 text-xs font-semibold text-[var(--ink-muted)] hover:bg-[var(--background)]"
-            title="Minimizar"
-          >
-            &#8211;
-          </button>
-          <button
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={onClose}
-            className="rounded px-1.5 py-0.5 text-xs font-semibold text-[var(--ink-muted)] hover:bg-[var(--background)]"
-            title="Cerrar"
-          >
-            &#10005;
-          </button>
-        </div>
-      </div>
-
-      <div className="px-4 py-3">
-        <p className="truncate text-sm font-semibold">{task.title}</p>
-        <p className="mt-0.5 text-xs text-[var(--ink-muted)]">{task.code}</p>
-
-        <p
-          className={`mt-3 text-center font-mono text-3xl font-bold ${
-            isOvertime ? "text-red-700" : "text-[var(--foreground)]"
-          }`}
-        >
-          {formatClock(totalSeconds)}
-        </p>
-
-        {isOvertime ? (
-          <p className="mt-1 text-center text-xs font-semibold text-red-700">
-            Superaste el tiempo autorizado ({authorizedHours.toFixed(1)} h)
-          </p>
-        ) : task.status === "paused" ? (
-          <p className="mt-1 text-center text-xs font-semibold text-amber-700">Pausada</p>
-        ) : null}
-
-        {isOvertime ? (
-          <button
-            type="button"
-            onClick={onRequestExtension}
-            className="ui-btn ui-btn-secondary ui-btn-sm mt-2 w-full"
-          >
-            Solicitar más horas
-          </button>
-        ) : null}
-
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          {task.status === "todo" || task.status === "paused" ? (
-            <button
-              onClick={onStart}
-              disabled={saving}
-              className="ui-btn ui-btn-primary ui-btn-sm col-span-2 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              Iniciar
-            </button>
-          ) : null}
-          {task.status === "doing" ? (
-            <button
-              onClick={onPause}
-              disabled={saving}
-              className="ui-btn ui-btn-secondary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              Pausar
-            </button>
-          ) : null}
-          {task.status === "doing" || task.status === "paused" ? (
-            <button
-              onClick={onFinish}
-              disabled={saving}
-              className={`ui-btn ui-btn-secondary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70 ${
-                task.status === "paused" ? "col-span-2" : ""
-              }`}
-            >
-              Finalizar
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
+import ExtensionRequestModal from "./ExtensionRequestModal";
+import FloatingTimerWidget from "./FloatingTimerWidget";
+import { UNASSIGNED_SENTINEL, activityTypeLabels, priorityLabels, roleLabels, statusLabels } from "./labels";
+import {
+  buildDisplayTasks,
+  buildWorkerTimeline,
+  computeWorkerKpis,
+  countPeopleWithTasks,
+  dueSemaforo,
+  filterActiveProjects,
+  filterTasks,
+  getQuincenaRange,
+  groupConsequentTasks,
+  listAvailableAcademies,
+  peopleForProject,
+  pickPriorityTasks,
+  toDateKey,
+} from "./taskLogic";
+import { formatActiveDuration as formatDuration } from "./timer";
+import type { HalfMonth, ProjectRow, TaskEditForm, TaskRow, TaskUpdateRow, UserRow } from "./types";
 
 export default function TasksPage() {
   const router = useRouter();
@@ -340,10 +40,6 @@ export default function TasksPage() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [extensionTask, setExtensionTask] = useState<TaskRow | null>(null);
-  const [extensionHours, setExtensionHours] = useState("1");
-  const [extensionReason, setExtensionReason] = useState("");
-  const [extensionSaving, setExtensionSaving] = useState(false);
-  const [extensionError, setExtensionError] = useState("");
   const [savingTaskId, setSavingTaskId] = useState("");
   const [deletingTaskId, setDeletingTaskId] = useState("");
   const [loadingHistoryTaskId, setLoadingHistoryTaskId] = useState("");
@@ -731,178 +427,53 @@ export default function TasksPage() {
     }
   };
 
-  const filteredTasks = useMemo(() => {
-    const result = tasks.filter((task) => {
-      const byDoneStatus = showDoneTasks || task.status !== "done";
-
-      if (canManagePlanning) {
-        const project = projects.find((item) => item.id === task.projectId);
-        const bySpecialty = selectedSpecialty.length === 0 || project?.scope === selectedSpecialty;
-        const byAcademy =
-          selectedAcademy.length === 0 ||
-          (!!project && normalizeAcademy(project.code) === selectedAcademy);
-        const byProject = selectedProjectId.length === 0 || task.projectId === selectedProjectId;
-        const byAssignee =
-          selectedAssigneeId.length === 0 ||
-          (selectedAssigneeId === UNASSIGNED_SENTINEL
-            ? !task.assigneeId
-            : task.assigneeId === selectedAssigneeId);
-        const byActivityQuincena =
-          selectedAssigneeId.length === 0 ||
-          showAllActivityQuincenas ||
-          (!!activityQuincenaRange &&
-            !!task.dueDate &&
-            task.dueDate >= activityQuincenaRange.startKey &&
-            task.dueDate <= activityQuincenaRange.endKey);
-
-        return bySpecialty && byAcademy && byProject && byAssignee && byActivityQuincena && byDoneStatus;
-      }
-
-      const bySearch =
-        search.trim().length === 0 ||
-        task.code.toLowerCase().includes(search.toLowerCase()) ||
-        task.title.toLowerCase().includes(search.toLowerCase());
-
-      return bySearch && byDoneStatus;
-    });
-
-    return result.sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
-  }, [
-    tasks,
-    search,
-    canManagePlanning,
-    projects,
-    selectedSpecialty,
-    selectedAcademy,
-    selectedProjectId,
-    selectedAssigneeId,
-    activityQuincenaRange,
-    showAllActivityQuincenas,
-    showDoneTasks,
-  ]);
+  const filteredTasks = useMemo(
+    () =>
+      filterTasks(tasks, projects, {
+        showDoneTasks,
+        canManagePlanning,
+        search,
+        selectedSpecialty,
+        selectedAcademy,
+        selectedProjectId,
+        selectedAssigneeId,
+        showAllActivityQuincenas,
+        activityRange: activityQuincenaRange,
+      }),
+    [
+      tasks,
+      search,
+      canManagePlanning,
+      projects,
+      selectedSpecialty,
+      selectedAcademy,
+      selectedProjectId,
+      selectedAssigneeId,
+      activityQuincenaRange,
+      showAllActivityQuincenas,
+      showDoneTasks,
+    ],
+  );
 
   const availableAcademies = useMemo(
-    () => {
-      const academyLabels = new Map<string, string>();
-      projects
-        .filter(
-          (project) =>
-            project.status === "active" &&
-            selectedSpecialty.length > 0 &&
-            project.scope === selectedSpecialty,
-        )
-        .forEach((project) => {
-          const label = project.code.trim();
-          const key = normalizeAcademy(label);
-          const currentLabel = academyLabels.get(key);
-          if (!currentLabel || (currentLabel === currentLabel.toUpperCase() && label !== label.toUpperCase())) {
-            academyLabels.set(key, label);
-          }
-        });
-
-      return [...academyLabels.entries()]
-        .map(([key, label]) => ({ key, label }))
-        .sort((left, right) => left.label.localeCompare(right.label, "es"));
-    },
+    () => listAvailableAcademies(projects, selectedSpecialty),
     [projects, selectedSpecialty],
   );
 
   const activeProjects = useMemo(
-    () =>
-      projects.filter(
-        (project) =>
-          project.status === "active" &&
-          (selectedSpecialty.length === 0 || project.scope === selectedSpecialty) &&
-          (selectedAcademy.length === 0 || normalizeAcademy(project.code) === selectedAcademy) &&
-          (selectedAssigneeId.length === 0 ||
-            tasks.some(
-              (task) =>
-                task.projectId === project.id &&
-                (selectedAssigneeId === UNASSIGNED_SENTINEL
-                  ? !task.assigneeId
-                  : task.assigneeId === selectedAssigneeId),
-            )),
-      ),
+    () => filterActiveProjects(projects, tasks, { selectedSpecialty, selectedAcademy, selectedAssigneeId }),
     [projects, tasks, selectedSpecialty, selectedAcademy, selectedAssigneeId],
   );
 
-  const peopleForSelectedProject = useMemo(() => {
-    if (!selectedProjectId) {
-      return [];
-    }
+  const peopleForSelectedProject = useMemo(
+    () => peopleForProject(tasks, users, selectedProjectId),
+    [tasks, users, selectedProjectId],
+  );
 
-    const counts = new Map<string, number>();
-    let unassignedCount = 0;
-
-    tasks.forEach((task) => {
-      if (task.projectId !== selectedProjectId) {
-        return;
-      }
-      if (!task.assigneeId) {
-        unassignedCount += 1;
-        return;
-      }
-      counts.set(task.assigneeId, (counts.get(task.assigneeId) ?? 0) + 1);
-    });
-
-    const people = [...counts.entries()]
-      .map(([userId, count]) => {
-        const user = users.find((item) => item.id === userId);
-        return {
-          id: userId,
-          count,
-          label: user ? `${user.fullName} (${roleLabels[user.role] ?? user.role})` : userId.slice(0, 8),
-        };
-      })
-      .sort((a, b) => b.count - a.count);
-
-    if (unassignedCount > 0) {
-      people.push({ id: UNASSIGNED_SENTINEL, count: unassignedCount, label: "Sin asignar" });
-    }
-
-    return people;
-  }, [tasks, users, selectedProjectId]);
-
-  const peopleWithTaskCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    let unassignedCount = 0;
-
-    tasks.forEach((task) => {
-      const project = projects.find((item) => item.id === task.projectId);
-      if (selectedSpecialty.length > 0 && project?.scope !== selectedSpecialty) {
-        return;
-      }
-      if (
-        selectedAcademy.length > 0 &&
-        (!project || normalizeAcademy(project.code) !== selectedAcademy)
-      ) {
-        return;
-      }
-
-      if (!task.assigneeId) {
-        unassignedCount += 1;
-        return;
-      }
-      counts.set(task.assigneeId, (counts.get(task.assigneeId) ?? 0) + 1);
-    });
-
-    const people = [...counts.entries()]
-      .map(([userId, count]) => {
-        const user = users.find((item) => item.id === userId);
-        return {
-          id: userId,
-          count,
-          label: user ? `${user.fullName} (${roleLabels[user.role] ?? user.role})` : userId.slice(0, 8),
-        };
-      })
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "es"));
-
-    if (unassignedCount > 0) {
-      people.push({ id: UNASSIGNED_SENTINEL, count: unassignedCount, label: "Sin asignar" });
-    }
-
-    return people;
-  }, [tasks, projects, users, selectedSpecialty, selectedAcademy]);
+  const peopleWithTaskCounts = useMemo(
+    () => countPeopleWithTasks(tasks, projects, users, { selectedSpecialty, selectedAcademy }),
+    [tasks, projects, users, selectedSpecialty, selectedAcademy],
+  );
 
   const projectById = useMemo(
     () => Object.fromEntries(projects.map((project) => [project.id, project])),
@@ -914,40 +485,9 @@ export default function TasksPage() {
     [tasks],
   );
 
-  const consequentTasksByParent = useMemo(() => {
-    return tasks.reduce<Record<string, TaskRow[]>>((accumulator, task) => {
-      if (!task.parentTaskId) {
-        return accumulator;
-      }
+  const consequentTasksByParent = useMemo(() => groupConsequentTasks(tasks), [tasks]);
 
-      if (!accumulator[task.parentTaskId]) {
-        accumulator[task.parentTaskId] = [];
-      }
-
-      accumulator[task.parentTaskId].push(task);
-      accumulator[task.parentTaskId].sort((left, right) => {
-        const leftDate = left.dueDate ?? "9999-12-31";
-        const rightDate = right.dueDate ?? "9999-12-31";
-        return leftDate.localeCompare(rightDate) || left.code.localeCompare(right.code);
-      });
-      return accumulator;
-    }, {});
-  }, [tasks]);
-
-  const todayIso = useMemo(() => {
-    const now = new Date();
-    const month = `${now.getMonth() + 1}`.padStart(2, "0");
-    const day = `${now.getDate()}`.padStart(2, "0");
-    return `${now.getFullYear()}-${month}-${day}`;
-  }, []);
-
-  const tomorrowIso = useMemo(() => {
-    const todayDate = new Date(`${todayIso}T00:00:00`);
-    todayDate.setDate(todayDate.getDate() + 1);
-    const month = `${todayDate.getMonth() + 1}`.padStart(2, "0");
-    const day = `${todayDate.getDate()}`.padStart(2, "0");
-    return `${todayDate.getFullYear()}-${month}-${day}`;
-  }, [todayIso]);
+  const todayIso = useMemo(() => toDateKey(new Date()), []);
 
   const workerDisplayName = useMemo(() => {
     if (!email) {
@@ -966,155 +506,24 @@ export default function TasksPage() {
     [],
   );
 
-  const getUrgencyScore = (task: TaskRow) => {
-    if (task.status === "done") {
-      return -1000;
-    }
-    if (task.status === "blocked") {
-      return 500;
-    }
-    if (!task.dueDate) {
-      return task.priority === "urgent" ? 320 : 150;
-    }
+  const workerKpis = useMemo(() => computeWorkerKpis(filteredTasks, todayIso), [filteredTasks, todayIso]);
 
-    const dueDate = new Date(`${task.dueDate}T23:59:59`);
-    const todayDate = new Date(`${todayIso}T00:00:00`);
-    const daysLeft = Math.ceil((dueDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+  const workerPriorityTasks = useMemo(
+    () => pickPriorityTasks(filteredTasks, todayIso),
+    [filteredTasks, todayIso],
+  );
 
-    if (daysLeft < 0) {
-      return 450 + Math.abs(daysLeft);
-    }
-    if (daysLeft === 0) {
-      return 420;
-    }
-    if (daysLeft <= 2) {
-      return 360 - daysLeft * 10;
-    }
-    return 220 - daysLeft;
-  };
+  const workerTimeline = useMemo(
+    () => buildWorkerTimeline(filteredTasks, todayIso),
+    [filteredTasks, todayIso],
+  );
 
-  const workerKpis = useMemo(() => {
-    const total = filteredTasks.length;
-    const done = filteredTasks.filter(
-      (task) => task.status === "done" && task.completionOutcome !== "not_completed",
-    ).length;
-    const doing = filteredTasks.filter((task) => task.status === "doing").length;
-    const blocked = filteredTasks.filter((task) => task.status === "blocked").length;
-    const dueToday = filteredTasks.filter((task) => task.status !== "done" && task.dueDate === todayIso).length;
-    const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+  const displayTasks = useMemo(
+    () => buildDisplayTasks(filteredTasks, focusMode, todayIso),
+    [filteredTasks, focusMode, todayIso],
+  );
 
-    return {
-      total,
-      done,
-      doing,
-      blocked,
-      dueToday,
-      progress,
-      active: total - done,
-    };
-  }, [filteredTasks, todayIso]);
-
-  const workerPriorityTasks = useMemo(() => {
-    return filteredTasks
-      .filter((task) => task.status !== "done")
-      .slice()
-      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a))
-      .slice(0, 4);
-  }, [filteredTasks, todayIso]);
-
-  const workerTimeline = useMemo(() => {
-    const active = filteredTasks
-      .filter((task) => task.status !== "done" && !!task.dueDate)
-      .slice();
-
-    const overdue = active
-      .filter((task) => (task.dueDate ?? "") < todayIso)
-      .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
-
-    const today = active
-      .filter((task) => task.dueDate === todayIso)
-      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a));
-
-    const tomorrow = active
-      .filter((task) => task.dueDate === tomorrowIso)
-      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a));
-
-    return {
-      overdue,
-      today,
-      tomorrow,
-    };
-  }, [filteredTasks, todayIso, tomorrowIso]);
-
-  const displayTasks = useMemo(() => {
-    const base = focusMode
-      ? filteredTasks.filter((task) => task.status !== "done")
-      : filteredTasks;
-
-    return base
-      .slice()
-      .sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a));
-  }, [filteredTasks, focusMode, todayIso]);
-
-  const taskDueSemaforo = (task: TaskRow) => {
-    if (task.status === "done") {
-      if (task.completionOutcome === "not_completed") {
-        return {
-          label: "No completada",
-          dotClass: "bg-red-500",
-          textClass: "text-red-600",
-        };
-      }
-      return {
-        label: "Finalizada",
-        dotClass: "bg-emerald-500",
-        textClass: "text-emerald-600",
-      };
-    }
-
-    if (!task.dueDate) {
-      return {
-        label: "Sin fecha",
-        dotClass: "bg-slate-400",
-        textClass: "text-slate-600",
-      };
-    }
-
-    const today = new Date();
-    const dueDate = new Date(`${task.dueDate}T23:59:59`);
-    const dayMs = 1000 * 60 * 60 * 24;
-    const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / dayMs);
-
-    if (daysLeft < 0) {
-      return {
-        label: `Atrasada (${Math.abs(daysLeft)}d)`,
-        dotClass: "bg-red-500",
-        textClass: "text-red-600",
-      };
-    }
-
-    if (daysLeft <= 2) {
-      return {
-        label: `Crítica (${daysLeft}d)`,
-        dotClass: "bg-red-500",
-        textClass: "text-red-600",
-      };
-    }
-
-    if (daysLeft <= 5) {
-      return {
-        label: `Atención (${daysLeft}d)`,
-        dotClass: "bg-amber-500",
-        textClass: "text-amber-600",
-      };
-    }
-
-    return {
-      label: `En tiempo (${daysLeft}d)`,
-      dotClass: "bg-emerald-500",
-      textClass: "text-emerald-600",
-    };
-  };
+  const taskDueSemaforo = (task: TaskRow) => dueSemaforo(task, todayIso);
 
   const assigneeLabel = (assigneeId?: string) => {
     if (!assigneeId) {
@@ -1439,16 +848,7 @@ export default function TasksPage() {
     }
   };
 
-  const formatActiveDuration = (task: TaskRow) => {
-    const baseSeconds = task.activeSeconds ?? 0;
-    const liveSeconds = task.timerStartedAt
-      ? Math.max(0, Math.round((nowTick - new Date(task.timerStartedAt).getTime()) / 1000))
-      : 0;
-    const totalSeconds = baseSeconds + liveSeconds;
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    return `${hours}h ${minutes}m`;
-  };
+  const formatActiveDuration = (task: TaskRow) => formatDuration(task, nowTick);
 
   const onFloatingTimerDragPointerDown = (taskId: string) => (event: ReactPointerEvent<HTMLDivElement>) => {
     const entry = floatingTimers[taskId];
@@ -1648,51 +1048,6 @@ export default function TasksPage() {
   const canPlanConsequence = role === "manager" || role === "lead" || role === "worker";
   const canMarkNotCompleted = role === "manager" || role === "lead";
   const notCompletedTask = tasks.find((item) => item.id === openedNotCompletedTaskId);
-  const openExtensionRequest = (task: TaskRow) => {
-    setExtensionTask(task);
-    setExtensionHours("1");
-    setExtensionReason("");
-    setExtensionError("");
-  };
-
-  const submitExtensionRequest = async () => {
-    if (!extensionTask) {
-      return;
-    }
-
-    const requestedHours = Number(extensionHours);
-    if (!(requestedHours >= 0.25)) {
-      setExtensionError("Indica al menos 0.25 horas.");
-      return;
-    }
-    if (extensionReason.trim().length < 3) {
-      setExtensionError("Explica brevemente por qué necesitas más tiempo.");
-      return;
-    }
-
-    setExtensionSaving(true);
-    setExtensionError("");
-    try {
-      await axios.post(
-        `${API_URL}/time-extension-requests`,
-        { taskId: extensionTask.id, requestedHours, reason: extensionReason.trim() },
-        { headers: authHeaders() },
-      );
-      setExtensionTask(null);
-      setCenterNoticeMessage("Solicitud enviada a gerencia. Te avisaremos cuando la resuelva.");
-    } catch (requestError) {
-      const backendMessage = axios.isAxiosError(requestError)
-        ? (requestError.response?.data as { message?: string | string[] } | undefined)?.message
-        : undefined;
-      setExtensionError(
-        (Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage) ||
-          "No se pudo enviar la solicitud.",
-      );
-    } finally {
-      setExtensionSaving(false);
-    }
-  };
-
   const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
   const consequenceDraft = openedConsequenceTaskId
     ? taskDrafts[openedConsequenceTaskId]
@@ -3142,63 +2497,14 @@ export default function TasksPage() {
       ) : null}
 
       {extensionTask ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 px-4 py-6">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--line)] bg-white p-5 shadow-2xl">
-            <h3 className="text-lg font-semibold">Solicitar horas adicionales</h3>
-            <p className="mt-1 text-sm text-[var(--ink-muted)]">
-              {extensionTask.code} · {extensionTask.title}
-            </p>
-            <p className="mt-1 text-xs text-[var(--ink-muted)]">
-              Autorizadas hoy:{" "}
-              {(Number(extensionTask.estimatedHours ?? 0) + Number(extensionTask.authorizedExtraHours ?? 0)).toFixed(2)} h.
-              Gerencia decide cuántas aprobar.
-            </p>
-            <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
-              Horas que necesitas
-              <input
-                type="number"
-                min="0.25"
-                step="0.25"
-                value={extensionHours}
-                onChange={(event) => setExtensionHours(event.target.value)}
-                className="ui-control mt-1 w-full"
-              />
-            </label>
-            <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
-              Motivo
-              <textarea
-                value={extensionReason}
-                onChange={(event) => setExtensionReason(event.target.value)}
-                rows={3}
-                placeholder="Ej. El cliente pidió dos rondas más de correcciones"
-                className="ui-control mt-1 w-full"
-              />
-            </label>
-            {extensionError ? (
-              <p className="mt-3 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-sm text-[var(--danger)]">
-                {extensionError}
-              </p>
-            ) : null}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setExtensionTask(null)}
-                disabled={extensionSaving}
-                className="ui-btn ui-btn-secondary ui-btn-sm"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => void submitExtensionRequest()}
-                disabled={extensionSaving}
-                className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {extensionSaving ? "Enviando..." : "Enviar a gerencia"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ExtensionRequestModal
+          task={extensionTask}
+          onClose={() => setExtensionTask(null)}
+          onSent={() => {
+            setExtensionTask(null);
+            setCenterNoticeMessage("Solicitud enviada a gerencia. Te avisaremos cuando la resuelva.");
+          }}
+        />
       ) : null}
 
       {floatingTimerEntries.map(({ task: floatingTask, entry }) => (
@@ -3235,7 +2541,7 @@ export default function TasksPage() {
           onStart={() => void onTimerAction(floatingTask.id, "doing")}
           onPause={() => void onTimerAction(floatingTask.id, "paused")}
           onFinish={() => void onTimerAction(floatingTask.id, "done")}
-          onRequestExtension={() => openExtensionRequest(floatingTask)}
+          onRequestExtension={() => setExtensionTask(floatingTask)}
         />
       ))}
     </div>
