@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import ConsequenceModal from "./ConsequenceModal";
 import EditTaskModal from "./EditTaskModal";
 import ExtensionRequestModal from "./ExtensionRequestModal";
 import FloatingTimerWidget from "./FloatingTimerWidget";
@@ -28,7 +29,7 @@ import {
   toDateKey,
 } from "./taskLogic";
 import { formatActiveDuration as formatDuration } from "./timer";
-import type { HalfMonth, ProjectRow, TaskRow, TaskUpdateRow, UserRow } from "./types";
+import type { HalfMonth, ProjectRow, TaskDraft, TaskRow, TaskUpdateRow, UserRow } from "./types";
 
 export default function TasksPage() {
   const router = useRouter();
@@ -141,25 +142,7 @@ export default function TasksPage() {
     };
   };
 
-  const [taskDrafts, setTaskDrafts] = useState<
-    Record<
-      string,
-      {
-        status: TaskRow["status"];
-        priority: TaskRow["priority"];
-        assigneeId: string;
-        description: string;
-        dueDate: string;
-        estimatedHours: string;
-        handoffToUserId: string;
-        handoffTitle: string;
-        handoffMessage: string;
-        nextActivityType: TaskRow["activityType"];
-        nextDueDate: string;
-        nextEstimatedHours: string;
-      }
-    >
-  >({});
+  const [taskDrafts, setTaskDrafts] = useState<Record<string, TaskDraft>>({});
 
   const loadData = async (currentRole: string) => {
     try {
@@ -949,7 +932,8 @@ export default function TasksPage() {
   const canPlanConsequence = role === "manager" || role === "lead" || role === "worker";
   const canMarkNotCompleted = role === "manager" || role === "lead";
   const notCompletedTask = tasks.find((item) => item.id === openedNotCompletedTaskId);
-  const editingTask = tasks.find((item) => item.id === editingTaskId);  const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
+  const editingTask = tasks.find((item) => item.id === editingTaskId);
+  const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
   const consequenceDraft = openedConsequenceTaskId
     ? taskDrafts[openedConsequenceTaskId]
     : undefined;
@@ -2010,168 +1994,22 @@ export default function TasksPage() {
       ) : null}
 
       {canPlanConsequence && consequenceTask && consequenceDraft ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4"
-          onClick={() => setOpenedConsequenceTaskId("")}
-        >
-          <div
-            className="w-full max-w-2xl rounded-2xl border border-[var(--line)] bg-white p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  Tarea consecuente
-                </p>
-                <h3 className="mt-1 text-lg font-semibold">{consequenceTask.title}</h3>
-                <p className="text-xs text-[var(--ink-muted)]">{consequenceTask.code}</p>
-              </div>
-              <button
-                onClick={() => setOpenedConsequenceTaskId("")}
-                className="ui-btn ui-btn-secondary ui-btn-sm"
-              >
-                Cerrar
-              </button>
-            </div>
-
-            {!consequenceEnabled ? (
-              <p className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--ink-muted)]">
-                Marca esta tarea como finalizada para habilitar la continuidad.
-              </p>
-            ) : null}
-
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <select
-                value={consequenceDraft.handoffToUserId}
-                onChange={(event) =>
-                  setTaskDrafts((current) => ({
-                    ...current,
-                    [consequenceTask.id]: {
-                      ...current[consequenceTask.id],
-                      handoffToUserId: event.target.value,
-                    },
-                  }))
-                }
-                className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                disabled={!consequenceEnabled}
-              >
-                <option value="">Mencionar responsable siguiente (opcional)</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.fullName} ({roleLabels[user.role] ?? user.role})
-                  </option>
-                ))}
-              </select>
-              <select
-                value={consequenceDraft.nextActivityType ?? consequenceTask.activityType}
-                onChange={(event) =>
-                  setTaskDrafts((current) => ({
-                    ...current,
-                    [consequenceTask.id]: {
-                      ...current[consequenceTask.id],
-                      nextActivityType: event.target.value as TaskRow["activityType"],
-                    },
-                  }))
-                }
-                className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                disabled={!consequenceEnabled}
-              >
-                <option value="revision">revision</option>
-                <option value="edicion">edicion</option>
-                <option value="creacion">creacion</option>
-                <option value="presentaciones">presentaciones</option>
-                <option value="grabacion">grabacion</option>
-                <option value="plataforma">plataforma</option>
-                <option value="administrativo">administrativo</option>
-              </select>
-              <input
-                type="date"
-                value={consequenceDraft.nextDueDate ?? consequenceTask.dueDate ?? ""}
-                onChange={(event) =>
-                  setTaskDrafts((current) => ({
-                    ...current,
-                    [consequenceTask.id]: {
-                      ...current[consequenceTask.id],
-                      nextDueDate: event.target.value,
-                    },
-                  }))
-                }
-                className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                disabled={!consequenceEnabled}
-              />
-              <label className="text-xs text-[var(--ink-muted)]">
-                Horas estimadas (tarea consecuente)
-                <input
-                  type="number"
-                  min="0"
-                  step="0.5"
-                  value={consequenceDraft.nextEstimatedHours ?? consequenceTask.estimatedHours ?? ""}
-                  onChange={(event) =>
-                    setTaskDrafts((current) => ({
-                      ...current,
-                      [consequenceTask.id]: {
-                        ...current[consequenceTask.id],
-                        nextEstimatedHours: event.target.value,
-                      },
-                    }))
-                  }
-                  className="mt-1 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                  placeholder="0"
-                  disabled={!consequenceEnabled}
-                />
-              </label>
-            </div>
-
-            <div className="mt-3 space-y-3">
-              <input
-                value={consequenceDraft.handoffTitle}
-                onChange={(event) =>
-                  setTaskDrafts((current) => ({
-                    ...current,
-                    [consequenceTask.id]: {
-                      ...current[consequenceTask.id],
-                      handoffTitle: event.target.value,
-                    },
-                  }))
-                }
-                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                placeholder="Titulo de la tarea subsecuente"
-                disabled={!consequenceEnabled}
-              />
-              <input
-                value={consequenceDraft.handoffMessage}
-                onChange={(event) =>
-                  setTaskDrafts((current) => ({
-                    ...current,
-                    [consequenceTask.id]: {
-                      ...current[consequenceTask.id],
-                      handoffMessage: event.target.value,
-                    },
-                  }))
-                }
-                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                placeholder="Mensaje para la actividad consecuente"
-                disabled={!consequenceEnabled}
-              />
-            </div>
-
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <button
-                onClick={() => setOpenedConsequenceTaskId("")}
-                className="ui-btn ui-btn-secondary"
-              >
-                Cerrar
-              </button>
-              <button
-                onClick={() => void onSaveTaskQuickEdit(consequenceTask.id)}
-                disabled={savingTaskId === consequenceTask.id}
-                className="ui-btn ui-btn-primary disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {savingTaskId === consequenceTask.id ? "Guardando..." : "Guardar cambios"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConsequenceModal
+          key={consequenceTask.id}
+          task={consequenceTask}
+          draft={consequenceDraft}
+          enabled={consequenceEnabled}
+          users={users}
+          saving={savingTaskId === consequenceTask.id}
+          onChange={(patch) =>
+            setTaskDrafts((current) => ({
+              ...current,
+              [consequenceTask.id]: { ...current[consequenceTask.id], ...patch },
+            }))
+          }
+          onSave={() => void onSaveTaskQuickEdit(consequenceTask.id)}
+          onClose={() => setOpenedConsequenceTaskId("")}
+        />
       ) : null}
 
       {extensionTask ? (

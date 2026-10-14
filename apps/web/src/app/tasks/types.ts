@@ -67,3 +67,19 @@ export type TaskUpdateRow = {
 };
 
 export type HalfMonth = "first" | "second";
+
+/** Unsaved edits for one task row, plus the optional follow-up ("consecuente") task. */
+export type TaskDraft = {
+  status: TaskRow["status"];
+  priority: TaskRow["priority"];
+  assigneeId: string;
+  description: string;
+  dueDate: string;
+  estimatedHours: string;
+  handoffToUserId: string;
+  handoffTitle: string;
+  handoffMessage: string;
+  nextActivityType: TaskRow["activityType"];
+  nextDueDate: string;
+  nextEstimatedHours: string;
+};
