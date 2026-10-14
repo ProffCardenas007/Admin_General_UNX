@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
-import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
+import { API_URL, authHeaders, getStoredRole, getStoredToken, clearSession } from "../../lib/api";
 
 type UserRow = {
   id: string;
@@ -284,11 +284,7 @@ export default function ClassPlanningPage() {
   );
 
   const clearSessionAndGoLogin = () => {
-    window.localStorage.removeItem("sistema_mvp_token");
-    window.localStorage.removeItem("sistema_mvp_email");
-    window.localStorage.removeItem("sistema_mvp_role");
-    window.localStorage.removeItem("sistema_mvp_specialty");
-    window.localStorage.removeItem("sistema_mvp_specialties");
+    clearSession();
     router.replace("/");
   };
 

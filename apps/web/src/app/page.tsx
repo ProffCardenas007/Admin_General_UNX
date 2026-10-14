@@ -1,14 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import axios from "axios";
-import { useRouter } from "next/navigation";
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+import { useRouter, useSearchParams } from "next/navigation";
+import { API_URL, storeSession } from "../lib/api";
 
 export default function Home() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const sessionExpired = useSearchParams().get("session") === "expired";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,21 +40,7 @@ export default function Home() {
           ? [specialty]
           : [];
       const nextRoute = role === "worker" ? "/tasks" : "/dashboard";
-      window.localStorage.setItem("sistema_mvp_token", accessToken);
-      window.localStorage.setItem("sistema_mvp_email", email);
-      if (role) {
-        window.localStorage.setItem("sistema_mvp_role", role);
-      }
-      if (specialties.length > 0) {
-        window.localStorage.setItem("sistema_mvp_specialties", JSON.stringify(specialties));
-      } else {
-        window.localStorage.removeItem("sistema_mvp_specialties");
-      }
-      if (specialty) {
-        window.localStorage.setItem("sistema_mvp_specialty", specialty);
-      } else {
-        window.localStorage.removeItem("sistema_mvp_specialty");
-      }
+      storeSession({ token: accessToken, email, role, specialty, specialties });
       router.replace(nextRoute);
     } catch {
       setError("No se pudo iniciar sesión. Verifica usuario, contraseña y backend.");
@@ -95,6 +88,12 @@ export default function Home() {
             {loading ? "Entrando..." : "Conectar"}
           </button>
         </div>
+
+        {sessionExpired && !error ? (
+          <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Tu sesión expiró. Inicia sesión de nuevo para continuar.
+          </p>
+        ) : null}
 
         {error ? (
           <p className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">

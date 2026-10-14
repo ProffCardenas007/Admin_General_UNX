@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import axios from "axios";
-import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../lib/api";
+import { API_URL, authHeaders, clearSession, getStoredEmail, getStoredRole, getStoredToken } from "../lib/api";
 
 const roleLabels: Record<string, string> = {
   manager: "Gerencia",
@@ -211,11 +211,7 @@ export default function AppNav() {
   const isManager = role === "manager";
 
   const onLogout = () => {
-    window.localStorage.removeItem("sistema_mvp_token");
-    window.localStorage.removeItem("sistema_mvp_email");
-    window.localStorage.removeItem("sistema_mvp_role");
-    window.localStorage.removeItem("sistema_mvp_specialty");
-    window.localStorage.removeItem("sistema_mvp_specialties");
+    clearSession();
     router.replace("/");
   };
 

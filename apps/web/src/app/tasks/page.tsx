@@ -5,6 +5,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
+import { extractErrorMessage } from "../../lib/http";
 import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
 
 type TaskRow = {
@@ -140,24 +141,6 @@ const roleLabels: Record<string, string> = {
   manager: "gerencia",
   lead: "líder",
   worker: "colaborador",
-};
-
-const extractErrorMessage = (caughtError: unknown, fallback: string) => {
-  if (axios.isAxiosError(caughtError)) {
-    const rawMessage = caughtError.response?.data?.message;
-    const backendMessage =
-      typeof rawMessage === "string"
-        ? rawMessage
-        : Array.isArray(rawMessage)
-          ? rawMessage.join(". ")
-          : "";
-
-    if (backendMessage) {
-      return `${fallback} ${backendMessage}`;
-    }
-  }
-
-  return fallback;
 };
 
 const FLOATING_TIMER_WIDTH = 280;

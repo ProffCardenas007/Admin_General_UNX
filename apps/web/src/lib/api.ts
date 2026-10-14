@@ -25,6 +25,41 @@ function normalizeStoredSpecialties(values: Array<string | null | undefined>) {
   return normalized;
 }
 
+const SESSION_KEYS = [
+  "sistema_mvp_token",
+  "sistema_mvp_email",
+  "sistema_mvp_role",
+  "sistema_mvp_specialty",
+  "sistema_mvp_specialties",
+] as const;
+
+/** Removes everything the app keeps about the signed-in user. */
+export function clearSession() {
+  SESSION_KEYS.forEach((key) => window.localStorage.removeItem(key));
+}
+
+/** Persists the session returned by the login endpoint. */
+export function storeSession(input: {
+  token: string;
+  email: string;
+  role?: string;
+  specialty?: string;
+  specialties?: string[];
+}) {
+  clearSession();
+  window.localStorage.setItem("sistema_mvp_token", input.token);
+  window.localStorage.setItem("sistema_mvp_email", input.email);
+  if (input.role) {
+    window.localStorage.setItem("sistema_mvp_role", input.role);
+  }
+  if (input.specialties && input.specialties.length > 0) {
+    window.localStorage.setItem("sistema_mvp_specialties", JSON.stringify(input.specialties));
+  }
+  if (input.specialty) {
+    window.localStorage.setItem("sistema_mvp_specialty", input.specialty);
+  }
+}
+
 export function getStoredToken() {
   return window.localStorage.getItem("sistema_mvp_token") ?? "";
 }
@@ -87,13 +122,13 @@ export function getStoredSpecialties() {
 
   const token = getStoredToken();
   if (!token) {
-    return "";
+    return [];
   }
 
   try {
     const payload = token.split(".")[1];
     if (!payload) {
-      return "";
+      return [];
     }
 
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
