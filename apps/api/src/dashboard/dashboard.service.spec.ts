@@ -21,6 +21,7 @@ describe('DashboardService', () => {
     };
 
     tasksQb = {
+      innerJoin: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([
         { status: 'done', dueDate: null },
@@ -37,6 +38,7 @@ describe('DashboardService', () => {
 
     workloadQb = {
       select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       innerJoin: jest.fn().mockReturnThis(),
       groupBy: jest.fn().mockReturnThis(),
@@ -47,6 +49,7 @@ describe('DashboardService', () => {
 
     trendsQb = {
       select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       innerJoin: jest.fn().mockReturnThis(),
       groupBy: jest.fn().mockReturnThis(),
@@ -98,24 +101,89 @@ describe('DashboardService', () => {
   });
 
   it('scopes workload and trends for worker', async () => {
-    taskUpdatesRepository.createQueryBuilder
+    const workedQb = {
+      ...hoursQb,
+      groupBy: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+    tasksRepository.createQueryBuilder
       .mockImplementationOnce(() => workloadQb)
       .mockImplementationOnce(() => trendsQb);
+    taskUpdatesRepository.createQueryBuilder.mockReturnValue(workedQb);
 
     const actor = { id: 'worker-77', role: 'worker' as const };
     await service.getWorkload({}, actor);
     await service.getTrends({}, actor);
 
     expect(workloadQb.andWhere).toHaveBeenCalledWith(
+      'task.assignee_id = :actorId',
+      { actorId: 'worker-77' },
+    );
+    expect(workedQb.andWhere).toHaveBeenCalledWith(
       'update.user_id = :actorId',
       {
         actorId: 'worker-77',
       },
     );
     expect(trendsQb.andWhere).toHaveBeenCalledWith(
-      'update.user_id = :actorId',
+      'task.assignee_id = :actorId',
+      { actorId: 'worker-77' },
+    );
+  });
+
+  it('exposes estimated and real hours separately in workload', async () => {
+    const workedQb = {
+      ...hoursQb,
+      groupBy: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      getRawMany: jest
+        .fn()
+        .mockResolvedValue([{ userId: 'u1', workedHours: '5.5' }]),
+    };
+    workloadQb.getRawMany.mockResolvedValue([
       {
-        actorId: 'worker-77',
+        userId: 'u1',
+        estimatedHours: '10',
+        activeSecondsWorked: '3600',
+        tasksCount: '2',
+      },
+      {
+        userId: 'u2',
+        estimatedHours: '4',
+        activeSecondsWorked: '0',
+        tasksCount: '1',
+      },
+    ]);
+    tasksRepository.createQueryBuilder.mockImplementationOnce(() => workloadQb);
+    taskUpdatesRepository.createQueryBuilder.mockReturnValue(workedQb);
+
+    const rows = await service.getWorkload(
+      {},
+      { id: 'm', role: 'manager' as const },
+    );
+
+    expect(rows[0]).toMatchObject({
+      userId: 'u1',
+      estimatedHours: '10',
+      hoursWorked: '10',
+      workedHours: '5.5',
+    });
+    expect(rows[1]).toMatchObject({ userId: 'u2', workedHours: '0' });
+  });
+
+  it('limits summary hours to the lead specialties', async () => {
+    taskUpdatesRepository.createQueryBuilder.mockReturnValue(hoursQb);
+
+    await service.getSummary(
+      {},
+      { id: 'lead-1', role: 'lead' as const, specialties: ['media'] as any },
+    );
+
+    expect(hoursQb.andWhere).toHaveBeenCalledWith(
+      'project_scope.scope IN (:...scopes)',
+      {
+        scopes: expect.any(Array),
       },
     );
   });

@@ -11,6 +11,7 @@ import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
+import { realHoursSql } from '../common/hours';
 
 @Injectable()
 export class DashboardService {
@@ -130,9 +131,20 @@ export class DashboardService {
 
     const hoursQb = this.taskUpdatesRepository
       .createQueryBuilder('update')
-      .select('COALESCE(SUM(update.worked_hours), 0)', 'hoursWorked')
+      .select(`COALESCE(SUM(${realHoursSql('update')}), 0)`, 'hoursWorked')
       .innerJoin(TaskEntity, 'task', 'task.id = update.task_id');
 
+    if (actor.role === 'lead') {
+      hoursQb
+        .innerJoin(
+          ProjectEntity,
+          'project_scope',
+          'project_scope.id = task.project_id',
+        )
+        .andWhere('project_scope.scope IN (:...scopes)', {
+          scopes: leadSpecialties,
+        });
+    }
     if (projectId) {
       hoursQb.andWhere('task.project_id = :projectId', { projectId });
     }
@@ -180,12 +192,12 @@ export class DashboardService {
     const qb = this.tasksRepository
       .createQueryBuilder('task')
       .select('task.assignee_id', 'userId')
-      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'hoursWorked')
+      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'estimatedHours')
       .addSelect('COALESCE(SUM(task.active_seconds), 0)', 'activeSecondsWorked')
       .addSelect('COUNT(task.id)', 'tasksCount')
       .where('task.assignee_id IS NOT NULL')
       .groupBy('task.assignee_id')
-      .orderBy('"hoursWorked"', 'DESC');
+      .orderBy('"estimatedHours"', 'DESC');
 
     if (actor.role === 'lead') {
       if (leadSpecialties.length === 0) {
@@ -209,12 +221,51 @@ export class DashboardService {
       qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
     }
 
-      return qb.getRawMany<{
-        userId: string;
-        hoursWorked: string;
-        activeSecondsWorked: string;
-        tasksCount: string;
-      }>();
+      const workedQb = this.taskUpdatesRepository
+        .createQueryBuilder('update')
+        .select('update.user_id', 'userId')
+        .addSelect(`COALESCE(SUM(${realHoursSql('update')}), 0)`, 'workedHours')
+        .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
+        .groupBy('update.user_id');
+
+      if (actor.role === 'lead') {
+        workedQb
+          .innerJoin(
+            ProjectEntity,
+            'project_scope',
+            'project_scope.id = task.project_id',
+          )
+          .andWhere('project_scope.scope IN (:...scopes)', {
+            scopes: leadSpecialties,
+          });
+      }
+      if (projectId) {
+        workedQb.andWhere('task.project_id = :projectId', { projectId });
+      }
+      if (actor.role === 'worker') {
+        workedQb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+      }
+
+      const [rows, workedRows] = await Promise.all([
+        qb.getRawMany<{
+          userId: string;
+          estimatedHours: string;
+          activeSecondsWorked: string;
+          tasksCount: string;
+        }>(),
+        workedQb.getRawMany<{ userId: string; workedHours: string }>(),
+      ]);
+      const workedByUser = new Map(
+        workedRows.map((row) => [row.userId, row.workedHours]),
+      );
+
+      return rows.map((row) => ({
+        ...row,
+        // Estimated hours; kept under the old key for clients not yet updated.
+        hoursWorked: row.estimatedHours,
+        // Real hours from the shared ledger (timer + manual).
+        workedHours: workedByUser.get(row.userId) ?? '0',
+      }));
     } catch (error) {
       this.rethrowSchemaMismatch(error, 'getWorkload');
     }
@@ -241,7 +292,7 @@ export class DashboardService {
     const qb = this.tasksRepository
       .createQueryBuilder('task')
       .select(weekStartExpression, 'weekStart')
-      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'hoursWorked')
+      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'estimatedHours')
       .addSelect('COUNT(task.id)', 'tasksCount')
       .where('task.assignee_id IS NOT NULL')
       .groupBy(weekStartExpression)
@@ -275,11 +326,15 @@ export class DashboardService {
       qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
     }
 
-      return qb.getRawMany<{
+      const trendRows = await qb.getRawMany<{
         weekStart: string;
-        hoursWorked: string;
+        estimatedHours: string;
         tasksCount: string;
       }>();
+      return trendRows.map((row) => ({
+        ...row,
+        hoursWorked: row.estimatedHours,
+      }));
     } catch (error) {
       this.rethrowSchemaMismatch(error, 'getTrends');
     }

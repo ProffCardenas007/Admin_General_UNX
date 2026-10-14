@@ -27,6 +27,15 @@ export class ReportsController {
     return this.reportsService.getUserPerformance({ from, to });
   }
 
+  @Get('hours-deviation')
+  @Roles('manager')
+  getHoursDeviation(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+  ) {
+    return this.reportsService.getHoursDeviation({ from, to });
+  }
+
   @Get('tasks.csv')
   @Roles('manager', 'lead', 'worker')
   async downloadTasksCsv(
@@ -76,10 +85,7 @@ export class ReportsController {
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${fileName}"`,
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     return res.send(buffer);
   }
 }

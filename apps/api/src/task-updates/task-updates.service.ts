@@ -8,6 +8,15 @@ import { Repository } from 'typeorm';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { CreateTaskUpdateDto } from './dto/create-task-update.dto';
+import { TasksService } from '../tasks/tasks.service';
+import { ProjectScope } from '../common/specialties';
+
+type TaskUpdateActor = {
+  id: string;
+  role: 'manager' | 'lead' | 'worker';
+  specialty?: ProjectScope | null;
+  specialties?: ProjectScope[] | null;
+};
 
 @Injectable()
 export class TaskUpdatesService {
@@ -16,21 +25,28 @@ export class TaskUpdatesService {
     private readonly taskUpdatesRepository: Repository<TaskUpdateEntity>,
     @InjectRepository(TaskEntity)
     private readonly tasksRepository: Repository<TaskEntity>,
+    private readonly tasksService: TasksService,
   ) {}
 
-  private async syncTaskStatusFromProgress(task: TaskEntity, progressPercent: number) {
-    if (progressPercent < 100 || task.status === 'done') {
+  // Goes through TasksService so completion also stops the timer (crediting the
+  // hours ledger), stamps completedAt and activates the next step of a chain.
+  private async syncTaskStatusFromProgress(
+    task: TaskEntity,
+    progressPercent: number,
+    actor: TaskUpdateActor,
+  ) {
+    if (
+      progressPercent < 100 ||
+      task.status === 'done' ||
+      task.status === 'blocked'
+    ) {
       return;
     }
 
-    task.status = 'done';
-    await this.tasksRepository.save(task);
+    await this.tasksService.update(task.id, { status: 'done' }, actor);
   }
 
-  async create(
-    dto: CreateTaskUpdateDto,
-    actor: { id: string; role: 'manager' | 'lead' | 'worker' },
-  ) {
+  async create(dto: CreateTaskUpdateDto, actor: TaskUpdateActor) {
     const task = await this.tasksRepository.findOne({
       where: { id: dto.taskId },
     });
@@ -61,7 +77,7 @@ export class TaskUpdatesService {
       existing.blockerReason = dto.blockerReason;
       existing.comments = dto.comments;
       const saved = await this.taskUpdatesRepository.save(existing);
-      await this.syncTaskStatusFromProgress(task, dto.progressPercent);
+      await this.syncTaskStatusFromProgress(task, dto.progressPercent, actor);
       return saved;
     }
 
@@ -76,7 +92,7 @@ export class TaskUpdatesService {
     });
 
     const saved = await this.taskUpdatesRepository.save(created);
-    await this.syncTaskStatusFromProgress(task, dto.progressPercent);
+    await this.syncTaskStatusFromProgress(task, dto.progressPercent, actor);
     return saved;
   }
 

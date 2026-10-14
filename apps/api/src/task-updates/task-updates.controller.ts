@@ -13,6 +13,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { TaskUpdatesService } from './task-updates.service';
 import { CreateTaskUpdateDto } from './dto/create-task-update.dto';
+import { ProjectScope } from '../common/specialties';
 
 @Controller('task-updates')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,7 +52,15 @@ export class TaskUpdatesController {
   @Roles('manager', 'lead', 'worker')
   create(
     @Body() dto: CreateTaskUpdateDto,
-    @Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker' } },
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
   ) {
     return this.taskUpdatesService.create(dto, req.user);
   }

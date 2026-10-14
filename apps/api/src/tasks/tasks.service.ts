@@ -22,6 +22,8 @@ import { CreateTaskChainDto } from './dto/create-task-chain.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MarkTaskNotCompletedDto } from './dto/mark-task-not-completed.dto';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
+import { todayKey } from '../common/dates';
+import { TimeExtensionsService } from '../time-extensions/time-extensions.service';
 
 @Injectable()
 export class TasksService {
@@ -44,6 +46,7 @@ export class TasksService {
     private readonly teamsRepository: Repository<TeamEntity>,
     @InjectRepository(TeamMemberEntity)
     private readonly teamMembersRepository: Repository<TeamMemberEntity>,
+    private readonly timeExtensionsService: TimeExtensionsService,
   ) {}
 
   private async recordManagerAudit(input: {
@@ -76,6 +79,59 @@ export class TasksService {
         `Audit log skipped for task action ${input.action} on ${input.entityId}`,
       );
     }
+  }
+
+  private elapsedTimerSeconds(task: TaskEntity) {
+    if (!task.timerStartedAt) {
+      return 0;
+    }
+
+    return Math.max(
+      0,
+      Math.round((Date.now() - task.timerStartedAt.getTime()) / 1000),
+    );
+  }
+
+  /**
+   * Credits time measured by the task timer to the daily hours ledger
+   * (task_updates), so dashboard and reports share one source of real hours.
+   */
+  private async recordTimerSeconds(
+    taskId: string,
+    userId: string | null | undefined,
+    seconds: number,
+    updatesRepository: Repository<TaskUpdateEntity> = this.taskUpdatesRepository,
+  ) {
+    if (!userId || seconds <= 0) {
+      return;
+    }
+
+    const updateDate = todayKey();
+    const existing = await updatesRepository.findOne({
+      where: { taskId, userId, updateDate },
+    });
+
+    if (existing) {
+      existing.timerSeconds = (existing.timerSeconds ?? 0) + seconds;
+      await updatesRepository.save(existing);
+      return;
+    }
+
+    const latest = await updatesRepository.findOne({
+      where: { taskId, userId },
+      order: { updateDate: 'DESC', createdAt: 'DESC' },
+    });
+
+    await updatesRepository.save(
+      updatesRepository.create({
+        taskId,
+        userId,
+        updateDate,
+        workedHours: '0',
+        timerSeconds: seconds,
+        progressPercent: latest?.progressPercent ?? '0',
+      }),
+    );
   }
 
   private async resolveLeadSpecialties(actor: {
@@ -615,6 +671,7 @@ export class TasksService {
       task.completionOutcome = null;
     }
 
+    let stoppedTimerSeconds = 0;
     if (
       taskFields.status !== undefined &&
       taskFields.status !== before.status
@@ -622,16 +679,21 @@ export class TasksService {
       if (taskFields.status === 'doing') {
         task.timerStartedAt = new Date();
       } else if (before.status === 'doing' && task.timerStartedAt) {
-        const elapsedSeconds = Math.max(
-          0,
-          Math.round((Date.now() - task.timerStartedAt.getTime()) / 1000),
-        );
-        task.activeSeconds = (task.activeSeconds ?? 0) + elapsedSeconds;
+        stoppedTimerSeconds = this.elapsedTimerSeconds(task);
+        task.activeSeconds = (task.activeSeconds ?? 0) + stoppedTimerSeconds;
         task.timerStartedAt = null;
       }
     }
 
     const savedTask = await this.tasksRepository.save(task);
+    await this.recordTimerSeconds(
+      savedTask.id,
+      before.assigneeId,
+      stoppedTimerSeconds,
+    );
+    if (stoppedTimerSeconds > 0 || (taskFields.status === 'done' && before.status !== 'done')) {
+      await this.timeExtensionsService.flagOverrunIfNeeded(savedTask.id);
+    }
 
     if (actor.role === 'manager') {
       const changes: Record<string, { before: unknown; after: unknown }> = {};
@@ -733,7 +795,7 @@ export class TasksService {
 
       await this.notificationsRepository.save(notification);
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayKey();
       const consequentAssigneeLabel = handoffToUserId.slice(0, 8);
       const continuityComment = handoffMessage?.trim().length
         ? `Tarea finalizada y derivada a ${consequentTask.code} para ${consequentAssigneeLabel}. Nota: ${handoffMessage}`
@@ -883,12 +945,10 @@ export class TasksService {
       }
     }
 
+    let stoppedTimerSeconds = 0;
     if (task.status === 'doing' && task.timerStartedAt) {
-      const elapsedSeconds = Math.max(
-        0,
-        Math.round((Date.now() - task.timerStartedAt.getTime()) / 1000),
-      );
-      task.activeSeconds = (task.activeSeconds ?? 0) + elapsedSeconds;
+      stoppedTimerSeconds = this.elapsedTimerSeconds(task);
+      task.activeSeconds = (task.activeSeconds ?? 0) + stoppedTimerSeconds;
     }
     task.timerStartedAt = null;
 
@@ -903,7 +963,7 @@ export class TasksService {
       task.completionOutcome = 'not_completed';
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayKey();
     const historyMessage = reassignedUser
       ? `Tarea no completada. Motivo: ${reason}. Reasignada a ${reassignedUser.fullName}.`
       : `Tarea no completada. Motivo: ${reason}.`;
@@ -913,6 +973,12 @@ export class TasksService {
         const transactionalUpdatesRepository =
           manager.getRepository(TaskUpdateEntity);
         const saved = await transactionalTasksRepository.save(task);
+        await this.recordTimerSeconds(
+          task.id,
+          previousAssigneeId,
+          stoppedTimerSeconds,
+          transactionalUpdatesRepository,
+        );
         const existingUpdate = await transactionalUpdatesRepository.findOne({
           where: {
             taskId: task.id,
@@ -943,6 +1009,10 @@ export class TasksService {
         return saved;
       },
     );
+
+    if (stoppedTimerSeconds > 0) {
+      await this.timeExtensionsService.flagOverrunIfNeeded(savedTask.id);
+    }
 
     if (actor.role === 'manager') {
       await this.recordManagerAudit({

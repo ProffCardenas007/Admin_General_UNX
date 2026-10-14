@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS task_updates (
     user_id UUID NOT NULL REFERENCES users(id),
     update_date DATE NOT NULL,
     worked_hours NUMERIC(8, 2) NOT NULL CHECK (worked_hours >= 0),
+    timer_seconds INT NOT NULL DEFAULT 0 CHECK (timer_seconds >= 0),
     progress_percent NUMERIC(5, 2) NOT NULL CHECK (progress_percent >= 0 AND progress_percent <= 100),
     blocker_reason TEXT,
     comments TEXT,
@@ -401,3 +402,30 @@ LEFT JOIN tasks t ON t.project_id = p.id
 GROUP BY p.id, p.code, p.name;
 
 COMMIT;
+
+-- Time extension requests (managers authorize hours beyond the task estimate)
+ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS authorized_extra_hours NUMERIC(8, 2) NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS time_extension_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    requested_by UUID NOT NULL REFERENCES users(id),
+    requested_hours NUMERIC(8, 2) NOT NULL CHECK (requested_hours > 0),
+    reason TEXT NOT NULL,
+    source VARCHAR(10) NOT NULL DEFAULT 'manual',
+    status VARCHAR(10) NOT NULL DEFAULT 'pending',
+    approved_hours NUMERIC(8, 2),
+    decided_by UUID REFERENCES users(id),
+    decided_at TIMESTAMPTZ,
+    decision_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_time_extension_one_pending
+    ON time_extension_requests(task_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_time_extension_status_created
+    ON time_extension_requests(status, created_at DESC);
+
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(40);
+ALTER TABLE notifications
+    ADD COLUMN IF NOT EXISTS request_id UUID REFERENCES time_extension_requests(id) ON DELETE SET NULL;

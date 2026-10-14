@@ -22,6 +22,9 @@ export class TaskUpdateEntity {
   @Column({ name: 'worked_hours', type: 'numeric', precision: 8, scale: 2 })
   workedHours: string;
 
+  @Column({ name: 'timer_seconds', type: 'int', default: 0 })
+  timerSeconds: number;
+
   @Column({ name: 'progress_percent', type: 'numeric', precision: 5, scale: 2 })
   progressPercent: string;
 

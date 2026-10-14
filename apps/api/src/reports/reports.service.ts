@@ -12,7 +12,12 @@ import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 import { normalizeLeadSpecialties } from '../common/specialties';
-import type { TaskActivityType, TaskStatus } from '../database/entities/task.entity';
+import { realHoursSql } from '../common/hours';
+import { APP_TIMEZONE } from '../common/dates';
+import type {
+  TaskActivityType,
+  TaskStatus,
+} from '../database/entities/task.entity';
 
 const ACTIVITY_WEIGHTS: Record<TaskActivityType, number> = {
   creacion: 10,
@@ -100,7 +105,10 @@ export class ReportsService {
       .createQueryBuilder('taskUpdate')
       .select('taskUpdate.user_id', 'userId')
       .addSelect('task.activity_type', 'activityType')
-      .addSelect('COALESCE(SUM(taskUpdate.worked_hours), 0)', 'workedHours')
+      .addSelect(
+        `COALESCE(SUM(${realHoursSql('taskUpdate')}), 0)`,
+        'workedHours',
+      )
       .addSelect('COUNT(taskUpdate.id)', 'updatesCount')
       .innerJoin(TaskEntity, 'task', 'task.id = taskUpdate.task_id')
       .groupBy('taskUpdate.user_id')
@@ -174,8 +182,7 @@ export class ReportsService {
       );
       const completedTasks = userTasks.filter(
         (task) =>
-          task.status === 'done' &&
-          task.completionOutcome !== 'not_completed',
+          task.status === 'done' && task.completionOutcome !== 'not_completed',
       ).length;
       const notCompletedTasks = userTasks.filter(
         (task) => task.completionOutcome === 'not_completed',
@@ -222,14 +229,12 @@ export class ReportsService {
         users: rankedRows.length,
         averageHours: Number(
           (
-            rankedRows.reduce((sum, row) => sum + row.workedHours, 0) /
-            divisor
+            rankedRows.reduce((sum, row) => sum + row.workedHours, 0) / divisor
           ).toFixed(2),
         ),
         averagePoints: Number(
           (
-            rankedRows.reduce((sum, row) => sum + row.points, 0) /
-            divisor
+            rankedRows.reduce((sum, row) => sum + row.points, 0) / divisor
           ).toFixed(2),
         ),
         totalCompletedTasks: rankedRows.reduce(
@@ -426,7 +431,7 @@ export class ReportsService {
       const workedRows = await this.taskUpdatesRepository
         .createQueryBuilder('update')
         .select('update.task_id', 'taskId')
-        .addSelect('COALESCE(SUM(update.worked_hours), 0)', 'workedHours')
+        .addSelect(`COALESCE(SUM(${realHoursSql('update')}), 0)`, 'workedHours')
         .where('update.task_id IN (:...taskIds)', { taskIds })
         .andWhere('update.user_id = :userId', { userId })
         .groupBy('update.task_id')
@@ -520,6 +525,137 @@ export class ReportsService {
     return { buffer, fileName };
   }
 
+  /**
+   * Estimated vs authorized vs real hours.
+   * - Completed tasks (done, not marked "not completed") with logged time are
+   *   measured; the period filters on completion date.
+   * - Open tasks already past their authorized hours are listed separately.
+   * Real hours per task: manual hours from the ledger plus the timer total.
+   * The timer total is the larger of tasks.active_seconds and the timer
+   * seconds already credited to the ledger, so time tracked before the ledger
+   * existed still counts (it has no per-day detail, only a task total).
+   */
+  async getHoursDeviation(filters: { from?: string; to?: string }) {
+    const from = this.validateDate(filters.from, 'from');
+    const to = this.validateDate(filters.to, 'to');
+    if ((from && !to) || (!from && to)) {
+      throw new BadRequestException('Both from and to are required');
+    }
+    if (from && to && from > to) {
+      throw new BadRequestException('from must be before or equal to to');
+    }
+
+    const rows: Array<{
+      id: string;
+      code: string;
+      title: string;
+      activityType: TaskActivityType;
+      assigneeId: string;
+      status: TaskStatus;
+      estimated: number;
+      extra: number;
+      real: number;
+    }> = await this.tasksRepository.query(
+      `SELECT t.id, t.code, t.title,
+              t.activity_type AS "activityType",
+              t.assignee_id AS "assigneeId",
+              t.status,
+              t.estimated_hours::float AS estimated,
+              t.authorized_extra_hours::float AS extra,
+              (
+                COALESCE((SELECT SUM(u.worked_hours) FROM task_updates u WHERE u.task_id = t.id), 0)
+                + GREATEST(
+                    t.active_seconds,
+                    COALESCE((SELECT SUM(u.timer_seconds) FROM task_updates u WHERE u.task_id = t.id), 0)
+                  ) / 3600.0
+              )::float AS real
+         FROM tasks t
+        WHERE t.assignee_id IS NOT NULL
+          AND t.estimated_hours > 0
+          AND (
+            (t.status = 'done'
+              AND t.completion_outcome IS DISTINCT FROM 'not_completed'
+              AND ($1::date IS NULL OR (t.completed_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date))
+            OR t.status <> 'done'
+          )`,
+      [from ?? null, to ?? null, APP_TIMEZONE],
+    );
+
+    const completed = rows.filter((row) => row.status === 'done');
+    const measured = completed.filter((row) => row.real > 0);
+    const untrackedTasks = completed.length - measured.length;
+
+    const summarize = (items: typeof rows) => {
+      const estimated = items.reduce((sum, row) => sum + row.estimated, 0);
+      const authorized = items.reduce(
+        (sum, row) => sum + row.estimated + row.extra,
+        0,
+      );
+      const real = items.reduce((sum, row) => sum + row.real, 0);
+      return {
+        tasks: items.length,
+        estimatedHours: Number(estimated.toFixed(2)),
+        authorizedHours: Number(authorized.toFixed(2)),
+        realHours: Number(real.toFixed(2)),
+        varianceHours: Number((real - estimated).toFixed(2)),
+        variancePercent:
+          estimated > 0
+            ? Number((((real - estimated) / estimated) * 100).toFixed(1))
+            : 0,
+        overEstimateTasks: items.filter((row) => row.real > row.estimated)
+          .length,
+        overAuthorizedTasks: items.filter(
+          (row) => row.real > row.estimated + row.extra,
+        ).length,
+      };
+    };
+
+    const users = await this.usersRepository.find({
+      where: { id: In([...new Set(rows.map((row) => row.assigneeId))]) },
+    });
+    const userName = new Map(users.map((user) => [user.id, user.fullName]));
+
+    const byUser = [...new Set(measured.map((row) => row.assigneeId))]
+      .map((userId) => ({
+        userId,
+        fullName: userName.get(userId) ?? 'Usuario',
+        ...summarize(measured.filter((row) => row.assigneeId === userId)),
+      }))
+      .sort((left, right) => right.varianceHours - left.varianceHours);
+
+    const byActivity = ACTIVITY_TYPES.map((activityType) => ({
+      activityType,
+      ...summarize(measured.filter((row) => row.activityType === activityType)),
+    })).filter((row) => row.tasks > 0);
+
+    const overrunningNow = rows
+      .filter(
+        (row) => row.status !== 'done' && row.real > row.estimated + row.extra,
+      )
+      .map((row) => ({
+        taskId: row.id,
+        code: row.code,
+        title: row.title,
+        activityType: row.activityType,
+        assigneeName: userName.get(row.assigneeId) ?? 'Usuario',
+        estimatedHours: Number(row.estimated.toFixed(2)),
+        authorizedHours: Number((row.estimated + row.extra).toFixed(2)),
+        realHours: Number(row.real.toFixed(2)),
+        overHours: Number((row.real - row.estimated - row.extra).toFixed(2)),
+      }))
+      .sort((left, right) => right.overHours - left.overHours)
+      .slice(0, 20);
+
+    return {
+      period: { from: from ?? null, to: to ?? null },
+      totals: summarize(measured),
+      untrackedTasks,
+      byUser,
+      byActivity,
+      overrunningNow,
+    };
+  }
+
   private escapeCsv(value: string) {
     if (value.includes(',') || value.includes('"') || value.includes('\n')) {
       return `"${value.replace(/"/g, '""')}"`;
@@ -535,7 +671,10 @@ export class ReportsService {
       throw new BadRequestException(`${field} must use YYYY-MM-DD format`);
     }
     const parsed = new Date(`${value}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    if (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== value
+    ) {
       throw new BadRequestException(`${field} must be a valid date`);
     }
     return value;

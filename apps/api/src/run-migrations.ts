@@ -15,6 +15,8 @@ const MIGRATION_SCRIPTS = [
   'migrate-class-schedule.js',
   'migrate-class-planning.js',
   'migrate-class-subjects.js',
+  'migrate-task-update-timer.js',
+  'migrate-time-extensions.js',
 ];
 
 export async function runStartupMigrations() {

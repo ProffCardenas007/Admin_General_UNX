@@ -32,6 +32,8 @@ import { ClassCourseSubjectEntity } from './database/entities/class-course-subje
 import { ClassSessionEntity } from './database/entities/class-session.entity';
 import { SpecialtyEntity } from './database/entities/specialty.entity';
 import { SpecialtiesModule } from './specialties/specialties.module';
+import { TimeExtensionsModule } from './time-extensions/time-extensions.module';
+import { TimeExtensionRequestEntity } from './database/entities/time-extension-request.entity';
 
 @Module({
   imports: [
@@ -80,6 +82,7 @@ import { SpecialtiesModule } from './specialties/specialties.module';
             ClassCourseSubjectEntity,
             ClassSessionEntity,
             SpecialtyEntity,
+            TimeExtensionRequestEntity,
           ],
           synchronize: false,
         };
@@ -99,6 +102,7 @@ import { SpecialtiesModule } from './specialties/specialties.module';
     TeacherAvailabilityModule,
     ClassPlanningModule,
     SpecialtiesModule,
+    TimeExtensionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

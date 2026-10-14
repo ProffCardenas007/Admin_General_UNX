@@ -15,6 +15,7 @@ describe('TasksService', () => {
   let auditLogsRepository: any;
   let teamsRepository: any;
   let teamMembersRepository: any;
+  let timeExtensionsService: any;
 
   beforeEach(() => {
     qb = {
@@ -65,6 +66,9 @@ describe('TasksService', () => {
     };
     teamsRepository = { findOne: jest.fn() };
     teamMembersRepository = { find: jest.fn() };
+    timeExtensionsService = {
+      flagOverrunIfNeeded: jest.fn().mockResolvedValue(null),
+    };
 
     service = new TasksService(
       tasksRepository,
@@ -75,6 +79,7 @@ describe('TasksService', () => {
       auditLogsRepository,
       teamsRepository,
       teamMembersRepository,
+      timeExtensionsService,
     );
   });
 
@@ -289,6 +294,96 @@ describe('TasksService', () => {
 
     expect(result.timerStartedAt).toBeNull();
     expect(result.activeSeconds).toBeGreaterThanOrEqual(15);
+  });
+
+  it('credits timer seconds to the daily hours ledger when pausing', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: 'worker-1',
+      status: 'doing',
+      activeSeconds: 0,
+      timerStartedAt: new Date(Date.now() - 5000),
+    });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+
+    await service.update(
+      'task-1',
+      { status: 'paused' },
+      { id: 'worker-1', role: 'worker' },
+    );
+
+    expect(taskUpdatesRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        userId: 'worker-1',
+        workedHours: '0',
+        timerSeconds: expect.any(Number),
+      }),
+    );
+    const saved = taskUpdatesRepository.save.mock.calls[0][0];
+    expect(saved.timerSeconds).toBeGreaterThanOrEqual(5);
+  });
+
+  it('adds timer seconds to an existing same-day ledger row without touching manual hours', async () => {
+    const existing = { workedHours: '2', timerSeconds: 100 };
+    taskUpdatesRepository.findOne.mockResolvedValue(existing);
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: 'worker-1',
+      status: 'doing',
+      activeSeconds: 0,
+      timerStartedAt: new Date(Date.now() - 5000),
+    });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+
+    await service.update(
+      'task-1',
+      { status: 'paused' },
+      { id: 'worker-1', role: 'worker' },
+    );
+
+    expect(existing.workedHours).toBe('2');
+    expect(existing.timerSeconds).toBeGreaterThanOrEqual(105);
+  });
+
+  it('checks for a time overrun when the timer stops', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: 'worker-1',
+      status: 'doing',
+      activeSeconds: 0,
+      timerStartedAt: new Date(Date.now() - 5000),
+    });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+
+    await service.update(
+      'task-1',
+      { status: 'paused' },
+      { id: 'worker-1', role: 'worker' },
+    );
+
+    expect(timeExtensionsService.flagOverrunIfNeeded).toHaveBeenCalledWith(
+      'task-1',
+    );
+  });
+
+  it('does not touch the ledger when no timer was running', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: 'worker-1',
+      status: 'todo',
+      activeSeconds: 0,
+      timerStartedAt: null,
+    });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+
+    await service.update(
+      'task-1',
+      { status: 'done' },
+      { id: 'worker-1', role: 'worker' },
+    );
+
+    expect(taskUpdatesRepository.save).not.toHaveBeenCalled();
   });
 
   it('accumulates active seconds when finishing a running task', async () => {

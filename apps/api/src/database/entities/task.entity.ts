@@ -108,6 +108,15 @@ export class TaskEntity {
   })
   estimatedHours: string;
 
+  @Column({
+    name: 'authorized_extra_hours',
+    type: 'numeric',
+    precision: 8,
+    scale: 2,
+    default: 0,
+  })
+  authorizedExtraHours: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

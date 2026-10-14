@@ -213,4 +213,138 @@ describe('ReportsService', () => {
       { from: '2026-08-01', to: '2026-08-15' },
     );
   });
+
+  describe('getHoursDeviation', () => {
+    const row = (overrides: Record<string, unknown>) => ({
+      id: 'task-x',
+      code: 'EDI-001',
+      title: 'Tarea',
+      activityType: 'edicion',
+      assigneeId: 'worker-1',
+      status: 'done',
+      estimated: 4,
+      extra: 0,
+      real: 4,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      usersRepository.find.mockResolvedValue([
+        { id: 'worker-1', fullName: 'Ana' },
+        { id: 'worker-2', fullName: 'Luis' },
+      ]);
+    });
+
+    it('compares real hours against estimated and authorized per person', async () => {
+      tasksRepository.query = jest
+        .fn()
+        .mockResolvedValue([
+          row({ id: 't1', real: 6 }),
+          row({ id: 't2', estimated: 2, extra: 1, real: 3 }),
+          row({ id: 't3', assigneeId: 'worker-2', estimated: 5, real: 4 }),
+        ]);
+
+      const report = await service.getHoursDeviation({
+        from: '2026-08-01',
+        to: '2026-08-15',
+      });
+
+      const ana = report.byUser.find((user) => user.userId === 'worker-1');
+      expect(ana).toMatchObject({
+        fullName: 'Ana',
+        tasks: 2,
+        estimatedHours: 6,
+        authorizedHours: 7,
+        realHours: 9,
+        varianceHours: 3,
+        variancePercent: 50,
+        overEstimateTasks: 2,
+        overAuthorizedTasks: 1,
+      });
+      expect(report.byUser[0].userId).toBe('worker-1');
+      expect(report.byUser[1]).toMatchObject({
+        userId: 'worker-2',
+        varianceHours: -1,
+      });
+      expect(report.totals).toMatchObject({
+        tasks: 3,
+        realHours: 13,
+        estimatedHours: 11,
+      });
+      expect(report.byActivity).toHaveLength(1);
+    });
+
+    it('passes the period and timezone to the query', async () => {
+      tasksRepository.query = jest.fn().mockResolvedValue([]);
+
+      await service.getHoursDeviation({ from: '2026-08-01', to: '2026-08-15' });
+
+      expect(tasksRepository.query).toHaveBeenCalledWith(expect.any(String), [
+        '2026-08-01',
+        '2026-08-15',
+        'America/Mexico_City',
+      ]);
+    });
+
+    it('leaves completed tasks without logged time out of the averages', async () => {
+      tasksRepository.query = jest
+        .fn()
+        .mockResolvedValue([
+          row({ id: 't1', real: 5 }),
+          row({ id: 't2', real: 0 }),
+        ]);
+
+      const report = await service.getHoursDeviation({});
+
+      expect(report.untrackedTasks).toBe(1);
+      expect(report.totals.tasks).toBe(1);
+    });
+
+    it('lists open tasks already past their authorized hours, worst first', async () => {
+      tasksRepository.query = jest
+        .fn()
+        .mockResolvedValue([
+          row({
+            id: 'open-1',
+            status: 'doing',
+            estimated: 4,
+            extra: 0,
+            real: 5,
+          }),
+          row({
+            id: 'open-2',
+            status: 'doing',
+            estimated: 4,
+            extra: 2,
+            real: 9,
+          }),
+          row({
+            id: 'open-3',
+            status: 'doing',
+            estimated: 4,
+            extra: 2,
+            real: 5,
+          }),
+        ]);
+
+      const report = await service.getHoursDeviation({});
+
+      expect(report.overrunningNow.map((task) => task.taskId)).toEqual([
+        'open-2',
+        'open-1',
+      ]);
+      expect(report.overrunningNow[0]).toMatchObject({
+        authorizedHours: 6,
+        overHours: 3,
+        assigneeName: 'Ana',
+      });
+      expect(report.totals.tasks).toBe(0);
+    });
+
+    it('requires both ends of the period', async () => {
+      await expect(
+        service.getHoursDeviation({ from: '2026-08-01' }),
+      ).rejects.toThrow('Both from and to are required');
+    });
+  });
 });

@@ -22,6 +22,12 @@ export class NotificationEntity {
   @Column({ type: 'text' })
   message: string;
 
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  type?: string | null;
+
+  @Column({ name: 'request_id', type: 'uuid', nullable: true })
+  requestId?: string | null;
+
   @Column({ name: 'is_read', type: 'boolean', default: false })
   isRead: boolean;
 

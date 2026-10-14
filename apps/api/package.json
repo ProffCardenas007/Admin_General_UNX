@@ -20,6 +20,8 @@
     "migrate:class-schedule": "node scripts/migrate-class-schedule.js",
     "migrate:class-planning": "node scripts/migrate-class-planning.js",
     "migrate:class-subjects": "node scripts/migrate-class-subjects.js",
+    "migrate:time-extensions": "node scripts/migrate-time-extensions.js",
+    "migrate:task-update-timer": "node scripts/migrate-task-update-timer.js",
     "upsert:manager": "node scripts/upsert-manager.js",
     "free-port": "node scripts/free-port.js 4000",
     "start:dev": "npm run free-port && ts-node-dev --respawn --transpile-only src/main.ts",

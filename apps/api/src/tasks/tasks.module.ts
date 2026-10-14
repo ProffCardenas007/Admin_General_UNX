@@ -10,6 +10,7 @@ import { UserEntity } from '../database/entities/user.entity';
 import { AuditLogEntity } from '../database/entities/audit-log.entity';
 import { TeamEntity } from '../database/entities/team.entity';
 import { TeamMemberEntity } from '../database/entities/team-member.entity';
+import { TimeExtensionsModule } from '../time-extensions/time-extensions.module';
 
 @Module({
   imports: [
@@ -23,8 +24,10 @@ import { TeamMemberEntity } from '../database/entities/team-member.entity';
       TeamEntity,
       TeamMemberEntity,
     ]),
+    TimeExtensionsModule,
   ],
   controllers: [TasksController],
   providers: [TasksService],
+  exports: [TasksService],
 })
 export class TasksModule {}
