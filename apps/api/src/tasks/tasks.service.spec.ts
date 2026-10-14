@@ -31,6 +31,7 @@ describe('TasksService', () => {
 
     tasksRepository = {
       createQueryBuilder: jest.fn().mockReturnValue(qb),
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
       save: jest.fn(),
       create: jest.fn(),
@@ -426,6 +427,108 @@ describe('TasksService', () => {
       await expect(
         service.remove('task-1', { id: 'worker-2', role: 'worker' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('one running timer per person', () => {
+    const runningTask = (overrides: Record<string, unknown> = {}) => ({
+      id: 'task-old',
+      assigneeId: 'worker-1',
+      status: 'doing',
+      activeSeconds: 100,
+      timerStartedAt: new Date(Date.now() - 60_000),
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      tasksRepository.save.mockImplementation(async (task: any) => task);
+    });
+
+    it('pauses the other running task and banks its time when a new one starts', async () => {
+      const previous = runningTask();
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-new',
+        assigneeId: 'worker-1',
+        status: 'paused',
+        activeSeconds: 0,
+        timerStartedAt: null,
+      });
+      tasksRepository.find.mockResolvedValue([
+        { id: 'task-new', assigneeId: 'worker-1', status: 'doing' },
+        previous,
+      ]);
+
+      const result: any = await service.update(
+        'task-new',
+        { status: 'doing' },
+        { id: 'worker-1', role: 'worker' },
+      );
+
+      expect(tasksRepository.find).toHaveBeenCalledWith({
+        where: { assigneeId: 'worker-1', status: 'doing' },
+      });
+      expect(previous).toMatchObject({ status: 'paused', timerStartedAt: null });
+      expect(previous.activeSeconds).toBeGreaterThanOrEqual(160);
+      expect(taskUpdatesRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: 'task-old', userId: 'worker-1' }),
+      );
+      expect(timeExtensionsService.flagOverrunIfNeeded).toHaveBeenCalledWith('task-old');
+      expect(result.status).toBe('doing');
+      expect(result.pausedTasks.map((t: any) => t.id)).toEqual(['task-old']);
+    });
+
+    it('does not add pausedTasks when nothing else was running', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-new',
+        assigneeId: 'worker-1',
+        status: 'todo',
+        activeSeconds: 0,
+        timerStartedAt: null,
+      });
+      tasksRepository.find.mockResolvedValue([
+        { id: 'task-new', assigneeId: 'worker-1', status: 'doing' },
+      ]);
+
+      const result: any = await service.update(
+        'task-new',
+        { status: 'doing' },
+        { id: 'worker-1', role: 'worker' },
+      );
+
+      expect(result.pausedTasks).toBeUndefined();
+      expect(taskUpdatesRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('does nothing to other tasks when the status is not changing to doing', async () => {
+      tasksRepository.findOne.mockResolvedValue(runningTask());
+
+      await service.update(
+        'task-old',
+        { status: 'paused' },
+        { id: 'worker-1', role: 'worker' },
+      );
+
+      expect(tasksRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('only looks at the starting task\'s own assignee', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-new',
+        assigneeId: 'worker-2',
+        status: 'todo',
+        activeSeconds: 0,
+        timerStartedAt: null,
+      });
+
+      await service.update(
+        'task-new',
+        { status: 'doing' },
+        { id: 'manager-1', role: 'manager' },
+      );
+
+      expect(tasksRepository.find).toHaveBeenCalledWith({
+        where: { assigneeId: 'worker-2', status: 'doing' },
+      });
     });
   });
 

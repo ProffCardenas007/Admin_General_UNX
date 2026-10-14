@@ -779,6 +779,8 @@ export class TasksService {
     }
 
     const completedNow = taskFields.status === 'done' && before.status !== 'done';
+    const startedNow = taskFields.status === 'doing' && before.status !== 'doing';
+    const autoPaused: TaskEntity[] = [];
     const reassignedTo =
       taskFields.assigneeId && taskFields.assigneeId !== before.assigneeId
         ? taskFields.assigneeId
@@ -800,6 +802,32 @@ export class TasksService {
           stoppedTimerSeconds,
           transactionalUpdates,
         );
+
+        if (startedNow && saved.assigneeId) {
+          // One person, one running timer. Starting this task pauses whatever
+          // else they had running and banks the time it had accumulated, so
+          // hours are never counted twice and nothing is lost.
+          const alsoRunning = await transactionalTasks.find({
+            where: { assigneeId: saved.assigneeId, status: 'doing' },
+          });
+          for (const other of alsoRunning) {
+            if (other.id === saved.id) {
+              continue;
+            }
+            const seconds = this.elapsedTimerSeconds(other);
+            other.activeSeconds = (other.activeSeconds ?? 0) + seconds;
+            other.timerStartedAt = null;
+            other.status = 'paused';
+            await transactionalTasks.save(other);
+            await this.recordTimerSeconds(
+              other.id,
+              other.assigneeId,
+              seconds,
+              transactionalUpdates,
+            );
+            autoPaused.push(other);
+          }
+        }
 
         if (reassignedTo) {
           await this.notifyAssignees(
@@ -999,8 +1027,14 @@ export class TasksService {
     if (stoppedTimerSeconds > 0 || completedNow) {
       await this.timeExtensionsService.flagOverrunIfNeeded(savedTask.id);
     }
+    for (const paused of autoPaused) {
+      await this.timeExtensionsService.flagOverrunIfNeeded(paused.id);
+    }
 
-    return savedTask;
+    // Tell the client which of the person's other tasks were paused for it.
+    return autoPaused.length > 0
+      ? Object.assign(savedTask, { pausedTasks: autoPaused })
+      : savedTask;
   }
 
   async markNotCompleted(
