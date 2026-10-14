@@ -100,6 +100,32 @@ describe('DashboardService', () => {
     expect(result.hoursWorked).toBe(8);
   });
 
+  describe('overdue tasks', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('does not count a task due today, in the app timezone, as overdue', async () => {
+      // 02:00 UTC on the 15th is still the evening of the 14th in Mexico City.
+      jest.useFakeTimers({ now: new Date('2026-10-15T02:00:00Z') });
+      tasksQb.getMany.mockResolvedValue([
+        { status: 'todo', dueDate: '2026-10-14' },
+        { status: 'todo', dueDate: '2026-10-13' },
+        { status: 'doing', dueDate: '2026-10-01' },
+        { status: 'done', dueDate: '2026-09-01' },
+        { status: 'todo', dueDate: null },
+      ]);
+      taskUpdatesRepository.createQueryBuilder.mockReturnValue(hoursQb);
+
+      const result = await service.getSummary(
+        {},
+        { id: 'manager-1', role: 'manager' as const },
+      );
+
+      expect(result.overdueTasks).toBe(2);
+    });
+  });
+
   it('scopes workload and trends for worker', async () => {
     const workedQb = {
       ...hoursQb,

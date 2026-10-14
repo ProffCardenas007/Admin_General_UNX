@@ -12,6 +12,7 @@ import { TaskEntity } from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 import { realHoursSql } from '../common/hours';
+import { todayKey } from '../common/dates';
 
 @Injectable()
 export class DashboardService {
@@ -121,12 +122,15 @@ export class DashboardService {
       (task) => task.status === 'blocked',
     ).length;
 
-    const today = new Date();
+    // Due dates are calendar days: compare them with today's date in the app
+    // timezone. `new Date('2026-10-14')` is midnight UTC, which made tasks due
+    // today count as overdue from the evening before.
+    const today = todayKey();
     const overdueTasks = tasks.filter(
       (task) =>
         task.status !== 'done' &&
-        task.dueDate &&
-        new Date(task.dueDate) < today,
+        !!task.dueDate &&
+        String(task.dueDate).slice(0, 10) < today,
     ).length;
 
     const hoursQb = this.taskUpdatesRepository
