@@ -1575,7 +1575,7 @@ export default function TasksPage() {
       setError(
         extractErrorMessage(
           caughtError,
-          "No se pudo borrar la tarea. Solo gerencia o quien la creo puede hacerlo.",
+          "No se pudo borrar la tarea.",
         ),
       );
     } finally {

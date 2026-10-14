@@ -134,6 +134,19 @@ export class TasksService {
     );
   }
 
+  private async hasLoggedTime(task: TaskEntity) {
+    if ((task.activeSeconds ?? 0) > 0 || task.timerStartedAt) {
+      return true;
+    }
+
+    const loggedRows = await this.taskUpdatesRepository
+      .createQueryBuilder('update')
+      .where('update.task_id = :taskId', { taskId: task.id })
+      .andWhere('(update.worked_hours > 0 OR update.timer_seconds > 0)')
+      .getCount();
+    return loggedRows > 0;
+  }
+
   private async resolveLeadSpecialties(actor: {
     id: string;
     role: 'manager' | 'lead' | 'worker';
@@ -1053,6 +1066,14 @@ export class TasksService {
     if (actor.role !== 'manager' && task.createdBy !== actor.id) {
       throw new ForbiddenException(
         'Users can only delete tasks created by themselves',
+      );
+    }
+
+    // Deleting cascades to task_updates and would erase logged hours from the
+    // dashboard and reports, so tasks with time on them cannot be deleted.
+    if (await this.hasLoggedTime(task)) {
+      throw new ConflictException(
+        'Esta tarea tiene horas registradas. Para no perder el historial de horas, marcala como no completada en lugar de borrarla.',
       );
     }
 

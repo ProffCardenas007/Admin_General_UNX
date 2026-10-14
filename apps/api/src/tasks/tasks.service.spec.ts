@@ -1,5 +1,6 @@
 import { TasksService } from './tasks.service';
 import {
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ describe('TasksService', () => {
   let teamsRepository: any;
   let teamMembersRepository: any;
   let timeExtensionsService: any;
+  let loggedRowsQb: any;
 
   beforeEach(() => {
     qb = {
@@ -51,7 +53,13 @@ describe('TasksService', () => {
       create: jest.fn((input) => input),
       save: jest.fn().mockResolvedValue(undefined),
     };
+    loggedRowsQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
     taskUpdatesRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue(loggedRowsQb),
       create: jest.fn((input) => input),
       findOne: jest.fn().mockResolvedValue(null),
       save: jest.fn().mockResolvedValue(undefined),
@@ -365,6 +373,58 @@ describe('TasksService', () => {
     expect(timeExtensionsService.flagOverrunIfNeeded).toHaveBeenCalledWith(
       'task-1',
     );
+  });
+
+  describe('remove', () => {
+    const unusedTask = {
+      id: 'task-1',
+      createdBy: 'worker-1',
+      activeSeconds: 0,
+      timerStartedAt: null,
+    };
+
+    beforeEach(() => {
+      tasksRepository.delete = jest.fn().mockResolvedValue(undefined);
+    });
+
+    it('deletes a task with no logged time', async () => {
+      tasksRepository.findOne.mockResolvedValue(unusedTask);
+
+      await expect(
+        service.remove('task-1', { id: 'worker-1', role: 'worker' }),
+      ).resolves.toEqual({ deleted: true, taskId: 'task-1' });
+      expect(tasksRepository.delete).toHaveBeenCalledWith({ id: 'task-1' });
+    });
+
+    it('refuses to delete a task whose timer has run, even for managers', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        ...unusedTask,
+        activeSeconds: 600,
+      });
+
+      await expect(
+        service.remove('task-1', { id: 'manager-1', role: 'manager' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tasksRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete a task with hours in the ledger', async () => {
+      tasksRepository.findOne.mockResolvedValue(unusedTask);
+      loggedRowsQb.getCount.mockResolvedValue(1);
+
+      await expect(
+        service.remove('task-1', { id: 'worker-1', role: 'worker' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tasksRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('still only lets workers delete tasks they created', async () => {
+      tasksRepository.findOne.mockResolvedValue(unusedTask);
+
+      await expect(
+        service.remove('task-1', { id: 'worker-2', role: 'worker' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
   });
 
   it('does not touch the ledger when no timer was running', async () => {
