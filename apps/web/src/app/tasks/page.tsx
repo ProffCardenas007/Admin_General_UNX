@@ -28,6 +28,8 @@ type TaskRow = {
   priority: "low" | "medium" | "high" | "urgent";
   dueDate?: string;
   estimatedHours: string;
+  /** Extra hours approved by management on top of the original estimate. */
+  authorizedExtraHours?: string;
   activeSeconds?: number;
   timerStartedAt?: string | null;
   completionOutcome?: "completed" | "not_completed" | null;
@@ -65,6 +67,7 @@ type TaskUpdateRow = {
   userId: string;
   updateDate: string;
   workedHours: string;
+  timerSeconds?: number;
   progressPercent: string;
   blockerReason?: string;
   comments?: string;
@@ -182,6 +185,7 @@ function FloatingTimerWidget({
   onStart,
   onPause,
   onFinish,
+  onRequestExtension,
 }: {
   task: TaskRow;
   position: { x: number; y: number };
@@ -196,13 +200,16 @@ function FloatingTimerWidget({
   onStart: () => void;
   onPause: () => void;
   onFinish: () => void;
+  onRequestExtension: () => void;
 }) {
   const totalSeconds =
     (task.activeSeconds ?? 0) +
     (task.timerStartedAt
       ? Math.max(0, Math.round((nowTick - new Date(task.timerStartedAt).getTime()) / 1000))
       : 0);
-  const estimatedSeconds = Number(task.estimatedHours ?? 0) * 3600;
+  const authorizedHours =
+    Number(task.estimatedHours ?? 0) + Number(task.authorizedExtraHours ?? 0);
+  const estimatedSeconds = authorizedHours * 3600;
   const isOvertime = estimatedSeconds > 0 && totalSeconds > estimatedSeconds;
 
   if (minimized) {
@@ -286,10 +293,20 @@ function FloatingTimerWidget({
 
         {isOvertime ? (
           <p className="mt-1 text-center text-xs font-semibold text-red-700">
-            Superaste el tiempo estimado ({Number(task.estimatedHours ?? 0).toFixed(1)} h)
+            Superaste el tiempo autorizado ({authorizedHours.toFixed(1)} h)
           </p>
         ) : task.status === "paused" ? (
           <p className="mt-1 text-center text-xs font-semibold text-amber-700">Pausada</p>
+        ) : null}
+
+        {isOvertime ? (
+          <button
+            type="button"
+            onClick={onRequestExtension}
+            className="ui-btn ui-btn-secondary ui-btn-sm mt-2 w-full"
+          >
+            Solicitar más horas
+          </button>
         ) : null}
 
         <div className="mt-3 grid grid-cols-2 gap-2">
@@ -339,6 +356,11 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [extensionTask, setExtensionTask] = useState<TaskRow | null>(null);
+  const [extensionHours, setExtensionHours] = useState("1");
+  const [extensionReason, setExtensionReason] = useState("");
+  const [extensionSaving, setExtensionSaving] = useState(false);
+  const [extensionError, setExtensionError] = useState("");
   const [savingTaskId, setSavingTaskId] = useState("");
   const [deletingTaskId, setDeletingTaskId] = useState("");
   const [loadingHistoryTaskId, setLoadingHistoryTaskId] = useState("");
@@ -1643,6 +1665,51 @@ export default function TasksPage() {
   const canPlanConsequence = role === "manager" || role === "lead" || role === "worker";
   const canMarkNotCompleted = role === "manager" || role === "lead";
   const notCompletedTask = tasks.find((item) => item.id === openedNotCompletedTaskId);
+  const openExtensionRequest = (task: TaskRow) => {
+    setExtensionTask(task);
+    setExtensionHours("1");
+    setExtensionReason("");
+    setExtensionError("");
+  };
+
+  const submitExtensionRequest = async () => {
+    if (!extensionTask) {
+      return;
+    }
+
+    const requestedHours = Number(extensionHours);
+    if (!(requestedHours >= 0.25)) {
+      setExtensionError("Indica al menos 0.25 horas.");
+      return;
+    }
+    if (extensionReason.trim().length < 3) {
+      setExtensionError("Explica brevemente por qué necesitas más tiempo.");
+      return;
+    }
+
+    setExtensionSaving(true);
+    setExtensionError("");
+    try {
+      await axios.post(
+        `${API_URL}/time-extension-requests`,
+        { taskId: extensionTask.id, requestedHours, reason: extensionReason.trim() },
+        { headers: authHeaders() },
+      );
+      setExtensionTask(null);
+      setCenterNoticeMessage("Solicitud enviada a gerencia. Te avisaremos cuando la resuelva.");
+    } catch (requestError) {
+      const backendMessage = axios.isAxiosError(requestError)
+        ? (requestError.response?.data as { message?: string | string[] } | undefined)?.message
+        : undefined;
+      setExtensionError(
+        (Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage) ||
+          "No se pudo enviar la solicitud.",
+      );
+    } finally {
+      setExtensionSaving(false);
+    }
+  };
+
   const consequenceTask = tasks.find((item) => item.id === openedConsequenceTaskId);
   const consequenceDraft = openedConsequenceTaskId
     ? taskDrafts[openedConsequenceTaskId]
@@ -2415,6 +2482,9 @@ export default function TasksPage() {
                           </span>
                           <p className="mt-2 text-xs text-[var(--ink-muted)]">
                             Horas estimadas actuales: {task.estimatedHours ?? "0"}
+                            {Number(task.authorizedExtraHours ?? 0) > 0
+                              ? ` + ${Number(task.authorizedExtraHours).toFixed(2)} autorizadas`
+                              : ""}
                           </p>
                         </td>
                         <td className="px-4 py-3 md:min-w-[220px]">
@@ -2591,7 +2661,9 @@ export default function TasksPage() {
                                 <div key={item.id} className="rounded-xl border border-[var(--line)] bg-white p-3">
                                   <div className="flex flex-wrap items-center gap-3 text-xs">
                                     <span className="font-mono">{item.updateDate}</span>
-                                    <span>{Number(item.workedHours).toFixed(2)} h</span>
+                                    <span title="Cronómetro + horas capturadas">
+                                      {(Number(item.workedHours) + (item.timerSeconds ?? 0) / 3600).toFixed(2)} h
+                                    </span>
                                     <span>{Number(item.progressPercent).toFixed(0)}%</span>
                                     <span className="text-[var(--ink-muted)]">
                                       {assigneeLabel(item.userId)}
@@ -3086,6 +3158,66 @@ export default function TasksPage() {
         </div>
       ) : null}
 
+      {extensionTask ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 px-4 py-6">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--line)] bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-semibold">Solicitar horas adicionales</h3>
+            <p className="mt-1 text-sm text-[var(--ink-muted)]">
+              {extensionTask.code} · {extensionTask.title}
+            </p>
+            <p className="mt-1 text-xs text-[var(--ink-muted)]">
+              Autorizadas hoy:{" "}
+              {(Number(extensionTask.estimatedHours ?? 0) + Number(extensionTask.authorizedExtraHours ?? 0)).toFixed(2)} h.
+              Gerencia decide cuántas aprobar.
+            </p>
+            <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
+              Horas que necesitas
+              <input
+                type="number"
+                min="0.25"
+                step="0.25"
+                value={extensionHours}
+                onChange={(event) => setExtensionHours(event.target.value)}
+                className="ui-control mt-1 w-full"
+              />
+            </label>
+            <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
+              Motivo
+              <textarea
+                value={extensionReason}
+                onChange={(event) => setExtensionReason(event.target.value)}
+                rows={3}
+                placeholder="Ej. El cliente pidió dos rondas más de correcciones"
+                className="ui-control mt-1 w-full"
+              />
+            </label>
+            {extensionError ? (
+              <p className="mt-3 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-sm text-[var(--danger)]">
+                {extensionError}
+              </p>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setExtensionTask(null)}
+                disabled={extensionSaving}
+                className="ui-btn ui-btn-secondary ui-btn-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitExtensionRequest()}
+                disabled={extensionSaving}
+                className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {extensionSaving ? "Enviando..." : "Enviar a gerencia"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {floatingTimerEntries.map(({ task: floatingTask, entry }) => (
         <FloatingTimerWidget
           key={floatingTask.id}
@@ -3120,6 +3252,7 @@ export default function TasksPage() {
           onStart={() => void onTimerAction(floatingTask.id, "doing")}
           onPause={() => void onTimerAction(floatingTask.id, "paused")}
           onFinish={() => void onTimerAction(floatingTask.id, "done")}
+          onRequestExtension={() => openExtensionRequest(floatingTask)}
         />
       ))}
     </div>

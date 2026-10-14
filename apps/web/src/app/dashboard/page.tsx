@@ -17,7 +17,11 @@ type Summary = {
 
 type WorkloadRow = {
   userId: string;
+  estimatedHours?: string;
+  /** Deprecated alias of estimatedHours kept by the API for older clients. */
   hoursWorked: string;
+  /** Real hours: timer + manual entries, from the shared hours ledger. */
+  workedHours?: string;
   activeSecondsWorked?: string;
   tasksCount: string;
 };
@@ -203,6 +207,7 @@ export default function DashboardPage() {
   const [taskProjectFilter, setTaskProjectFilter] = useState("");
   const [taskUserFilter, setTaskUserFilter] = useState("");
   const [taskSearchFilter, setTaskSearchFilter] = useState("");
+  const [fortnightUserSearch, setFortnightUserSearch] = useState("");
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [assignedHoursExpanded, setAssignedHoursExpanded] = useState(false);
   const [actualHoursExpanded, setActualHoursExpanded] = useState(false);
@@ -227,17 +232,17 @@ export default function DashboardPage() {
     if (workload.length === 0) {
       return 1;
     }
-    return Math.max(...workload.map((item) => Number(item.hoursWorked || 0)), 1);
+    return Math.max(
+      ...workload.map((item) => Number(item.estimatedHours ?? item.hoursWorked ?? 0)),
+      1,
+    );
   }, [workload]);
 
   const activeHoursMax = useMemo(() => {
     if (workload.length === 0) {
       return 1;
     }
-    return Math.max(
-      ...workload.map((item) => Number(item.activeSecondsWorked || 0) / 3600),
-      1,
-    );
+    return Math.max(...workload.map((item) => Number(item.workedHours ?? 0)), 1);
   }, [workload]);
 
   const getRiskLevel = (project: ProjectRow, progress?: ProjectProgress): RiskLevel => {
@@ -457,6 +462,16 @@ export default function DashboardPage() {
         return first.user.fullName.localeCompare(second.user.fullName, "es");
       });
   }, [classHoursByUserId, currentFortnight, tasks, users]);
+
+  const filteredFortnightCards = useMemo(() => {
+    const normalize = (value: string) =>
+      value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const query = normalize(fortnightUserSearch.trim());
+    if (!query) {
+      return currentFortnightCards;
+    }
+    return currentFortnightCards.filter(({ user }) => normalize(user.fullName).includes(query));
+  }, [currentFortnightCards, fortnightUserSearch]);
 
   const scrollFortnightCards = (direction: -1 | 1) => {
     const viewport = fortnightCardsRef.current;
@@ -1229,7 +1244,7 @@ export default function DashboardPage() {
                     <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
                   ) : (
                     workload.map((row) => {
-                      const hours = Number(row.hoursWorked || 0);
+                      const hours = Number(row.estimatedHours ?? row.hoursWorked ?? 0);
                       const pct = Math.min((hours / workloadMax) * 100, 100);
                       const workloadUser = usersById[row.userId];
                       const workloadLabel = workloadUser?.fullName
@@ -1259,7 +1274,7 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--line)] bg-white px-4 py-3">
                 <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  Horas reales trabajadas (cronómetro) por colaborador
+                  Horas reales trabajadas (cronómetro + captura manual) por colaborador
                 </p>
                 <button
                   type="button"
@@ -1275,7 +1290,8 @@ export default function DashboardPage() {
                     <p className="text-sm text-[var(--ink-muted)]">Sin datos aún.</p>
                   ) : (
                     workload.map((row) => {
-                      const activeHours = Number(row.activeSecondsWorked || 0) / 3600;
+                      const activeHours = Number(row.workedHours ?? 0);
+                      const estimatedForRow = Number(row.estimatedHours ?? row.hoursWorked ?? 0);
                       const pct = Math.min((activeHours / activeHoursMax) * 100, 100);
                       const workloadUser = usersById[row.userId];
                       const workloadLabel = workloadUser?.fullName
@@ -1287,7 +1303,9 @@ export default function DashboardPage() {
                         <div key={row.userId} className="mb-3">
                           <div className="mb-1 flex items-center justify-between gap-3">
                             <p className="text-xs font-semibold">{workloadLabel}</p>
-                            <p className="text-sm text-[var(--ink-muted)]">{activeHours.toFixed(2)} h</p>
+                            <p className="text-sm text-[var(--ink-muted)]">
+                              {activeHours.toFixed(2)} h de {estimatedForRow.toFixed(2)} h estimadas
+                            </p>
                           </div>
                           <div className="bar-track">
                             <div
@@ -1430,9 +1448,22 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        <input
+          type="search"
+          value={fortnightUserSearch}
+          onChange={(event) => setFortnightUserSearch(event.target.value)}
+          placeholder="Buscar persona por nombre..."
+          aria-label="Buscar persona en actividades de la quincena"
+          className="mt-4 w-full max-w-sm rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+        />
+
         {currentFortnightCards.length === 0 ? (
           <p className="mt-4 text-sm text-[var(--ink-muted)]">
             No hay usuarios activos para mostrar.
+          </p>
+        ) : filteredFortnightCards.length === 0 ? (
+          <p className="mt-4 text-sm text-[var(--ink-muted)]">
+            Ninguna persona coincide con &quot;{fortnightUserSearch}&quot;.
           </p>
         ) : (
           <div
@@ -1440,7 +1471,7 @@ export default function DashboardPage() {
             className="mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3"
             aria-label="Tarjetas de actividades de la quincena"
           >
-            {currentFortnightCards.map(({ user, activities, activityHours, classHours: userClassHours, classSessions, totalHours, remainingHours, exceededHours }) => (
+            {filteredFortnightCards.map(({ user, activities, activityHours, classHours: userClassHours, classSessions, totalHours, remainingHours, exceededHours }) => (
               <article
                 key={user.id}
                 className="flex h-[430px] w-full max-w-[380px] shrink-0 snap-start flex-col rounded-2xl border border-[var(--line)] bg-white p-4"

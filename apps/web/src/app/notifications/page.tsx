@@ -5,6 +5,20 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
 
+type TimeExtensionRow = {
+  id: string;
+  taskId: string;
+  taskCode: string | null;
+  taskTitle: string | null;
+  taskEstimatedHours: string | null;
+  taskAuthorizedExtraHours: string | null;
+  requesterName: string | null;
+  requestedHours: string;
+  reason: string;
+  source: "manual" | "auto";
+  createdAt: string;
+};
+
 type NotificationRow = {
   id: string;
   title: string;
@@ -22,6 +36,10 @@ export default function NotificationsPage() {
   const [info, setInfo] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "unread" | "read">("all");
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<TimeExtensionRow[]>([]);
+  const [approvedHoursDraft, setApprovedHoursDraft] = useState<Record<string, string>>({});
+  const [decisionNoteDraft, setDecisionNoteDraft] = useState<Record<string, string>>({});
+  const [resolvingRequestId, setResolvingRequestId] = useState("");
 
   useEffect(() => {
     const token = getStoredToken();
@@ -53,6 +71,71 @@ export default function NotificationsPage() {
   useEffect(() => {
     void loadNotifications(statusFilter);
   }, [statusFilter]);
+
+  const loadPendingRequests = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/time-extension-requests`, {
+        headers: authHeaders(),
+        params: { status: "pending" },
+      });
+      setPendingRequests(response.data as TimeExtensionRow[]);
+    } catch {
+      setError("No se pudieron cargar las solicitudes de horas.");
+    }
+  };
+
+  useEffect(() => {
+    if (role === "manager") {
+      void loadPendingRequests();
+    }
+  }, [role]);
+
+  const resolveRequest = async (request: TimeExtensionRow, decision: "approve" | "reject") => {
+    const note = (decisionNoteDraft[request.id] ?? "").trim();
+    if (decision === "reject" && note.length < 3) {
+      setError("Escribe el motivo del rechazo para que la persona lo vea.");
+      return;
+    }
+
+    const rawHours = approvedHoursDraft[request.id];
+    const approvedHours = rawHours ? Number(rawHours) : undefined;
+    if (decision === "approve" && approvedHours !== undefined && !(approvedHours > 0)) {
+      setError("Las horas autorizadas deben ser mayores a 0.");
+      return;
+    }
+
+    setResolvingRequestId(request.id);
+    try {
+      if (decision === "approve") {
+        await axios.patch(
+          `${API_URL}/time-extension-requests/${request.id}/approve`,
+          { approvedHours, note: note || undefined },
+          { headers: authHeaders() },
+        );
+        setInfo("Horas adicionales autorizadas.");
+      } else {
+        await axios.patch(
+          `${API_URL}/time-extension-requests/${request.id}/reject`,
+          { note },
+          { headers: authHeaders() },
+        );
+        setInfo("Solicitud rechazada.");
+      }
+      setError("");
+      await Promise.all([loadPendingRequests(), loadNotifications(statusFilter)]);
+    } catch (requestError) {
+      const backendMessage = axios.isAxiosError(requestError)
+        ? (requestError.response?.data as { message?: string | string[] } | undefined)?.message
+        : undefined;
+      setError(
+        (Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage) ||
+          "No se pudo resolver la solicitud.",
+      );
+      await loadPendingRequests();
+    } finally {
+      setResolvingRequestId("");
+    }
+  };
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.isRead).length,
@@ -95,7 +178,7 @@ export default function NotificationsPage() {
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">Sistema de proyectos</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">Notificaciones</h1>
             <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              Tareas subsecuentes que te han asignado.
+              Asignaciones, avisos de tiempo y solicitudes de horas adicionales.
             </p>
           </div>
           <button onClick={() => void markAllRead()} className="ui-btn ui-btn-primary">
@@ -119,6 +202,92 @@ export default function NotificationsPage() {
         {error ? <p className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">{error}</p> : null}
         {info ? <p className="mt-4 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/8 px-4 py-3 text-sm text-[var(--foreground)]">{info}</p> : null}
       </section>
+
+      {role === "manager" ? (
+        <section className="kpi-card fade-up p-5">
+          <h2 className="text-lg font-semibold">Solicitudes de horas adicionales</h2>
+          <p className="mt-1 text-sm text-[var(--ink-muted)]">
+            Pendientes de tu autorización. Las horas aprobadas se suman al estimado original.
+          </p>
+          {pendingRequests.length === 0 ? (
+            <p className="ui-empty mt-4 px-4 py-3 text-sm">No hay solicitudes pendientes.</p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {pendingRequests.map((request) => {
+                const estimated = Number(request.taskEstimatedHours ?? 0);
+                const extra = Number(request.taskAuthorizedExtraHours ?? 0);
+                const busy = resolvingRequestId === request.id;
+                return (
+                  <article key={request.id} className="rounded-2xl border border-amber-300 bg-amber-50/60 p-4">
+                    <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold">
+                          {request.taskCode} · {request.taskTitle}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                          {request.requesterName ?? "Colaborador"} ·{" "}
+                          {request.source === "auto" ? "Detectada automáticamente" : "Solicitud manual"} ·{" "}
+                          {new Date(request.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <p className="text-sm font-semibold">
+                        Pide {Number(request.requestedHours).toFixed(2)} h
+                        <span className="ml-2 text-xs font-normal text-[var(--ink-muted)]">
+                          (estimado {estimated.toFixed(2)} h
+                          {extra > 0 ? ` + ${extra.toFixed(2)} h ya autorizadas` : ""})
+                        </span>
+                      </p>
+                    </div>
+                    <p className="mt-2 text-sm">{request.reason}</p>
+                    <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
+                      <input
+                        type="number"
+                        min="0.25"
+                        step="0.25"
+                        value={approvedHoursDraft[request.id] ?? ""}
+                        onChange={(event) =>
+                          setApprovedHoursDraft((current) => ({ ...current, [request.id]: event.target.value }))
+                        }
+                        placeholder={`Horas a autorizar (${Number(request.requestedHours).toFixed(2)})`}
+                        aria-label="Horas a autorizar"
+                        className="ui-control md:w-56"
+                      />
+                      <input
+                        type="text"
+                        value={decisionNoteDraft[request.id] ?? ""}
+                        onChange={(event) =>
+                          setDecisionNoteDraft((current) => ({ ...current, [request.id]: event.target.value }))
+                        }
+                        placeholder="Nota (obligatoria al rechazar)"
+                        aria-label="Nota de la decisión"
+                        className="ui-control flex-1"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void resolveRequest(request, "approve")}
+                          className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          Autorizar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void resolveRequest(request, "reject")}
+                          className="ui-btn ui-btn-secondary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          Rechazar
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <section className="kpi-card fade-up overflow-hidden p-0">
         {loading ? (

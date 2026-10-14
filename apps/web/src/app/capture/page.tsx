@@ -1393,7 +1393,7 @@ export default function CapturePage() {
             </select>
             <input type="date" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={updateForm.updateDate} onChange={(event) => setUpdateForm({ ...updateForm, updateDate: event.target.value })} />
             <div className="grid gap-3 md:grid-cols-2">
-              <input type="number" min="0" step="0.5" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Horas trabajadas" value={updateForm.workedHours} onChange={(event) => setUpdateForm({ ...updateForm, workedHours: event.target.value })} />
+              <input type="number" min="0" step="0.5" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Horas manuales (se suman al cronómetro)" title="Solo captura aquí el tiempo que NO mediste con el cronómetro; se suma al tiempo del cronómetro de ese día." value={updateForm.workedHours} onChange={(event) => setUpdateForm({ ...updateForm, workedHours: event.target.value })} />
               <input type="number" min="0" max="100" step="0.5" className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Progreso %" value={updateForm.progressPercent} onChange={(event) => setUpdateForm({ ...updateForm, progressPercent: event.target.value })} />
             </div>
             <textarea className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Bloqueador (opcional)" value={updateForm.blockerReason} onChange={(event) => setUpdateForm({ ...updateForm, blockerReason: event.target.value })} rows={3} />

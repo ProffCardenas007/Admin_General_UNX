@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { getStoredEmail, getStoredRole, getStoredToken } from "../lib/api";
+import axios from "axios";
+import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../lib/api";
 
 const roleLabels: Record<string, string> = {
   manager: "Gerencia",
@@ -149,6 +150,7 @@ const MANAGER_NAV: NavItem[] = [
   { label: "Programación de clases", href: "/class-availability", icon: <IconClassAvailability /> },
   { label: "Cursos y sesiones", href: "/class-planning", icon: <IconClassSchedule /> },
   { label: "Grilla de sesiones", href: "/class-grid",     icon: <IconGrid /> },
+  { label: "Desviación de horas", href: "/hours-deviation", icon: <IconHistory /> },
   { label: "Reporte", href: "/quincenas", icon: <IconQuincena /> },
   { label: "Historial", href: "/history", icon: <IconHistory /> },
 ];
@@ -161,6 +163,35 @@ export default function AppNav() {
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!getStoredToken() || pathname === "/") {
+      return;
+    }
+
+    let cancelled = false;
+    const loadUnread = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/notifications`, {
+          headers: authHeaders(),
+          params: { status: "unread" },
+        });
+        if (!cancelled) {
+          setUnreadCount(Array.isArray(response.data) ? response.data.length : 0);
+        }
+      } catch {
+        // The badge is a convenience; ignore transient failures.
+      }
+    };
+
+    void loadUnread();
+    const intervalId = window.setInterval(() => void loadUnread(), 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [pathname]);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -240,6 +271,14 @@ export default function AppNav() {
           >
             <span className="app-sidebar-icon">{item.icon}</span>
             <span className="app-sidebar-label">{item.label}</span>
+            {item.href === "/notifications" && unreadCount > 0 ? (
+              <span
+                className="ml-auto rounded-full bg-[var(--danger)] px-1.5 text-[10px] font-semibold leading-4 text-white"
+                aria-label={`${unreadCount} notificaciones sin leer`}
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            ) : null}
           </Link>
         ))}
 
