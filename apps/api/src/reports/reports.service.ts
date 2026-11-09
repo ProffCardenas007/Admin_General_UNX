@@ -11,13 +11,19 @@ import { TaskEntity } from '../database/entities/task.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
+import { TaskEvaluationEntity } from '../database/entities/task-evaluation.entity';
+import { SemesterActivityWeightEntity } from '../database/entities/semester-activity-weight.entity';
 import { normalizeLeadSpecialties } from '../common/specialties';
 import { realHoursSql } from '../common/hours';
-import { APP_TIMEZONE } from '../common/dates';
+import { APP_TIMEZONE, todayKey } from '../common/dates';
 import type {
   TaskActivityType,
   TaskStatus,
 } from '../database/entities/task.entity';
+import {
+  SaveSemesterWeightsDto,
+  SaveTaskEvaluationDto,
+} from './dto/semester-evaluation.dto';
 
 const ACTIVITY_WEIGHTS: Record<TaskActivityType, number> = {
   creacion: 10,
@@ -67,7 +73,281 @@ export class ReportsService {
     private readonly usersRepository: Repository<UserEntity>,
     @InjectRepository(TaskUpdateEntity)
     private readonly taskUpdatesRepository: Repository<TaskUpdateEntity>,
+    @InjectRepository(TaskEvaluationEntity)
+    private readonly taskEvaluationsRepository: Repository<TaskEvaluationEntity>,
+    @InjectRepository(SemesterActivityWeightEntity)
+    private readonly semesterWeightsRepository: Repository<SemesterActivityWeightEntity>,
   ) {}
+
+  private semesterRange(year: number, semester: number) {
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      throw new BadRequestException('Invalid semester year');
+    }
+    if (semester !== 1 && semester !== 2) {
+      throw new BadRequestException('Semester must be 1 or 2');
+    }
+    return semester === 1
+      ? { from: `${year}-01-01`, to: `${year}-06-30` }
+      : { from: `${year}-07-01`, to: `${year}-12-31` };
+  }
+
+  private deliveryStatus(task: TaskEntity) {
+    if (task.completionOutcome === 'not_completed') return 'not_delivered';
+    if (task.status !== 'done') return 'not_delivered';
+    if (!task.completedAt || !task.dueDate) return 'delivered';
+    return todayKey(task.completedAt) <= task.dueDate
+      ? 'on_time'
+      : 'late';
+  }
+
+  async getSemesterEvaluation(year: number, semester: number) {
+    const period = this.semesterRange(year, semester);
+    const [users, tasks, storedWeights] = await Promise.all([
+      this.usersRepository.find({
+        where: { isActive: true },
+        order: { fullName: 'ASC' },
+      }),
+      this.tasksRepository
+        .createQueryBuilder('task')
+        .where('task.assignee_id IS NOT NULL')
+        .andWhere('task.due_date >= :from AND task.due_date <= :to', period)
+        .orderBy('task.due_date', 'ASC')
+        .addOrderBy('task.created_at', 'ASC')
+        .getMany(),
+      this.semesterWeightsRepository.find({ where: { year, semester } }),
+    ]);
+
+    const taskIds = tasks.map((task) => task.id);
+    const projectIds = [...new Set(tasks.map((task) => task.projectId))];
+    const [evaluations, projects] = await Promise.all([
+      taskIds.length
+        ? this.taskEvaluationsRepository.find({
+            where: { taskId: In(taskIds) },
+          })
+        : [],
+      projectIds.length
+        ? this.projectsRepository.find({ where: { id: In(projectIds) } })
+        : [],
+    ]);
+    const evaluationsByTask = new Map<string, TaskEvaluationEntity>(
+      evaluations.map(
+        (evaluation): [string, TaskEvaluationEntity] => [
+          evaluation.taskId,
+          evaluation,
+        ],
+      ),
+    );
+    const projectsById = new Map<string, ProjectEntity>(
+      projects.map(
+        (project): [string, ProjectEntity] => [project.id, project],
+      ),
+    );
+    const weights = {
+      ...ACTIVITY_WEIGHTS,
+      ...Object.fromEntries(
+        storedWeights.map((row) => [row.activityType, Number(row.weight)]),
+      ),
+    };
+
+    const activeUsers = users.filter((user) => user.role !== 'manager');
+    const rows = activeUsers
+      .map((user) => {
+        const userTasks = tasks.filter((task) => task.assigneeId === user.id);
+        const taskRows = userTasks.map((task) => {
+          const evaluation = evaluationsByTask.get(task.id);
+          const estimatedHours = Number(task.estimatedHours || 0);
+          const weight = weights[task.activityType];
+          const possiblePoints = estimatedHours * weight;
+          const grade =
+            evaluation === undefined ? null : Number(evaluation.grade);
+          return {
+            id: task.id,
+            code: task.code,
+            title: task.title,
+            projectName:
+              projectsById.get(task.projectId)?.name ?? 'Proyecto no encontrado',
+            activityType: task.activityType,
+            status: task.status,
+            completionOutcome: task.completionOutcome ?? null,
+            deliveryStatus: this.deliveryStatus(task),
+            dueDate: task.dueDate ?? null,
+            completedAt: task.completedAt?.toISOString() ?? null,
+            estimatedHours,
+            weight,
+            possiblePoints: Number(possiblePoints.toFixed(2)),
+            grade,
+            earnedPoints:
+              grade === null
+                ? null
+                : Number(((possiblePoints * grade) / 100).toFixed(2)),
+            comments: evaluation?.comments ?? null,
+          };
+        });
+        const gradedTasks = taskRows.filter((task) => task.grade !== null);
+        const possiblePoints = gradedTasks.reduce(
+          (sum, task) => sum + task.possiblePoints,
+          0,
+        );
+        const earnedPoints = gradedTasks.reduce(
+          (sum, task) => sum + (task.earnedPoints ?? 0),
+          0,
+        );
+        const activity = Object.fromEntries(
+          ACTIVITY_TYPES.map((activityType) => {
+            const activityTasks = taskRows.filter(
+              (task) => task.activityType === activityType,
+            );
+            const graded = activityTasks.filter((task) => task.grade !== null);
+            const activityPossible = graded.reduce(
+              (sum, task) => sum + task.possiblePoints,
+              0,
+            );
+            const activityEarned = graded.reduce(
+              (sum, task) => sum + (task.earnedPoints ?? 0),
+              0,
+            );
+            return [
+              activityType,
+              {
+                tasks: activityTasks.length,
+                graded: graded.length,
+                estimatedHours: Number(
+                  activityTasks
+                    .reduce((sum, task) => sum + task.estimatedHours, 0)
+                    .toFixed(2),
+                ),
+                possiblePoints: Number(activityPossible.toFixed(2)),
+                earnedPoints: Number(activityEarned.toFixed(2)),
+                grade:
+                  activityPossible > 0
+                    ? Number(
+                        ((activityEarned / activityPossible) * 100).toFixed(1),
+                      )
+                    : null,
+              },
+            ];
+          }),
+        );
+
+        return {
+          userId: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+          tasks: taskRows,
+          taskCount: taskRows.length,
+          gradedCount: gradedTasks.length,
+          completedCount: taskRows.filter(
+            (task) =>
+              task.deliveryStatus === 'on_time' ||
+              task.deliveryStatus === 'late' ||
+              task.deliveryStatus === 'delivered',
+          ).length,
+          onTimeCount: taskRows.filter(
+            (task) => task.deliveryStatus === 'on_time',
+          ).length,
+          lateCount: taskRows.filter((task) => task.deliveryStatus === 'late')
+            .length,
+          notDeliveredCount: taskRows.filter(
+            (task) => task.deliveryStatus === 'not_delivered',
+          ).length,
+          pendingCount: taskRows.filter(
+            (task) => task.deliveryStatus === 'pending',
+          ).length,
+          estimatedHours: Number(
+            taskRows
+              .reduce((sum, task) => sum + task.estimatedHours, 0)
+              .toFixed(2),
+          ),
+          possiblePoints: Number(possiblePoints.toFixed(2)),
+          earnedPoints: Number(earnedPoints.toFixed(2)),
+          finalGrade:
+            possiblePoints > 0
+              ? Number(((earnedPoints / possiblePoints) * 100).toFixed(1))
+              : null,
+          activity,
+        };
+      })
+      .filter((user) => user.taskCount > 0)
+      .sort(
+        (left, right) =>
+          (right.finalGrade ?? -1) - (left.finalGrade ?? -1) ||
+          right.gradedCount - left.gradedCount ||
+          left.fullName.localeCompare(right.fullName, 'es'),
+      )
+      .map((user, index) => ({ ...user, rank: index + 1 }));
+
+    const gradedUsers = rows.filter((user) => user.finalGrade !== null);
+    return {
+      year,
+      semester,
+      period,
+      weights,
+      customizedWeights: storedWeights.length > 0,
+      team: {
+        users: rows.length,
+        tasks: rows.reduce((sum, user) => sum + user.taskCount, 0),
+        gradedTasks: rows.reduce((sum, user) => sum + user.gradedCount, 0),
+        averageGrade:
+          gradedUsers.length > 0
+            ? Number(
+                (
+                  gradedUsers.reduce(
+                    (sum, user) => sum + (user.finalGrade ?? 0),
+                    0,
+                  ) / gradedUsers.length
+                ).toFixed(1),
+              )
+            : null,
+      },
+      users: rows,
+    };
+  }
+
+  async saveSemesterWeights(dto: SaveSemesterWeightsDto, actorId: string) {
+    this.semesterRange(dto.year, dto.semester);
+    for (const activityType of ACTIVITY_TYPES) {
+      const value = Number(dto.weights[activityType]);
+      if (!Number.isFinite(value) || value < 0 || value > 100) {
+        throw new BadRequestException(
+          `Invalid weight for ${activityType}; use a value from 0 to 100`,
+        );
+      }
+      let row = await this.semesterWeightsRepository.findOne({
+        where: {
+          year: dto.year,
+          semester: dto.semester,
+          activityType,
+        },
+      });
+      row ??= this.semesterWeightsRepository.create({
+        year: dto.year,
+        semester: dto.semester,
+        activityType,
+      });
+      row.weight = String(value);
+      row.updatedBy = actorId;
+      await this.semesterWeightsRepository.save(row);
+    }
+    return this.getSemesterEvaluation(dto.year, dto.semester);
+  }
+
+  async saveTaskEvaluation(
+    taskId: string,
+    dto: SaveTaskEvaluationDto,
+    actorId: string,
+  ) {
+    const task = await this.tasksRepository.findOne({ where: { id: taskId } });
+    if (!task) throw new NotFoundException('Task not found');
+    let evaluation = await this.taskEvaluationsRepository.findOne({
+      where: { taskId },
+    });
+    evaluation ??= this.taskEvaluationsRepository.create({ taskId });
+    evaluation.grade = String(dto.grade);
+    evaluation.comments = dto.comments?.trim() || null;
+    evaluation.evaluatedBy = actorId;
+    return this.taskEvaluationsRepository.save(evaluation);
+  }
 
   async getUserPerformance(filters: { from?: string; to?: string }) {
     const from = this.validateDate(filters.from, 'from');

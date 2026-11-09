@@ -19,6 +19,7 @@ const MIGRATION_SCRIPTS = [
   'migrate-time-extensions.js',
   'migrate-work-plans.js',
   'migrate-messaging.js',
+  'migrate-semester-evaluations.js',
 ];
 
 export async function runStartupMigrations() {

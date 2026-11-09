@@ -5,6 +5,7 @@ import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
+import SemesterEvaluationPanel from "./SemesterEvaluationPanel";
 
 type ActivityType =
   | "creacion"
@@ -53,7 +54,7 @@ type PerformanceReport = {
 };
 
 type HalfMonth = "first" | "second";
-type PeriodMode = "fortnight" | "global";
+type PeriodMode = "fortnight" | "semester" | "global";
 
 const activityOrder: ActivityType[] = [
   "creacion",
@@ -154,6 +155,10 @@ export default function UserReportsPage() {
     if (getStoredRole() !== "manager") {
       return;
     }
+    if (mode === "semester") {
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
     const loadReport = async () => {
@@ -234,6 +239,14 @@ export default function UserReportsPage() {
             <div className="inline-flex rounded-xl border border-[var(--line)] bg-white p-1">
               <button
                 type="button"
+                aria-pressed={mode === "semester"}
+                onClick={() => setMode("semester")}
+                className={`ui-btn ui-btn-sm ${mode === "semester" ? "ui-btn-primary" : "ui-btn-secondary"}`}
+              >
+                Semestral
+              </button>
+              <button
+                type="button"
                 aria-pressed={mode === "fortnight"}
                 onClick={() => setMode("fortnight")}
                 className={`ui-btn ui-btn-sm ${mode === "fortnight" ? "ui-btn-primary" : "ui-btn-secondary"}`}
@@ -286,24 +299,28 @@ export default function UserReportsPage() {
         <p className="mt-3 text-xs text-[var(--ink-muted)]">
           {mode === "global"
             ? "Acumulado histórico completo."
+            : mode === "semester"
+              ? "Evaluación de enero a junio o de julio a diciembre."
             : range
               ? `Periodo analizado: ${range.from} al ${range.to}.`
               : "Selecciona un mes válido."}
         </p>
       </section>
 
-      {error ? (
+      {mode === "semester" ? <SemesterEvaluationPanel /> : null}
+
+      {mode !== "semester" && error ? (
         <p className="rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
 
-      {loading ? (
+      {mode !== "semester" && loading ? (
         <section className="kpi-card p-5">
           <div className="ui-skeleton h-7 w-56" />
           <div className="ui-skeleton mt-4 h-28 w-full" />
         </section>
-      ) : report ? (
+      ) : mode !== "semester" && report ? (
         <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[

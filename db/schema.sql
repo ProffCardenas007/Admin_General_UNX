@@ -532,3 +532,24 @@ CREATE TABLE IF NOT EXISTS work_plan_cells (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_work_plan_cell
     ON work_plan_cells(row_id, COALESCE(column_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+CREATE TABLE IF NOT EXISTS task_evaluations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+    grade NUMERIC(5,2) NOT NULL CHECK (grade >= 0 AND grade <= 100),
+    comments TEXT,
+    evaluated_by UUID NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS semester_activity_weights (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    year INT NOT NULL CHECK (year >= 2000 AND year <= 2100),
+    semester SMALLINT NOT NULL CHECK (semester IN (1, 2)),
+    activity_type VARCHAR(30) NOT NULL,
+    weight NUMERIC(8,2) NOT NULL CHECK (weight >= 0 AND weight <= 100),
+    updated_by UUID NOT NULL REFERENCES users(id),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_semester_activity_weight UNIQUE (year, semester, activity_type)
+);

@@ -6,13 +6,17 @@ describe('ReportsService', () => {
   let projectsRepository: any;
   let usersRepository: any;
   let taskUpdatesRepository: any;
+  let taskEvaluationsRepository: any;
+  let semesterWeightsRepository: any;
   let qb: any;
 
   beforeEach(() => {
     qb = {
+      where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       innerJoin: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([
         {
           id: 'task-1',
@@ -49,12 +53,26 @@ describe('ReportsService', () => {
     taskUpdatesRepository = {
       createQueryBuilder: jest.fn(),
     };
+    taskEvaluationsRepository = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn(),
+      create: jest.fn((value) => value),
+      save: jest.fn((value) => Promise.resolve(value)),
+    };
+    semesterWeightsRepository = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn(),
+      create: jest.fn((value) => value),
+      save: jest.fn((value) => Promise.resolve(value)),
+    };
 
     service = new ReportsService(
       tasksRepository,
       projectsRepository,
       usersRepository,
       taskUpdatesRepository,
+      taskEvaluationsRepository,
+      semesterWeightsRepository,
     );
   });
 
@@ -108,6 +126,76 @@ describe('ReportsService', () => {
     expect(csv).toContain(
       'task-1,TASK-1,Task worker,PRJ-1,Proj 1,worker@acme.com',
     );
+  });
+
+  it('calculates semester grade from estimated hours and activity weights', async () => {
+    usersRepository.find.mockResolvedValue([
+      {
+        id: 'worker-1',
+        fullName: 'Ana',
+        email: 'ana@acme.com',
+        role: 'worker',
+        isActive: true,
+      },
+    ]);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'task-1',
+        code: 'TASK-1',
+        title: 'Contenido',
+        projectId: 'project-1',
+        assigneeId: 'worker-1',
+        activityType: 'creacion',
+        status: 'done',
+        completionOutcome: 'completed',
+        dueDate: '2026-06-15',
+        completedAt: new Date('2026-06-14T18:00:00.000Z'),
+        estimatedHours: '4',
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+      {
+        id: 'task-2',
+        code: 'TASK-2',
+        title: 'Pendiente',
+        projectId: 'project-1',
+        assigneeId: 'worker-1',
+        activityType: 'revision',
+        status: 'doing',
+        completionOutcome: null,
+        dueDate: '2026-06-20',
+        completedAt: null,
+        estimatedHours: '2',
+        createdAt: new Date('2026-05-02T00:00:00.000Z'),
+      },
+    ]);
+    taskEvaluationsRepository.find.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        grade: '80',
+        comments: null,
+      },
+    ]);
+
+    const result = await service.getSemesterEvaluation(2026, 1);
+
+    expect(result.period).toEqual({
+      from: '2026-01-01',
+      to: '2026-06-30',
+    });
+    expect(result.users[0]).toMatchObject({
+      finalGrade: 80,
+      possiblePoints: 40,
+      earnedPoints: 32,
+      onTimeCount: 1,
+      notDeliveredCount: 1,
+    });
+    expect(result.users[0].tasks[0]).toMatchObject({
+      deliveryStatus: 'on_time',
+      weight: 10,
+      possiblePoints: 40,
+      grade: 80,
+      earnedPoints: 32,
+    });
   });
 
   it('calculates weighted user performance and ranking', async () => {

@@ -44,6 +44,8 @@ import { MessageConversationEntity } from './database/entities/message-conversat
 import { MessageConversationParticipantEntity } from './database/entities/message-conversation-participant.entity';
 import { MessageEntity } from './database/entities/message.entity';
 import { MessagingModule } from './messaging/messaging.module';
+import { TaskEvaluationEntity } from './database/entities/task-evaluation.entity';
+import { SemesterActivityWeightEntity } from './database/entities/semester-activity-weight.entity';
 
 @Module({
   imports: [
@@ -101,6 +103,8 @@ import { MessagingModule } from './messaging/messaging.module';
             MessageConversationEntity,
             MessageConversationParticipantEntity,
             MessageEntity,
+            TaskEvaluationEntity,
+            SemesterActivityWeightEntity,
           ],
           synchronize: false,
         };
