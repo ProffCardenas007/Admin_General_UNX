@@ -101,6 +101,21 @@ export class TasksController {
     return this.tasksService.update(taskId, dto, req.user);
   }
 
+  @Patch(':taskId/claim')
+  @Roles('lead', 'worker')
+  claim(
+    @Param('taskId') taskId: string,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'lead' | 'worker';
+      };
+    },
+  ) {
+    return this.tasksService.claim(taskId, req.user);
+  }
+
   @Patch(':taskId/not-completed')
   @Roles('manager', 'lead')
   markNotCompleted(

@@ -105,7 +105,7 @@ export class ProjectsService {
       qb.leftJoin(
         TaskEntity,
         'lead_task',
-        'lead_task.project_id = project.id AND lead_task.assignee_id = :actorId',
+        'lead_task.project_id = project.id AND (lead_task.assignee_id = :actorId OR lead_task.assignee_id IS NULL)',
         { actorId: actor.id },
       ).distinct(true);
 
@@ -123,7 +123,7 @@ export class ProjectsService {
       qb.innerJoin(
         TaskEntity,
         'task',
-        'task.project_id = project.id AND task.assignee_id = :actorId',
+        'task.project_id = project.id AND (task.assignee_id = :actorId OR task.assignee_id IS NULL)',
         { actorId: actor.id },
       ).distinct(true);
     }

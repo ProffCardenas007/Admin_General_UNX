@@ -12,6 +12,7 @@
     "migrate:dynamic-specialties": "node scripts/migrate-dynamic-specialties.js",
     "migrate:specialties:v2": "node scripts/migrate-specialties-v2.js",
     "migrate:task-activity": "node scripts/migrate-task-activity.js",
+    "migrate:work-plans": "node scripts/migrate-work-plans.js",
     "migrate:task-timer": "node scripts/migrate-task-timer.js",
     "migrate:projects:uniqueness": "node scripts/migrate-project-uniqueness.js",
     "migrate:created-by:ownership": "node scripts/migrate-created-by-ownership.js",

@@ -229,7 +229,10 @@ export class TasksService {
     }
 
     if (actor.role === 'worker') {
-      qb.andWhere('task.assignee_id = :assigneeId', { assigneeId: actor.id });
+      qb.andWhere(
+        '(task.assignee_id = :assigneeId OR task.assignee_id IS NULL)',
+        { assigneeId: actor.id },
+      );
     } else if (actor.role === 'lead') {
       const leadScope = filters.scope === 'assigned' ? 'assigned' : 'my';
       if (leadScope === 'assigned') {
@@ -245,9 +248,15 @@ export class TasksService {
         qb.andWhere('project_scope.scope IN (:...scopes)', {
           scopes: leadSpecialties,
         });
-        qb.andWhere('task.assignee_id != :actorId', { actorId: actor.id });
+        qb.andWhere(
+          '(task.assignee_id != :actorId OR task.assignee_id IS NULL)',
+          { actorId: actor.id },
+        );
       } else {
-        qb.andWhere('task.assignee_id = :assigneeId', { assigneeId: actor.id });
+        qb.andWhere(
+          '(task.assignee_id = :assigneeId OR task.assignee_id IS NULL)',
+          { assigneeId: actor.id },
+        );
       }
     } else if (filters.assigneeId) {
       qb.andWhere('task.assignee_id = :assigneeId', {
@@ -606,6 +615,13 @@ export class TasksService {
 
     const resolvedAssigneeId =
       actor.role === 'worker' ? actor.id : dto.assigneeId;
+    const resolvedStatus = dto.status ?? 'todo';
+
+    if (!resolvedAssigneeId && resolvedStatus !== 'todo') {
+      throw new BadRequestException(
+        'Unassigned tasks must be created with todo status',
+      );
+    }
 
     const taskPayload = {
       projectId: dto.projectId,
@@ -614,7 +630,7 @@ export class TasksService {
       description: dto.description,
       assigneeId: resolvedAssigneeId,
       createdBy: actor.id,
-      status: dto.status ?? 'todo',
+      status: resolvedStatus,
       priority: dto.priority ?? 'medium',
       dueDate: dto.dueDate,
       estimatedHours: String(dto.estimatedHours ?? 0),
@@ -654,6 +670,37 @@ export class TasksService {
         manager.getRepository(NotificationEntity),
       );
       return created;
+    });
+  }
+
+  async claim(
+    taskId: string,
+    actor: {
+      id: string;
+      role: 'lead' | 'worker';
+    },
+  ) {
+    return this.tasksRepository.manager.transaction(async (manager) => {
+      const transactionalTasks = manager.getRepository(TaskEntity);
+      const task = await transactionalTasks.findOne({
+        where: { id: taskId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!task) {
+        throw new NotFoundException('Task not found');
+      }
+      if (task.assigneeId) {
+        throw new ConflictException('La tarea ya fue tomada por otro usuario.');
+      }
+      if (task.status !== 'todo') {
+        throw new BadRequestException(
+          'Solo se pueden tomar tareas pendientes sin asignar.',
+        );
+      }
+
+      task.assigneeId = actor.id;
+      return transactionalTasks.save(task);
     });
   }
 

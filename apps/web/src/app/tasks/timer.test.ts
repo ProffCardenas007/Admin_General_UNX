@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   STALE_TIMER_HOURS,
   isTimerStale,
+  pickAvailableTasks,
   pickMyActiveTasks,
   summarizeActiveTasks,
   timerProgress,
@@ -92,6 +93,17 @@ describe("my active tasks", () => {
 
   it("returns nothing without a signed-in user", () => {
     assert.deepEqual(pickMyActiveTasks([t("a", "doing", { assigneeId: undefined })], ""), []);
+  });
+
+  it("finds pending unassigned tasks and orders them by title", () => {
+    const list = pickAvailableTasks([
+      t("zeta", "todo", { assigneeId: undefined, title: "Zeta" }),
+      t("assigned", "todo", { title: "Asignada" }),
+      t("blocked", "blocked", { assigneeId: undefined, title: "Bloqueada" }),
+      t("alpha", "todo", { assigneeId: undefined, title: "Álgebra" }),
+    ]);
+
+    assert.deepEqual(list.map((task) => task.id), ["alpha", "zeta"]);
   });
 
   it("totals the saved and running time and counts each state", () => {

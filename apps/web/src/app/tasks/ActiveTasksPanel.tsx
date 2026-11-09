@@ -19,8 +19,11 @@ import type { TaskRow } from "./types";
  */
 export default function ActiveTasksPanel({
   tasks,
+  availableTasks,
+  canClaim,
   projectLabel,
   savingTaskId,
+  onClaim,
   onStart,
   onPause,
   onFinish,
@@ -28,8 +31,12 @@ export default function ActiveTasksPanel({
 }: {
   /** Already filtered to the signed-in person's running and paused tasks. */
   tasks: TaskRow[];
+  /** Pending tasks published without an assignee. */
+  availableTasks: TaskRow[];
+  canClaim: boolean;
   projectLabel: (projectId: string) => string;
   savingTaskId: string;
+  onClaim: (taskId: string) => void;
   onStart: (taskId: string) => void;
   onPause: (taskId: string) => void;
   onFinish: (taskId: string) => void;
@@ -205,6 +212,69 @@ export default function ActiveTasksPanel({
           })}
         </div>
       )}
+
+      <div className="mt-5 border-t border-[var(--line)] pt-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="font-semibold">Tareas disponibles para tomar</h3>
+            <p className="text-sm text-[var(--ink-muted)]">
+              Actividades publicadas sin responsable. Al tomar una, quedará asignada a tu usuario.
+            </p>
+          </div>
+          <span className="w-fit rounded-full border border-[var(--line)] bg-[var(--background)] px-3 py-1 text-xs font-semibold">
+            {availableTasks.length} disponibles
+          </span>
+        </div>
+
+        {availableTasks.length === 0 ? (
+          <p className="mt-3 rounded-xl border border-dashed border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--ink-muted)]">
+            No hay tareas disponibles por el momento.
+          </p>
+        ) : (
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {availableTasks.map((task) => {
+              const saving = savingTaskId === task.id;
+              return (
+                <article key={task.id} className="flex flex-col rounded-2xl border border-sky-200 bg-sky-50/50 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-sky-700">Disponible</span>
+                    <span className="font-mono text-xs text-[var(--ink-muted)]">{task.code}</span>
+                  </div>
+                  <p className="mt-2 break-words text-sm font-semibold">{task.title}</p>
+                  <p className="mt-0.5 text-xs text-[var(--ink-muted)]">{projectLabel(task.projectId)}</p>
+                  {task.description ? (
+                    <p className="mt-3 line-clamp-3 text-sm text-[var(--ink-muted)]">{task.description}</p>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-full border border-[var(--line)] bg-white px-2 py-1">
+                      {Number(task.estimatedHours ?? 0).toFixed(1)} h estimadas
+                    </span>
+                    {task.dueDate ? (
+                      <span className="rounded-full border border-[var(--line)] bg-white px-2 py-1">
+                        Vence {task.dueDate.slice(0, 10)}
+                      </span>
+                    ) : null}
+                  </div>
+                  {canClaim ? (
+                    <button
+                      type="button"
+                      onClick={() => onClaim(task.id)}
+                      disabled={saving}
+                      className="ui-btn ui-btn-primary ui-btn-sm mt-4 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {saving ? "Tomando..." : "Tomar tarea"}
+                    </button>
+                  ) : (
+                    <p className="mt-4 text-xs text-[var(--ink-muted)]">
+                      Disponible para líderes y colaboradores.
+                    </p>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

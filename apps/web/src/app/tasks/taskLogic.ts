@@ -154,7 +154,7 @@ export const filterTasks = (tasks: TaskRow[], projects: ProjectRow[], filters: T
       task.code.toLowerCase().includes(filters.search.toLowerCase()) ||
       task.title.toLowerCase().includes(filters.search.toLowerCase());
 
-    return bySearch && byDoneStatus;
+    return !!task.assigneeId && bySearch && byDoneStatus;
   });
 
   return result.sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));

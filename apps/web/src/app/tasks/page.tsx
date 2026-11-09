@@ -29,7 +29,7 @@ import {
   pickPriorityTasks,
   toDateKey,
 } from "./taskLogic";
-import { formatActiveDuration as formatDuration, pickMyActiveTasks } from "./timer";
+import { formatActiveDuration as formatDuration, pickAvailableTasks, pickMyActiveTasks } from "./timer";
 import type { HalfMonth, ProjectRow, TaskDraft, TaskRow, TaskUpdateRow, UserRow } from "./types";
 
 export default function TasksPage() {
@@ -98,6 +98,7 @@ export default function TasksPage() {
   const [exportError, setExportError] = useState("");
   const [showDoneTasks, setShowDoneTasks] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [operationalViewExpanded, setOperationalViewExpanded] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
 
   const [floatingTimers, setFloatingTimers] = useState<
@@ -496,6 +497,10 @@ export default function TasksPage() {
   );
 
   const myActiveTasks = useMemo(() => pickMyActiveTasks(tasks, currentUserId), [tasks, currentUserId]);
+  const availableTasks = useMemo(
+    () => pickAvailableTasks(tasks),
+    [tasks],
+  );
 
   const taskDueSemaforo = (task: TaskRow) => dueSemaforo(task, todayIso);
 
@@ -544,6 +549,53 @@ export default function TasksPage() {
     }));
     setEditingTaskId("");
     setInfo(`Tarea ${updatedTask.code} actualizada.`);
+  };
+
+  const onClaimTask = async (taskId: string) => {
+    setInfo("");
+    setError("");
+    setSavingTaskId(taskId);
+
+    try {
+      const response = await axios.patch<TaskRow>(
+        `${API_URL}/tasks/${taskId}/claim`,
+        {},
+        { headers: authHeaders() },
+      );
+      const claimedTask = response.data;
+      setTasks((current) =>
+        current.map((task) => (task.id === claimedTask.id ? claimedTask : task)),
+      );
+      setTaskDrafts((current) => ({
+        ...current,
+        [claimedTask.id]: {
+          ...current[claimedTask.id],
+          status: claimedTask.status,
+          priority: claimedTask.priority,
+          assigneeId: claimedTask.assigneeId ?? "",
+          description: claimedTask.description ?? "",
+          dueDate: claimedTask.dueDate ?? "",
+          estimatedHours: claimedTask.estimatedHours ?? "",
+          handoffToUserId: current[claimedTask.id]?.handoffToUserId ?? "",
+          handoffTitle: current[claimedTask.id]?.handoffTitle ?? "",
+          handoffMessage: current[claimedTask.id]?.handoffMessage ?? "",
+          nextActivityType: current[claimedTask.id]?.nextActivityType ?? "creacion",
+          nextDueDate: current[claimedTask.id]?.nextDueDate ?? "",
+          nextEstimatedHours: current[claimedTask.id]?.nextEstimatedHours ?? "",
+        },
+      }));
+      setInfo(`La tarea ${claimedTask.code} quedó asignada a tu usuario.`);
+    } catch (caughtError) {
+      setError(
+        extractErrorMessage(
+          caughtError,
+          "No se pudo tomar la tarea. Es posible que otra persona ya la haya tomado.",
+        ),
+      );
+      await loadData(role);
+    } finally {
+      setSavingTaskId("");
+    }
   };
 
   const onSaveTaskQuickEdit = async (taskId: string) => {
@@ -1056,8 +1108,11 @@ export default function TasksPage() {
 
         <ActiveTasksPanel
           tasks={myActiveTasks}
+          availableTasks={availableTasks}
+          canClaim={role === "lead" || role === "worker"}
           projectLabel={projectLabel}
           savingTaskId={savingTaskId}
+          onClaim={(taskId) => void onClaimTask(taskId)}
           onStart={(taskId) => void onTimerAction(taskId, "doing")}
           onPause={(taskId) => void onTimerAction(taskId, "paused")}
           onFinish={(taskId) => void onTimerAction(taskId, "done")}
@@ -1065,6 +1120,30 @@ export default function TasksPage() {
         />
 
         <div className="mt-5 rounded-2xl border border-[var(--line)] bg-gradient-to-r from-white via-[var(--background)] to-white p-4">
+          <button
+            type="button"
+            aria-expanded={operationalViewExpanded}
+            aria-controls="operational-task-view"
+            onClick={() => setOperationalViewExpanded((expanded) => !expanded)}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <span>
+              <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                {isWorker ? "Mi jornada" : "Vista operativa"}
+              </span>
+              <span className="mt-1 block text-sm text-[var(--ink-muted)]">
+                {workerKpis.active} pendientes · {workerKpis.doing} en curso · {workerKpis.blocked} bloqueadas
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-sm font-semibold text-[var(--accent)]">
+              {operationalViewExpanded ? "Ocultar" : "Desplegar"}
+              <span aria-hidden="true" className="text-lg leading-none">
+                {operationalViewExpanded ? "−" : "+"}
+              </span>
+            </span>
+          </button>
+          {operationalViewExpanded ? (
+            <div id="operational-task-view" className="mt-4 border-t border-[var(--line)] pt-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
@@ -1227,7 +1306,9 @@ export default function TasksPage() {
                 </div>
               </div>
             </div>
-          </div>
+            </div>
+            ) : null}
+        </div>
 
         {canManagePlanning ? (
           <div className="mt-6 space-y-4">

@@ -6,6 +6,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { groupHoursByLabel } from "./reportLogic";
 
 type TaskRow = {
   id: string;
@@ -30,6 +31,20 @@ type UserRow = {
   role: "manager" | "lead" | "worker";
 };
 
+type ClassHourBreakdown = {
+  program: string;
+  activityType: string;
+  hours: number;
+  sessionsCount: number;
+};
+
+type ClassHoursRow = {
+  userId: string;
+  classHours: number;
+  sessionsCount: number;
+  breakdown: ClassHourBreakdown[];
+};
+
 type HalfMonth = "first" | "second";
 
 const chartPalette = [
@@ -48,19 +63,6 @@ const toDateKey = (date: Date) => {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-};
-
-const parseTaskDateKey = (raw?: string) => {
-  if (!raw) {
-    return "";
-  }
-
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  return toDateKey(date);
 };
 
 const getQuincenaRange = (yearMonth: string, half: HalfMonth) => {
@@ -142,11 +144,21 @@ export default function QuincenasPage() {
       cursorY += 14;
       doc.text(`Rango: ${dateRangeLabel}`, marginX, cursorY);
       cursorY += 14;
-      doc.text(`Horas totales del equipo: ${totalProjectHours.toFixed(2)} h`, marginX, cursorY);
+      doc.text(
+        "El periodo filtra las clases; las tareas incluyen todas las horas estimadas asignadas.",
+        marginX,
+        cursorY,
+      );
+      cursorY += 14;
+      doc.text(
+        `Horas totales: ${totalWorkHours.toFixed(2)} h · Tareas/proyectos: ${totalProjectHours.toFixed(2)} h · Clase: ${totalClassHours.toFixed(2)} h`,
+        marginX,
+        cursorY,
+      );
 
       autoTable(doc, {
         startY: cursorY + 16,
-        head: [["Proyecto", "Academia - Especialidad", "Horas", "Tareas", "Participacion"]],
+        head: [["Proyecto", "Academia - Especialidad", "Horas asignadas", "Tareas", "% tareas"]],
         body:
           projectSummary.length === 0
             ? [["Sin datos", "-", "0.00 h", "0", "0.0%"]]
@@ -170,6 +182,28 @@ export default function QuincenasPage() {
 
       autoTable(doc, {
         startY: cursorY,
+        head: [["Programa", "Actividad docente", "Horas", "Clases", "% docente", "% total"]],
+        body:
+          teachingDistribution.length === 0
+            ? [["Sin datos", "-", "0.00 h", "0", "0.0%", "0.0%"]]
+            : teachingDistribution.map((row) => [
+                row.program,
+                row.activityType,
+                `${row.hours.toFixed(2)} h`,
+                String(row.sessionsCount),
+                `${(totalClassHours > 0 ? (row.hours / totalClassHours) * 100 : 0).toFixed(1)}%`,
+                `${(totalWorkHours > 0 ? (row.hours / totalWorkHours) * 100 : 0).toFixed(1)}%`,
+              ]),
+        styles: { fontSize: 9, cellPadding: 5 },
+        headStyles: { fillColor: [11, 79, 108] },
+      });
+
+      cursorY =
+        ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable
+          ?.finalY ?? cursorY) + 20;
+
+      autoTable(doc, {
+        startY: cursorY,
         head: [["Distribucion general del equipo", "Horas", "Participacion"]],
         body:
           teamSpecialtyDistribution.length === 0
@@ -189,22 +223,24 @@ export default function QuincenasPage() {
 
       autoTable(doc, {
         startY: cursorY,
-        head: [["Trabajador", "Horas", "Tareas", "Distribucion por academia-especialidad"]],
+        head: [["Profesor", "Total", "Tareas/proyectos", "Clase", "Clases", "Distribución"]],
         body:
           personStats.length === 0
-            ? [["Sin datos", "0.00 h", "0", "-"]]
+            ? [["Sin datos", "0.00 h", "0.00 h", "0.00 h", "0", "-"]]
             : personStats.map((person) => [
                 person.fullName,
                 `${person.totalHours.toFixed(2)} h`,
-                String(person.tasksCount),
-                person.specialties
-                  .map((specialty) => `${specialty.specialty}: ${specialty.pct.toFixed(1)}%`)
+                `${person.administrativeHours.toFixed(2)} h`,
+                `${person.teachingHours.toFixed(2)} h`,
+                String(person.sessionsCount),
+                person.distribution
+                  .map((row) => `${row.label}: ${row.pct.toFixed(1)}%`)
                   .join(" | "),
               ]),
         styles: { fontSize: 8.5, cellPadding: 5 },
         headStyles: { fillColor: [245, 158, 11] },
         columnStyles: {
-          3: { cellWidth: 260 },
+          5: { cellWidth: 210 },
         },
       });
 
@@ -225,6 +261,8 @@ export default function QuincenasPage() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [classHours, setClassHours] = useState<ClassHoursRow[]>([]);
+  const [classHoursLoading, setClassHoursLoading] = useState(false);
 
   const projectsById = useMemo(
     () => Object.fromEntries(projects.map((project) => [project.id, project])),
@@ -242,28 +280,10 @@ export default function QuincenasPage() {
     [halfMonth, yearMonth],
   );
 
-  const filteredAssignedTasks = useMemo(() => {
-    if (!quincenaRange) {
-      return [] as TaskRow[];
-    }
-
-    return tasks.filter((task) => {
-      if (!task.assigneeId) {
-        return false;
-      }
-
-      if (task.status !== "done") {
-        return false;
-      }
-
-      const dateKey = parseTaskDateKey(task.dueDate);
-      if (!dateKey) {
-        return false;
-      }
-
-      return dateKey >= quincenaRange.startKey && dateKey <= quincenaRange.endKey;
-    });
-  }, [quincenaRange, tasks]);
+  const filteredAssignedTasks = useMemo(
+    () => tasks.filter((task) => Boolean(task.assigneeId)),
+    [tasks],
+  );
 
   const projectSummary = useMemo(() => {
     const grouped = new Map<string, { id: string; projectName: string; projectCode: string; specialtyAcademy: string; hours: number; tasks: number }>();
@@ -296,21 +316,56 @@ export default function QuincenasPage() {
     [projectSummary],
   );
 
-  const teamSpecialtyDistribution = useMemo(() => {
-    const grouped = new Map<string, { specialty: string; hours: number }>();
+  const totalClassHours = useMemo(
+    () => classHours.reduce((sum, row) => sum + row.classHours, 0),
+    [classHours],
+  );
 
-    filteredAssignedTasks.forEach((task) => {
-      const specialty = academiaEspecialidadLabel(projectsById[task.projectId]);
-      const hours = Number(task.estimatedHours ?? 0);
-      const current = grouped.get(specialty) ?? { specialty, hours: 0 };
-      current.hours += Number.isFinite(hours) ? hours : 0;
-      grouped.set(specialty, current);
+  const totalClassSessions = useMemo(
+    () => classHours.reduce((sum, row) => sum + row.sessionsCount, 0),
+    [classHours],
+  );
+
+  const totalWorkHours = totalProjectHours + totalClassHours;
+
+  const teachingDistribution = useMemo(() => {
+    const grouped = new Map<string, ClassHourBreakdown>();
+
+    classHours.forEach((person) => {
+      person.breakdown.forEach((row) => {
+        const key = `${row.program}|${row.activityType}`;
+        const current = grouped.get(key) ?? {
+          program: row.program,
+          activityType: row.activityType,
+          hours: 0,
+          sessionsCount: 0,
+        };
+        current.hours += row.hours;
+        current.sessionsCount += row.sessionsCount;
+        grouped.set(key, current);
+      });
     });
 
-    const rows = [...grouped.values()]
-      .sort((a, b) => b.hours - a.hours)
+    return [...grouped.values()].sort(
+      (first, second) =>
+        second.hours - first.hours ||
+        `${first.program}-${first.activityType}`.localeCompare(
+          `${second.program}-${second.activityType}`,
+          "es",
+        ),
+    );
+  }, [classHours]);
+
+  const teamSpecialtyDistribution = useMemo(() => {
+    const rows = groupHoursByLabel(
+      filteredAssignedTasks.map((task) => ({
+        label: academiaEspecialidadLabel(projectsById[task.projectId]),
+        hours: Number(task.estimatedHours ?? 0),
+      })),
+    )
       .map((row) => ({
-        ...row,
+        specialty: row.label,
+        hours: row.hours,
         pct: totalProjectHours > 0 ? (row.hours / totalProjectHours) * 100 : 0,
       }));
 
@@ -324,39 +379,65 @@ export default function QuincenasPage() {
 
   const personStats = useMemo(() => {
     const workerList = users.filter((user) => user.role !== "manager");
+    const classHoursByUserId = new Map(classHours.map((row) => [row.userId, row]));
 
     return workerList
       .map((user) => {
         const userTasks = filteredAssignedTasks.filter((task) => task.assigneeId === user.id);
-        const totalHours = userTasks.reduce((sum, task) => sum + Number(task.estimatedHours ?? 0), 0);
+        const administrativeHours = userTasks.reduce(
+          (sum, task) => sum + Number(task.estimatedHours ?? 0),
+          0,
+        );
+        const userClassHours = classHoursByUserId.get(user.id);
+        const teachingHours = userClassHours?.classHours ?? 0;
+        const totalHours = administrativeHours + teachingHours;
 
-        const bySpecialtyMap = new Map<string, number>();
-        userTasks.forEach((task) => {
-          const specialty = academiaEspecialidadLabel(projectsById[task.projectId]);
-          const hours = Number(task.estimatedHours ?? 0);
-          bySpecialtyMap.set(specialty, (bySpecialtyMap.get(specialty) ?? 0) + (Number.isFinite(hours) ? hours : 0));
-        });
-
-        const specialtyRows = [...bySpecialtyMap.entries()]
-          .map(([specialty, hours]) => ({
-            specialty,
-            hours,
-            pct: totalHours > 0 ? (hours / totalHours) * 100 : 0,
+        const specialtyRows = groupHoursByLabel(
+          userTasks.map((task) => ({
+            label: academiaEspecialidadLabel(projectsById[task.projectId]),
+            hours: Number(task.estimatedHours ?? 0),
+          })),
+        )
+          .map((row) => ({
+            specialty: row.label,
+            hours: row.hours,
+            pct: administrativeHours > 0 ? (row.hours / administrativeHours) * 100 : 0,
           }))
           .sort((a, b) => b.hours - a.hours);
+
+        const distribution = [
+          ...specialtyRows.map((row) => ({
+            label: `Tarea/proyecto · ${row.specialty}`,
+            hours: row.hours,
+          })),
+          ...(userClassHours?.breakdown.map((row) => ({
+            label: `Clase · ${row.program} · ${row.activityType}`,
+            hours: row.hours,
+          })) ?? []),
+        ]
+          .map((row) => ({
+            ...row,
+            pct: totalHours > 0 ? (row.hours / totalHours) * 100 : 0,
+          }))
+          .sort((first, second) => second.hours - first.hours);
 
         return {
           id: user.id,
           fullName: user.fullName,
           role: user.role,
           totalHours,
+          administrativeHours,
+          teachingHours,
+          sessionsCount: userClassHours?.sessionsCount ?? 0,
           tasksCount: userTasks.length,
           specialties: specialtyRows,
+          teaching: userClassHours?.breakdown ?? [],
+          distribution,
         };
       })
       .filter((user) => user.totalHours > 0)
       .sort((a, b) => b.totalHours - a.totalHours);
-  }, [filteredAssignedTasks, projectsById, users]);
+  }, [classHours, filteredAssignedTasks, projectsById, users]);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -397,6 +478,42 @@ export default function QuincenasPage() {
     void loadData();
   }, [router]);
 
+  useEffect(() => {
+    if (!getStoredToken() || getStoredRole() !== "manager" || !quincenaRange) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadClassHours = async () => {
+      try {
+        setClassHoursLoading(true);
+        const { data } = await axios.get<ClassHoursRow[]>(
+          `${API_URL}/class-planning/session-hours`,
+          {
+            headers: authHeaders(),
+            params: {
+              from: quincenaRange.startKey,
+              to: quincenaRange.endKey,
+            },
+          },
+        );
+        if (!cancelled) setClassHours(data);
+      } catch {
+        if (!cancelled) {
+          setClassHours([]);
+          setError("No se pudieron cargar las horas de clase del periodo.");
+        }
+      } finally {
+        if (!cancelled) setClassHoursLoading(false);
+      }
+    };
+
+    void loadClassHours();
+    return () => {
+      cancelled = true;
+    };
+  }, [quincenaRange]);
+
   if (loading) {
     return (
       <section className="mx-auto w-full max-w-7xl p-4 md:p-6">
@@ -415,7 +532,7 @@ export default function QuincenasPage() {
           <div>
             <h1 className="text-2xl font-semibold">Reporte de gerencia</h1>
             <p className="mt-1 text-sm text-[var(--ink-muted)]">
-              Horas estimadas de tareas creadas en la quincena, con distribucion por proyecto y por especialidad.
+              Gasto de tiempo por profesor: horas asignadas en tareas/proyectos y clases impartidas por programa y actividad.
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
@@ -428,6 +545,7 @@ export default function QuincenasPage() {
 
         <p className="mt-2 text-xs text-[var(--ink-muted)] print:hidden">
           El boton Generar PDF crea un documento estructurado con tablas y porcentajes del reporte.
+          El periodo seleccionado filtra las clases; las tareas/proyectos incluyen todas las horas estimadas asignadas en la plataforma.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-[minmax(180px,220px),minmax(170px,220px),1fr]">
@@ -469,10 +587,88 @@ export default function QuincenasPage() {
         ) : null}
       </article>
 
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <article className="kpi-card p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--ink-muted)]">Horas totales</p>
+          <p className="mt-2 text-3xl font-semibold">{totalWorkHours.toFixed(2)} h</p>
+          <p className="mt-1 text-xs text-[var(--ink-muted)]">Base para porcentajes de gasto</p>
+        </article>
+        <article className="kpi-card p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--ink-muted)]">Tareas / proyectos</p>
+          <p className="mt-2 text-3xl font-semibold">{totalProjectHours.toFixed(2)} h</p>
+          <p className="mt-1 text-xs text-[var(--ink-muted)]">
+            {(totalWorkHours > 0 ? (totalProjectHours / totalWorkHours) * 100 : 0).toFixed(1)}% del total
+          </p>
+        </article>
+        <article className="kpi-card p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--ink-muted)]">Horas de clase</p>
+          <p className="mt-2 text-3xl font-semibold">
+            {classHoursLoading ? "…" : `${totalClassHours.toFixed(2)} h`}
+          </p>
+          <p className="mt-1 text-xs text-[var(--ink-muted)]">
+            {(totalWorkHours > 0 ? (totalClassHours / totalWorkHours) * 100 : 0).toFixed(1)}% del total
+          </p>
+        </article>
+        <article className="kpi-card p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--ink-muted)]">Clases impartidas</p>
+          <p className="mt-2 text-3xl font-semibold">{classHoursLoading ? "…" : totalClassSessions}</p>
+          <p className="mt-1 text-xs text-[var(--ink-muted)]">Incluye coberturas del profesor sustituto</p>
+        </article>
+      </div>
+
       <article className="kpi-card p-5">
-        <h2 className="text-lg font-semibold">Horas por proyecto (quincena)</h2>
+        <h2 className="text-lg font-semibold">Horas docentes por programa y actividad</h2>
         <p className="mt-1 text-sm text-[var(--ink-muted)]">
-          Total del equipo en la quincena (solo tareas finalizadas por fecha de entrega): {totalProjectHours.toFixed(2)} h
+          PAA y EXANI-II separados en clase regular, regularización, asesoría, aplicación y explicación de examen.
+        </p>
+        <p className="mt-1 text-xs text-[var(--ink-muted)]">
+          Los horarios importados que indican EXANI se clasifican como EXANI-II; los demás corresponden a PAA según el formato actual.
+        </p>
+
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+          <table className="min-w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-[var(--line)] bg-[var(--background)]/60 text-left">
+                <th className="px-3 py-3 font-semibold">Programa</th>
+                <th className="px-3 py-3 font-semibold">Actividad</th>
+                <th className="px-3 py-3 font-semibold">Horas</th>
+                <th className="px-3 py-3 font-semibold">Clases</th>
+                <th className="px-3 py-3 font-semibold">% horas docentes</th>
+                <th className="px-3 py-3 font-semibold">% gasto total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teachingDistribution.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-3 py-4 text-center text-[var(--ink-muted)]">
+                    {classHoursLoading ? "Cargando horas de clase…" : "No hay clases en la quincena seleccionada."}
+                  </td>
+                </tr>
+              ) : (
+                teachingDistribution.map((row) => (
+                  <tr key={`${row.program}-${row.activityType}`} className="border-b border-[var(--line)]/50">
+                    <td className="px-3 py-3 font-semibold">{row.program}</td>
+                    <td className="px-3 py-3">{row.activityType}</td>
+                    <td className="px-3 py-3">{row.hours.toFixed(2)} h</td>
+                    <td className="px-3 py-3">{row.sessionsCount}</td>
+                    <td className="px-3 py-3">
+                      {(totalClassHours > 0 ? (row.hours / totalClassHours) * 100 : 0).toFixed(1)}%
+                    </td>
+                    <td className="px-3 py-3">
+                      {(totalWorkHours > 0 ? (row.hours / totalWorkHours) * 100 : 0).toFixed(1)}%
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="kpi-card p-5">
+        <h2 className="text-lg font-semibold">Horas asignadas por proyecto</h2>
+        <p className="mt-1 text-sm text-[var(--ink-muted)]">
+          Horas estimadas de todas las tareas asignadas registradas en la plataforma, sin importar fecha, estado ni horas reales: {totalProjectHours.toFixed(2)} h
         </p>
 
         <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
@@ -490,7 +686,7 @@ export default function QuincenasPage() {
               {projectSummary.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-3 py-4 text-center text-[var(--ink-muted)]">
-                    No hay tareas en la quincena seleccionada.
+                    No hay tareas asignadas con horas estimadas.
                   </td>
                 </tr>
               ) : (
@@ -517,9 +713,9 @@ export default function QuincenasPage() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(320px,380px),1fr]">
         <article className="kpi-card p-5">
-          <h2 className="text-lg font-semibold">Distribucion general del equipo</h2>
+          <h2 className="text-lg font-semibold">Distribución de tareas y proyectos</h2>
           <p className="mt-1 text-sm text-[var(--ink-muted)]">
-            Porcentaje del tiempo estimado por especialidad en la quincena.
+            Porcentaje de las horas de proyectos por academia y especialidad.
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-4">
@@ -544,9 +740,9 @@ export default function QuincenasPage() {
         </article>
 
         <article className="kpi-card p-5">
-          <h2 className="text-lg font-semibold">Distribucion por persona</h2>
+          <h2 className="text-lg font-semibold">Costo de tiempo por profesor</h2>
           <p className="mt-1 text-sm text-[var(--ink-muted)]">
-            Uso del tiempo estimado por trabajador y especialidad dentro de la quincena.
+            Total combinado y porcentaje dedicado a tareas, proyectos y docencia.
           </p>
 
           {personStats.length === 0 ? (
@@ -558,34 +754,42 @@ export default function QuincenasPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-semibold">{person.fullName}</p>
-                      <p className="text-xs text-[var(--ink-muted)]">{person.tasksCount} tareas · {person.totalHours.toFixed(2)} h</p>
+                      <p className="text-xs text-[var(--ink-muted)]">
+                        {person.totalHours.toFixed(2)} h totales · {person.tasksCount} tareas · {person.sessionsCount} clases
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                        Tareas/proyectos {person.administrativeHours.toFixed(2)} h (
+                        {(person.totalHours > 0 ? (person.administrativeHours / person.totalHours) * 100 : 0).toFixed(1)}%)
+                        {" · "}Clase {person.teachingHours.toFixed(2)} h (
+                        {(person.totalHours > 0 ? (person.teachingHours / person.totalHours) * 100 : 0).toFixed(1)}%)
+                      </p>
                     </div>
                   </div>
 
                   <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200">
                     <div className="flex h-full w-full">
-                      {person.specialties.map((row, index) => (
+                      {person.distribution.map((row, index) => (
                         <div
-                          key={`${person.id}-${row.specialty}`}
+                          key={`${person.id}-${row.label}`}
                           style={{
                             width: `${row.pct}%`,
                             backgroundColor: chartPalette[index % chartPalette.length],
                           }}
-                          title={`${row.specialty}: ${row.pct.toFixed(1)}%`}
+                          title={`${row.label}: ${row.pct.toFixed(1)}%`}
                         />
                       ))}
                     </div>
                   </div>
 
                   <div className="mt-3 space-y-1 text-xs">
-                    {person.specialties.map((row, index) => (
-                      <div key={`${person.id}-${row.specialty}-legend`} className="flex items-center justify-between gap-2">
+                    {person.distribution.map((row, index) => (
+                      <div key={`${person.id}-${row.label}-legend`} className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <span
                             className="inline-block h-2.5 w-2.5 rounded-full"
                             style={{ backgroundColor: chartPalette[index % chartPalette.length] }}
                           />
-                          <span>{row.specialty}</span>
+                          <span>{row.label}</span>
                         </div>
                         <span className="text-[var(--ink-muted)]">{row.hours.toFixed(2)} h ({row.pct.toFixed(1)}%)</span>
                       </div>

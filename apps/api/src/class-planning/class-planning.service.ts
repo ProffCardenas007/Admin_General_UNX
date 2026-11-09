@@ -30,6 +30,35 @@ const PRESENCIAL_TIME_BLOCKS = [
 ];
 const VIRTUAL_EXTRA_TIME_BLOCK = { startTime: '19:00', endTime: '22:30' };
 
+const normalizeCourseLabel = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+export const classifyCourseProgram = (
+  course: Pick<ClassCourseEntity, 'code' | 'name'>,
+) => {
+  const label = normalizeCourseLabel(`${course.code} ${course.name}`);
+  return label.includes('exani') ? 'EXANI-II' : 'PAA';
+};
+
+export const classifyCourseActivity = (
+  course: Pick<ClassCourseEntity, 'code' | 'name'>,
+) => {
+  const code = normalizeCourseLabel(course.code);
+  const name = normalizeCourseLabel(course.name);
+
+  if (code.includes('regularizacion')) return 'Regularización';
+  if (code.includes('asesoria')) return 'Asesoría';
+  if (code.includes('examen')) {
+    return name.includes('explicacion')
+      ? 'Explicación de examen'
+      : 'Aplicación de examen';
+  }
+  return 'Clase regular';
+};
+
 @Injectable()
 export class ClassPlanningService {
   constructor(
@@ -362,17 +391,55 @@ export class ClassPlanningService {
     }
 
     const sessions = await qb.getMany();
-    const totals = new Map<string, { classHours: number; sessionsCount: number }>();
+    const courseIds = [...new Set(sessions.map((session) => session.courseId))];
+    const courses = courseIds.length
+      ? await this.coursesRepository.find({ where: { id: In(courseIds) } })
+      : [];
+    const coursesById = new Map(courses.map((course) => [course.id, course]));
+    const totals = new Map<
+      string,
+      {
+        classHours: number;
+        sessionsCount: number;
+        breakdown: Map<
+          string,
+          {
+            program: string;
+            activityType: string;
+            hours: number;
+            sessionsCount: number;
+          }
+        >;
+      }
+    >();
 
     sessions.forEach((session) => {
       const userId = session.coverTeacherUserId ?? session.teacherUserId;
+      const course = coursesById.get(session.courseId);
+      if (!course) return;
       const durationHours = Math.max(
         0,
         (this.timeToMinutes(session.endTime) - this.timeToMinutes(session.startTime)) / 60,
       );
-      const current = totals.get(userId) ?? { classHours: 0, sessionsCount: 0 };
+      const current = totals.get(userId) ?? {
+        classHours: 0,
+        sessionsCount: 0,
+        breakdown: new Map(),
+      };
       current.classHours += durationHours;
       current.sessionsCount += 1;
+      const program = classifyCourseProgram(course);
+      const activityType = classifyCourseActivity(course);
+      const breakdownKey = `${program}|${activityType}`;
+      const breakdown = current.breakdown.get(breakdownKey) ?? {
+        program,
+        activityType,
+        hours: 0,
+        sessionsCount: 0,
+      };
+      breakdown.hours += durationHours;
+      breakdown.sessionsCount += 1;
+      current.breakdown.set(breakdownKey, breakdown);
       totals.set(userId, current);
     });
 
@@ -381,6 +448,19 @@ export class ClassPlanningService {
         userId,
         classHours: Number(total.classHours.toFixed(2)),
         sessionsCount: total.sessionsCount,
+        breakdown: [...total.breakdown.values()]
+          .map((row) => ({
+            ...row,
+            hours: Number(row.hours.toFixed(2)),
+          }))
+          .sort(
+            (left, right) =>
+              right.hours - left.hours ||
+              `${left.program}-${left.activityType}`.localeCompare(
+                `${right.program}-${right.activityType}`,
+                'es',
+              ),
+          ),
       }))
       .sort((left, right) => right.classHours - left.classHours);
   }

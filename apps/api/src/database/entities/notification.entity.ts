@@ -28,6 +28,9 @@ export class NotificationEntity {
   @Column({ name: 'request_id', type: 'uuid', nullable: true })
   requestId?: string | null;
 
+  @Column({ name: 'conversation_id', type: 'uuid', nullable: true })
+  conversationId?: string | null;
+
   @Column({ name: 'is_read', type: 'boolean', default: false })
   isRead: boolean;
 

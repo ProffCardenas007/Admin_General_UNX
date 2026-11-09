@@ -109,7 +109,37 @@ Roles: manager, lead, worker
 ### GET /task-updates
 Query params: `taskId`, `userId`, `from`, `to`, `page`, `limit`
 
-## 6) Excel Import
+## 6) Mensajería de trabajo
+
+Roles: manager, lead, worker. Las conversaciones son directas y entre dos personas activas. Los mensajes se conservan; no hay edición ni eliminación.
+
+### GET /messaging/users
+Returns active users available to message (excluding the signed-in user).
+
+### GET /messaging/conversations
+Returns the signed-in user's conversations, the other participant, latest message and unread count.
+
+### POST /messaging/conversations
+Opens an existing direct conversation or creates one.
+```json
+{ "recipientId": "uuid" }
+```
+
+### GET /messaging/conversations/:conversationId/messages
+Returns up to 50 newest messages in chronological order and marks the conversation read for the signed-in user. Query `before` with a message UUID to load an older page.
+
+### POST /messaging/conversations/:conversationId/messages
+Sends a message and notifies the other participant.
+```json
+{
+  "content": "¿Podemos revisar la entrega de hoy?",
+  "projectId": "uuid",
+  "taskId": "uuid"
+}
+```
+`projectId` and `taskId` are optional; when both are supplied, the task must belong to that project.
+
+## 7) Excel Import
 
 ### POST /imports/excel
 Roles: manager, lead, worker
@@ -130,7 +160,7 @@ Returns processing status and summary counters.
 ### GET /imports/:importId/errors
 Returns row-level validation errors.
 
-## 7) Dashboard and KPIs
+## 8) Dashboard and KPIs
 
 ### GET /dashboard/summary
 Roles: manager, lead
@@ -153,7 +183,7 @@ Returns workload by employee.
 ### GET /dashboard/trends
 Returns weekly velocity and delays trend.
 
-## 8) Standard Error Format
+## 9) Standard Error Format
 
 ```json
 {

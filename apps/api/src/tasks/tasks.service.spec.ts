@@ -1,5 +1,6 @@
 import { TasksService } from './tasks.service';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -94,15 +95,62 @@ describe('TasksService', () => {
     );
   });
 
-  it('forces worker visibility to own assignee id', async () => {
+  it('shows workers their own tasks and unassigned tasks', async () => {
     await service.findAll(
       { assigneeId: 'someone-else', projectId: 'project-1' },
       { id: 'worker-1', role: 'worker' },
     );
 
-    expect(qb.andWhere).toHaveBeenCalledWith('task.assignee_id = :assigneeId', {
-      assigneeId: 'worker-1',
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      '(task.assignee_id = :assigneeId OR task.assignee_id IS NULL)',
+      { assigneeId: 'worker-1' },
+    );
+  });
+
+  it('claims an unassigned pending task for the current user', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: null,
+      status: 'todo',
     });
+    tasksRepository.save.mockImplementation(async (task: any) => task);
+
+    const result = await service.claim('task-1', {
+      id: 'worker-1',
+      role: 'worker',
+    });
+
+    expect(result.assigneeId).toBe('worker-1');
+    expect(tasksRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 'task-1' },
+      lock: { mode: 'pessimistic_write' },
+    });
+  });
+
+  it('rejects claiming a task that another user already took', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: 'worker-2',
+      status: 'todo',
+    });
+
+    await expect(
+      service.claim('task-1', { id: 'worker-1', role: 'worker' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tasksRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects claiming an unassigned task that is not pending', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: null,
+      status: 'blocked',
+    });
+
+    await expect(
+      service.claim('task-1', { id: 'lead-1', role: 'lead' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tasksRepository.save).not.toHaveBeenCalled();
   });
 
   it('blocks worker updating task not assigned to them', async () => {

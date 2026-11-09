@@ -34,6 +34,16 @@ import { SpecialtyEntity } from './database/entities/specialty.entity';
 import { SpecialtiesModule } from './specialties/specialties.module';
 import { TimeExtensionsModule } from './time-extensions/time-extensions.module';
 import { TimeExtensionRequestEntity } from './database/entities/time-extension-request.entity';
+import { WorkPlanEntity } from './database/entities/work-plan.entity';
+import { WorkPlanColumnEntity } from './database/entities/work-plan-column.entity';
+import { WorkPlanSectionEntity } from './database/entities/work-plan-section.entity';
+import { WorkPlanRowEntity } from './database/entities/work-plan-row.entity';
+import { WorkPlanCellEntity } from './database/entities/work-plan-cell.entity';
+import { WorkPlansModule } from './work-plans/work-plans.module';
+import { MessageConversationEntity } from './database/entities/message-conversation.entity';
+import { MessageConversationParticipantEntity } from './database/entities/message-conversation-participant.entity';
+import { MessageEntity } from './database/entities/message.entity';
+import { MessagingModule } from './messaging/messaging.module';
 
 @Module({
   imports: [
@@ -83,6 +93,14 @@ import { TimeExtensionRequestEntity } from './database/entities/time-extension-r
             ClassSessionEntity,
             SpecialtyEntity,
             TimeExtensionRequestEntity,
+            WorkPlanEntity,
+            WorkPlanColumnEntity,
+            WorkPlanSectionEntity,
+            WorkPlanRowEntity,
+            WorkPlanCellEntity,
+            MessageConversationEntity,
+            MessageConversationParticipantEntity,
+            MessageEntity,
           ],
           synchronize: false,
         };
@@ -103,6 +121,8 @@ import { TimeExtensionRequestEntity } from './database/entities/time-extension-r
     ClassPlanningModule,
     SpecialtiesModule,
     TimeExtensionsModule,
+    WorkPlansModule,
+    MessagingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

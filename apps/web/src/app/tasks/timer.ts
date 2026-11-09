@@ -80,6 +80,16 @@ export const pickMyActiveTasks = <T extends Pick<TaskRow, "assigneeId" | "status
         a.title.localeCompare(b.title, "es"),
     );
 
+/** Pending tasks without an owner, sorted consistently for every role. */
+export const pickAvailableTasks = <
+  T extends Pick<TaskRow, "assigneeId" | "status" | "title">
+>(
+  tasks: T[],
+) =>
+  tasks
+    .filter((task) => !task.assigneeId && task.status === "todo")
+    .sort((a, b) => a.title.localeCompare(b.title, "es"));
+
 export const summarizeActiveTasks = (
   tasks: Array<TimedTask & Pick<TaskRow, "status">>,
   nowMs: number,

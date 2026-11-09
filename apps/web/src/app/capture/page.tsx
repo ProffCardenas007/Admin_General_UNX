@@ -312,7 +312,6 @@ export default function CapturePage() {
       }
 
       if (userResponse.data?.length > 0) {
-        setTaskForm((current) => ({ ...current, assigneeId: userResponse.data[0].id }));
         setTaskChainForm((current) => ({
           ...current,
           steps: current.steps.map((step, index) =>
@@ -1013,7 +1012,7 @@ export default function CapturePage() {
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Titulo" value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} />
             <textarea className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Descripcion" value={taskForm.description} onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })} rows={4} />
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.assigneeId} onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}>
-              <option value="">Asignado a</option>
+              <option value="">Sin asignar — disponible para tomar</option>
               {users.map((user) => (
                 <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
               ))}

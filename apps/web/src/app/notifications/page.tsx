@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
+import MessagingPanel from "./MessagingPanel";
 
 type TimeExtensionRow = {
   id: string;
@@ -26,6 +27,8 @@ type NotificationRow = {
   isRead: boolean;
   createdAt: string;
   readAt?: string;
+  type?: string | null;
+  conversationId?: string | null;
 };
 
 export default function NotificationsPage() {
@@ -170,6 +173,24 @@ export default function NotificationsPage() {
     }
   };
 
+  const openNotification = async (notification: NotificationRow) => {
+    if (notification.type === "message" && notification.conversationId) {
+      if (!notification.isRead) {
+        await markRead(notification.id);
+      }
+      router.push(`/notifications?conversationId=${notification.conversationId}`);
+      window.dispatchEvent(
+        new CustomEvent("open-message-conversation", {
+          detail: notification.conversationId,
+        }),
+      );
+      return;
+    }
+    if (!notification.isRead) {
+      await markRead(notification.id);
+    }
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
       <section className="glass-panel fade-up p-6 md:p-8">
@@ -202,6 +223,8 @@ export default function NotificationsPage() {
         {error ? <p className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">{error}</p> : null}
         {info ? <p className="mt-4 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/8 px-4 py-3 text-sm text-[var(--foreground)]">{info}</p> : null}
       </section>
+
+      <MessagingPanel />
 
       {role === "manager" ? (
         <section className="kpi-card fade-up p-5">
@@ -320,10 +343,19 @@ export default function NotificationsPage() {
                     </span>
                     {!notification.isRead ? (
                       <button
-                        onClick={() => void markRead(notification.id)}
+                        onClick={() => void openNotification(notification)}
                         className="ui-btn ui-btn-secondary ui-btn-sm"
                       >
-                        Marcar leida
+                        {notification.type === "message" && notification.conversationId
+                          ? "Abrir conversación"
+                          : "Marcar leida"}
+                      </button>
+                    ) : notification.type === "message" && notification.conversationId ? (
+                      <button
+                        onClick={() => void openNotification(notification)}
+                        className="ui-btn ui-btn-secondary ui-btn-sm"
+                      >
+                        Abrir conversación
                       </button>
                     ) : null}
                   </div>

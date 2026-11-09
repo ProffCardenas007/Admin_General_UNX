@@ -187,8 +187,16 @@ describe("task filters", () => {
 
   it("workers only search by code or title", () => {
     const worker = { ...baseFilters, canManagePlanning: false };
-    assert.deepEqual(ids(filterTasks([task({ id: "x", title: "Guion final" }), task({ id: "y", code: "REV-9" })], projects, { ...worker, search: "guion" })), ["x"]);
-    assert.deepEqual(ids(filterTasks([task({ id: "x" }), task({ id: "y", code: "REV-9" })], projects, { ...worker, search: "rev-9" })), ["y"]);
+    assert.deepEqual(ids(filterTasks([task({ id: "x", title: "Guion final", assigneeId: "u1" }), task({ id: "y", code: "REV-9", assigneeId: "u1" })], projects, { ...worker, search: "guion" })), ["x"]);
+    assert.deepEqual(ids(filterTasks([task({ id: "x", assigneeId: "u1" }), task({ id: "y", code: "REV-9", assigneeId: "u1" })], projects, { ...worker, search: "rev-9" })), ["y"]);
+  });
+
+  it("keeps unassigned tasks out of the worker table because they appear in the available section", () => {
+    const worker = { ...baseFilters, canManagePlanning: false };
+    assert.deepEqual(
+      ids(filterTasks([task({ id: "mine", assigneeId: "u1" }), task({ id: "available" })], projects, worker)),
+      ["mine"],
+    );
   });
 
   it("lists academies of active projects in the chosen specialty, preferring the mixed-case label", () => {

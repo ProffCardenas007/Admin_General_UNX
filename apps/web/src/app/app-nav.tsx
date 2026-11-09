@@ -139,6 +139,7 @@ const MAIN_NAV: NavItem[] = [
   { label: "Dashboard",       href: "/dashboard",      icon: <IconDashboard />,  workerHidden: true },
   { label: "Tareas",          href: "/tasks",           icon: <IconTasks /> },
   { label: "Proyectos",       href: "/projects",        icon: <IconProjects />,   workerHidden: true },
+  { label: "Planeación",      href: "/planning",        icon: <IconGrid />,       workerHidden: true },
   { label: "Calendario",      href: "/calendar",        icon: <IconCalendar /> },
   { label: "Clases", href: "/class-schedule", icon: <IconClassSchedule /> },
   { label: "Notificaciones",  href: "/notifications",   icon: <IconBell /> },

@@ -13,6 +13,7 @@ describe('TasksController', () => {
       create: jest.fn().mockResolvedValue({}),
       createChain: jest.fn().mockResolvedValue({}),
       update: jest.fn().mockResolvedValue({}),
+      claim: jest.fn().mockResolvedValue({}),
       markNotCompleted: jest.fn().mockResolvedValue({}),
       remove: jest.fn().mockResolvedValue({ deleted: true }),
     };
@@ -27,17 +28,19 @@ describe('TasksController', () => {
     );
   });
 
-  it('forwards create, chain, update, not-completed and delete with the actor', async () => {
+  it('forwards create, chain, update, claim, not-completed and delete with the actor', async () => {
     const dto: any = { title: 'x' };
     await controller.create(dto, req);
     await controller.createChain(dto, req);
     await controller.update('t1', dto, req);
+    await controller.claim('t1', req);
     await controller.markNotCompleted('t1', { reason: 'r' } as any, req);
     await controller.remove('t1', req);
 
     expect(service.create).toHaveBeenCalledWith(dto, req.user);
     expect(service.createChain).toHaveBeenCalledWith(dto, req.user);
     expect(service.update).toHaveBeenCalledWith('t1', dto, req.user);
+    expect(service.claim).toHaveBeenCalledWith('t1', req.user);
     expect(service.markNotCompleted).toHaveBeenCalledWith('t1', { reason: 'r' }, req.user);
     expect(service.remove).toHaveBeenCalledWith('t1', req.user);
   });

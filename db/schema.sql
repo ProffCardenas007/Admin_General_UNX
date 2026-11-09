@@ -192,8 +192,60 @@ CREATE TABLE IF NOT EXISTS notifications (
     message TEXT NOT NULL,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     read_at TIMESTAMPTZ,
+    conversation_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS message_conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_one_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_two_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_message_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_message_conversation_distinct_users CHECK (user_one_id <> user_two_id),
+    CONSTRAINT uq_message_conversations_direct_pair UNIQUE (user_one_id, user_two_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_conversation_participants (
+    conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_read_at TIMESTAMPTZ,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (conversation_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_conversations_user_one
+    ON message_conversations(user_one_id, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_conversations_user_two
+    ON message_conversations(user_two_id, last_message_at DESC);
+
+ALTER TABLE notifications
+    ADD COLUMN IF NOT EXISTS conversation_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_notifications_conversation'
+          AND conrelid = 'notifications'::regclass
+    ) THEN
+        ALTER TABLE notifications
+            ADD CONSTRAINT fk_notifications_conversation
+            FOREIGN KEY (conversation_id) REFERENCES message_conversations(id) ON DELETE SET NULL;
+    END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -247,6 +299,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_chain_order ON tasks(chain_id, chain_order)
 CREATE INDEX IF NOT EXISTS idx_task_updates_task_date ON task_updates(task_id, update_date DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_excel_imports_user_date ON excel_imports(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kpi_project_date ON kpi_snapshots(project_id, snapshot_date DESC);
@@ -429,3 +482,53 @@ CREATE INDEX IF NOT EXISTS idx_time_extension_status_created
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(40);
 ALTER TABLE notifications
     ADD COLUMN IF NOT EXISTS request_id UUID REFERENCES time_extension_requests(id) ON DELETE SET NULL;
+
+-- Work plans (planning grids: leads plan work before assigning it)
+CREATE TABLE IF NOT EXISTS work_plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(160) NOT NULL,
+    description TEXT,
+    owner_id UUID NOT NULL REFERENCES users(id),
+    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_work_plans_owner ON work_plans(owner_id);
+
+CREATE TABLE IF NOT EXISTS work_plan_columns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plan_id UUID NOT NULL REFERENCES work_plans(id) ON DELETE CASCADE,
+    label VARCHAR(120) NOT NULL,
+    position INT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS work_plan_sections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plan_id UUID NOT NULL REFERENCES work_plans(id) ON DELETE CASCADE,
+    title VARCHAR(160) NOT NULL,
+    spans_all BOOLEAN NOT NULL DEFAULT FALSE,
+    position INT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS work_plan_rows (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    section_id UUID NOT NULL REFERENCES work_plan_sections(id) ON DELETE CASCADE,
+    label VARCHAR(160) NOT NULL,
+    position INT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS work_plan_cells (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    row_id UUID NOT NULL REFERENCES work_plan_rows(id) ON DELETE CASCADE,
+    column_id UUID REFERENCES work_plan_columns(id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
+    start_date DATE,
+    end_date DATE,
+    suggested_assignee VARCHAR(120),
+    note TEXT,
+    task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+    column_span INT NOT NULL DEFAULT 1,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_plan_cell
+    ON work_plan_cells(row_id, COALESCE(column_id, '00000000-0000-0000-0000-000000000000'::uuid));

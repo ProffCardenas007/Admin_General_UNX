@@ -60,7 +60,7 @@ export default function TaskCreateModal({
     description: "",
     assigneeId: users.some((user) => user.id === defaults.assigneeId)
       ? defaults.assigneeId
-      : (users[0]?.id ?? ""),
+      : "",
     teamId: "",
     status: defaults.status,
     priority: defaults.priority,
@@ -242,7 +242,7 @@ export default function TaskCreateModal({
                 value={taskForm.assigneeId}
                 onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}
               >
-                <option value="">Asignado a</option>
+                <option value="">Sin asignar — disponible para tomar</option>
                 {users.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.fullName} - {roleLabels[user.role] ?? user.role}
