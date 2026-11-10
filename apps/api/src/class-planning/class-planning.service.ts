@@ -396,6 +396,13 @@ export class ClassPlanningService {
       ? await this.coursesRepository.find({ where: { id: In(courseIds) } })
       : [];
     const coursesById = new Map(courses.map((course) => [course.id, course]));
+    const subjectIds = [...new Set(sessions.map((session) => session.subjectId))];
+    const subjects = subjectIds.length
+      ? await this.subjectsRepository.find({ where: { id: In(subjectIds) } })
+      : [];
+    const subjectNameById = new Map(
+      subjects.map((subject) => [subject.id, subject.name.trim().replace(/\s+/g, ' ')]),
+    );
     const totals = new Map<
       string,
       {
@@ -405,6 +412,7 @@ export class ClassPlanningService {
           string,
           {
             program: string;
+            subject: string;
             activityType: string;
             hours: number;
             sessionsCount: number;
@@ -430,9 +438,11 @@ export class ClassPlanningService {
       current.sessionsCount += 1;
       const program = classifyCourseProgram(course);
       const activityType = classifyCourseActivity(course);
-      const breakdownKey = `${program}|${activityType}`;
+      const subject = subjectNameById.get(session.subjectId) || 'Sin materia';
+      const breakdownKey = `${program}|${subject.toLowerCase()}|${activityType}`;
       const breakdown = current.breakdown.get(breakdownKey) ?? {
         program,
+        subject,
         activityType,
         hours: 0,
         sessionsCount: 0,
@@ -456,8 +466,8 @@ export class ClassPlanningService {
           .sort(
             (left, right) =>
               right.hours - left.hours ||
-              `${left.program}-${left.activityType}`.localeCompare(
-                `${right.program}-${right.activityType}`,
+              `${left.program}-${left.subject}-${left.activityType}`.localeCompare(
+                `${right.program}-${right.subject}-${right.activityType}`,
                 'es',
               ),
           ),
