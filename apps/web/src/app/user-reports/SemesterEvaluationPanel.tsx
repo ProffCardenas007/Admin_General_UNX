@@ -3,6 +3,7 @@
 import axios from "axios";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { API_URL, authHeaders } from "../../lib/api";
+import { buildTeamStats, type Band, type Profile, type Summary } from "./semesterStats";
 
 type ActivityType =
   | "creacion"
@@ -106,6 +107,53 @@ const deliveryTone: Record<DeliveryStatus, string> = {
   delivered: "text-emerald-700",
 };
 
+type ResultsTab = "calificacion" | "puntos" | "analisis";
+
+const bandLabels: Record<Band, string> = {
+  muy_arriba: "Muy por encima",
+  arriba: "Por encima",
+  media: "En la media",
+  abajo: "Por debajo",
+  muy_abajo: "Muy por debajo",
+};
+
+const bandTone: Record<Band, string> = {
+  muy_arriba: "bg-emerald-100 text-emerald-800",
+  arriba: "bg-emerald-50 text-emerald-700",
+  media: "bg-slate-100 text-slate-700",
+  abajo: "bg-amber-50 text-amber-800",
+  muy_abajo: "bg-red-100 text-red-800",
+};
+
+const profileLabels: Record<Profile, string> = {
+  alto_desempeno: "Alto desempeño",
+  productivo: "Productivo, cuidar calidad",
+  calidad: "Buena calidad, poco volumen",
+  atencion: "Requiere atención",
+};
+
+const profileHints: Record<Profile, string> = {
+  alto_desempeno: "Calificación y puntos en la media del grupo o arriba.",
+  productivo: "Hace mucho trabajo, pero su calificación está bajo la media.",
+  calidad: "Trabaja bien, pero produce menos puntos que la media.",
+  atencion: "Calificación y puntos bajo la media del grupo.",
+};
+
+const profileTone: Record<Profile, string> = {
+  alto_desempeno: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  productivo: "border-sky-200 bg-sky-50 text-sky-800",
+  calidad: "border-violet-200 bg-violet-50 text-violet-800",
+  atencion: "border-red-200 bg-red-50 text-red-800",
+};
+
+const profileOrder: Profile[] = ["alto_desempeno", "productivo", "calidad", "atencion"];
+
+const formatSigned = (value: number, digits = 1) =>
+  `${value > 0 ? "+" : value < 0 ? "−" : ""}${new Intl.NumberFormat("es-MX", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(Math.abs(value))}`;
+
 const formatNumber = (value: number, digits = 1) =>
   new Intl.NumberFormat("es-MX", {
     minimumFractionDigits: digits,
@@ -155,6 +203,7 @@ export default function SemesterEvaluationPanel() {
   const [loading, setLoading] = useState(true);
   const [savingWeights, setSavingWeights] = useState(false);
   const [savingGrades, setSavingGrades] = useState(false);
+  const [resultsTab, setResultsTab] = useState<ResultsTab>("calificacion");
   const [onlyUngraded, setOnlyUngraded] = useState(true);
   const [page, setPage] = useState(0);
   const [fillValue, setFillValue] = useState("100");
@@ -203,6 +252,19 @@ export default function SemesterEvaluationPanel() {
   const selectedUser = useMemo(
     () => report?.users.find((user) => user.userId === selectedUserId) ?? null,
     [report, selectedUserId],
+  );
+
+  const teamStats = useMemo(() => buildTeamStats(report?.users ?? []), [report]);
+  const statsByUser = useMemo(
+    () => new Map(teamStats.rows.map((row) => [row.userId, row])),
+    [teamStats],
+  );
+  const usersByPoints = useMemo(
+    () =>
+      [...(report?.users ?? [])].sort(
+        (a, b) => b.earnedPoints - a.earnedPoints || a.fullName.localeCompare(b.fullName, "es"),
+      ),
+    [report],
   );
 
   // Calificación guardada de cada tarea, para saber qué cambió sin guardar.
@@ -451,9 +513,34 @@ export default function SemesterEvaluationPanel() {
             <div className="border-b border-[var(--line)] px-5 py-4">
               <h2 className="text-lg font-semibold">Resultados del equipo</h2>
               <p className="mt-1 text-sm text-[var(--ink-muted)]">
-                Las tareas no entregadas cuentan como 0 automáticamente; las pendientes (aún en tiempo) no afectan el resultado.
+                {resultsTab === "calificacion"
+                  ? "Calidad del trabajo: promedio de calificaciones ponderado por horas y actividad. Las no entregadas cuentan 0; las pendientes (aún en tiempo) no afectan."
+                  : resultsTab === "puntos"
+                    ? "Cantidad de trabajo bien hecho: puntos = horas × ponderación × calificación ÷ 100. Quien más puntos hizo es la referencia (100)."
+                    : "Cada persona comparada con la media del grupo, en calificación y en puntos."}
               </p>
+              <div role="tablist" aria-label="Tipo de resultado" className="mt-4 inline-flex flex-wrap gap-1 rounded-xl border border-[var(--line)] bg-[var(--background)] p-1">
+                {([
+                  ["calificacion", "Calificación"],
+                  ["puntos", "Puntos obtenidos"],
+                  ["analisis", "Análisis estadístico"],
+                ] as Array<[ResultsTab, string]>).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={resultsTab === tab}
+                    onClick={() => setResultsTab(tab)}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                      resultsTab === tab ? "bg-white text-[var(--accent)] shadow-sm" : "text-[var(--ink-muted)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
+            {resultsTab === "calificacion" ? (
             <div className="overflow-x-auto">
               <table className="ui-table min-w-[900px] w-full">
                 <thead>
@@ -496,6 +583,203 @@ export default function SemesterEvaluationPanel() {
                 <p className="ui-empty m-4 px-4 py-3 text-sm">No hay tareas con fecha límite en este semestre.</p>
               ) : null}
             </div>
+            ) : null}
+
+            {resultsTab === "puntos" ? (
+              <div className="overflow-x-auto">
+                <table className="ui-table min-w-[980px] w-full">
+                  <thead>
+                    <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
+                      <th className="px-4 py-3">Posición</th>
+                      <th className="px-4 py-3">Usuario</th>
+                      <th className="px-4 py-3">Calificadas</th>
+                      <th className="px-4 py-3 text-right">Horas</th>
+                      <th className="px-4 py-3 text-right">Puntos obtenidos</th>
+                      <th className="px-4 py-3 text-right">Posibles</th>
+                      <th className="px-4 py-3">Calificación por puntos</th>
+                      <th className="px-4 py-3 text-right">% del equipo</th>
+                      <th className="px-4 py-3">Detalle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersByPoints.map((user) => {
+                      const stats = statsByUser.get(user.userId);
+                      return (
+                        <tr key={user.userId} className={`border-b border-[var(--line)]/60 ${selectedUserId === user.userId ? "bg-[var(--accent)]/5" : ""}`}>
+                          <td className="px-4 py-3 font-mono font-semibold">{stats ? `#${stats.pointsRank}` : "—"}</td>
+                          <td className="px-4 py-3">
+                            <p className="font-semibold">{user.fullName}</p>
+                            <p className="text-xs text-[var(--ink-muted)]">{user.email}</p>
+                          </td>
+                          <td className="px-4 py-3">{user.gradedCount}/{user.taskCount}</td>
+                          <td className="px-4 py-3 text-right tabular-nums">{formatNumber(user.estimatedHours)} h</td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatNumber(user.earnedPoints)}</td>
+                          <td className="px-4 py-3 text-right tabular-nums text-[var(--ink-muted)]">{formatNumber(user.possiblePoints)}</td>
+                          <td className="px-4 py-3">
+                            {stats ? (
+                              <div className="flex items-center gap-2">
+                                <div className="h-2 w-28 overflow-hidden rounded-full bg-slate-200">
+                                  <div className="h-full bg-[var(--accent)]" style={{ width: `${Math.min(100, stats.pointsScore)}%` }} />
+                                </div>
+                                <span className="font-semibold text-[var(--accent)] tabular-nums">{formatNumber(stats.pointsScore)} / 100</span>
+                              </div>
+                            ) : (
+                              <span className="text-[var(--ink-muted)]">Pendiente</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {teamStats.totalPoints > 0 ? `${formatNumber((user.earnedPoints / teamStats.totalPoints) * 100)}%` : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <button type="button" onClick={() => selectUser(user.userId)} className="ui-btn ui-btn-secondary ui-btn-sm">
+                              Ver tareas
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {report.users.length === 0 ? (
+                  <p className="ui-empty m-4 px-4 py-3 text-sm">No hay tareas con fecha límite en este semestre.</p>
+                ) : null}
+                <p className="border-t border-[var(--line)] px-5 py-3 text-xs text-[var(--ink-muted)]">
+                  Los puntos premian el volumen: más horas calificadas con buena nota suman más. Solo cuentan tareas ya calificadas
+                  (o no entregadas, con 0), así que conviene comparar cuando el equipo esté calificado de forma pareja.
+                </p>
+              </div>
+            ) : null}
+
+            {resultsTab === "analisis" ? (
+              <div className="space-y-5 p-5">
+                {teamStats.rows.length < 2 ? (
+                  <p className="ui-empty px-4 py-3 text-sm">
+                    Se necesitan al menos dos personas con tareas calificadas para comparar contra el grupo.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {([
+                        ["Calificación", teamStats.gradeSummary, 1, ""],
+                        ["Puntos obtenidos", teamStats.pointsSummary, 1, " pts"],
+                      ] as Array<[string, Summary | null, number, string]>).map(([title, summary, digits, unit]) =>
+                        summary ? (
+                          <article key={title} className="rounded-2xl border border-[var(--line)] bg-white p-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">{title} del grupo</p>
+                            <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                              <div>
+                                <dt className="text-xs text-[var(--ink-muted)]">Media</dt>
+                                <dd className="text-lg font-semibold tabular-nums">{formatNumber(summary.mean, digits)}{unit}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs text-[var(--ink-muted)]">Mediana</dt>
+                                <dd className="text-lg font-semibold tabular-nums">{formatNumber(summary.median, digits)}{unit}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs text-[var(--ink-muted)]">Desv. estándar</dt>
+                                <dd className="text-lg font-semibold tabular-nums">{formatNumber(summary.stdDev, digits)}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs text-[var(--ink-muted)]">Rango</dt>
+                                <dd className="font-semibold tabular-nums">{formatNumber(summary.min, digits)} – {formatNumber(summary.max, digits)}</dd>
+                              </div>
+                            </dl>
+                            <p className="mt-2 text-xs text-[var(--ink-muted)]">{summary.n} personas con tareas calificadas</p>
+                          </article>
+                        ) : null,
+                      )}
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {profileOrder.map((profile) => {
+                        const people = teamStats.rows.filter((row) => row.profile === profile);
+                        return (
+                          <article key={profile} className={`rounded-2xl border p-4 ${profileTone[profile]}`}>
+                            <p className="text-sm font-semibold">{profileLabels[profile]}</p>
+                            <p className="mt-1 text-2xl font-semibold tabular-nums">{people.length}</p>
+                            <p className="mt-1 text-xs opacity-80">{profileHints[profile]}</p>
+                            {people.length > 0 ? (
+                              <p className="mt-2 text-xs font-medium">{people.map((row) => row.fullName).join(", ")}</p>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    <div className="overflow-x-auto rounded-2xl border border-[var(--line)] bg-white">
+                      <table className="ui-table min-w-[1100px] w-full">
+                        <thead>
+                          <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
+                            <th className="px-4 py-3">Usuario</th>
+                            <th className="px-4 py-3 text-right">Calificación</th>
+                            <th className="px-4 py-3 text-right">vs. media</th>
+                            <th className="px-4 py-3 text-right">z</th>
+                            <th className="px-4 py-3">Nivel</th>
+                            <th className="px-4 py-3 text-right">Puntos</th>
+                            <th className="px-4 py-3 text-right">% de la media</th>
+                            <th className="px-4 py-3 text-right">z</th>
+                            <th className="px-4 py-3">Nivel</th>
+                            <th className="px-4 py-3 text-right">Percentil</th>
+                            <th className="px-4 py-3">Perfil</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...teamStats.rows]
+                            .sort((a, b) => b.gradeZ + b.pointsZ - (a.gradeZ + a.pointsZ))
+                            .map((row) => (
+                              <tr key={row.userId} className="border-b border-[var(--line)]/60">
+                                <td className="px-4 py-3 font-semibold">{row.fullName}</td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.grade)}</td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatSigned(row.gradeDiff)}</td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatSigned(row.gradeZ, 2)}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${bandTone[row.gradeBand]}`}>{bandLabels[row.gradeBand]}</span>
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.points)}</td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.pointsIndex, 0)}%</td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatSigned(row.pointsZ, 2)}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${bandTone[row.pointsBand]}`}>{bandLabels[row.pointsBand]}</span>
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.pointsPercentile, 0)}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${profileTone[row.profile]}`}>{profileLabels[row.profile]}</span>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--line)] bg-[var(--background)]/50 p-4 text-xs text-[var(--ink-muted)]">
+                      <p className="font-semibold text-[var(--foreground)]">Cómo leer el análisis</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-4">
+                        <li>
+                          <strong>z</strong> indica a cuántas desviaciones estándar de la media del grupo está la persona. Permite comparar
+                          calificación y puntos aunque estén en escalas distintas. Nivel: z ≥ 1 muy por encima; 0.5 a 1 por encima;
+                          −0.5 a 0.5 en la media; −1 a −0.5 por debajo; ≤ −1 muy por debajo.
+                        </li>
+                        <li>
+                          <strong>% de la media</strong>: 100% es exactamente el promedio de puntos del grupo; 150% es la mitad más.
+                        </li>
+                        <li>
+                          <strong>Percentil</strong>: porcentaje del grupo que hizo menos puntos que la persona.
+                        </li>
+                        <li>
+                          Si la media y la mediana están muy separadas, hay personas con valores extremos que jalan el promedio; en ese
+                          caso la mediana describe mejor al grupo típico.
+                        </li>
+                        <li>
+                          Solo entran personas con al menos una tarea calificada
+                          {teamStats.excluded > 0 ? ` (${teamStats.excluded} sin calificaciones quedan fuera)` : ""}. La tabla se
+                          ordena por la suma de ambos z.
+                        </li>
+                      </ul>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
           </section>
 
           {selectedUser ? (
