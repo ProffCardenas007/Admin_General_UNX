@@ -17,6 +17,7 @@ import { ReportsService } from './reports.service';
 import {
   SaveSemesterWeightsDto,
   SaveTaskEvaluationDto,
+  SaveTaskEvaluationsDto,
 } from './dto/semester-evaluation.dto';
 
 @Controller('reports')
@@ -52,6 +53,15 @@ export class ReportsController {
     @Req() req: { user: { id: string } },
   ) {
     return this.reportsService.saveSemesterWeights(dto, req.user.id);
+  }
+
+  @Put('tasks/evaluations')
+  @Roles('manager')
+  saveTaskEvaluations(
+    @Body() dto: SaveTaskEvaluationsDto,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.reportsService.saveTaskEvaluations(dto, req.user.id);
   }
 
   @Put('tasks/:taskId/evaluation')

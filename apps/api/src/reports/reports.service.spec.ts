@@ -34,6 +34,7 @@ describe('ReportsService', () => {
 
     tasksRepository = {
       createQueryBuilder: jest.fn().mockReturnValue(qb),
+      find: jest.fn().mockResolvedValue([]),
     };
 
     projectsRepository = {
@@ -179,8 +180,8 @@ describe('ReportsService', () => {
     const result = await service.getSemesterEvaluation(2026, 1);
 
     expect(result.period).toEqual({
-      from: '2026-01-01',
-      to: '2026-06-30',
+      from: '2026-02-01',
+      to: '2026-07-31',
     });
     expect(result.users[0]).toMatchObject({
       finalGrade: 80,
@@ -472,31 +473,29 @@ describe('ReportsService', () => {
     });
 
     it('lists open tasks already past their authorized hours, worst first', async () => {
-      tasksRepository.query = jest
-        .fn()
-        .mockResolvedValue([
-          row({
-            id: 'open-1',
-            status: 'doing',
-            estimated: 4,
-            extra: 0,
-            real: 5,
-          }),
-          row({
-            id: 'open-2',
-            status: 'doing',
-            estimated: 4,
-            extra: 2,
-            real: 9,
-          }),
-          row({
-            id: 'open-3',
-            status: 'doing',
-            estimated: 4,
-            extra: 2,
-            real: 5,
-          }),
-        ]);
+      tasksRepository.query = jest.fn().mockResolvedValue([
+        row({
+          id: 'open-1',
+          status: 'doing',
+          estimated: 4,
+          extra: 0,
+          real: 5,
+        }),
+        row({
+          id: 'open-2',
+          status: 'doing',
+          estimated: 4,
+          extra: 2,
+          real: 9,
+        }),
+        row({
+          id: 'open-3',
+          status: 'doing',
+          estimated: 4,
+          extra: 2,
+          real: 5,
+        }),
+      ]);
 
       const report = await service.getHoursDeviation({});
 
@@ -516,6 +515,60 @@ describe('ReportsService', () => {
       await expect(
         service.getHoursDeviation({ from: '2026-08-01' }),
       ).rejects.toThrow('Both from and to are required');
+    });
+  });
+  describe('semester periods and batch grading', () => {
+    it('runs the second semester from August to January of the next year', async () => {
+      const result = await service.getSemesterEvaluation(2026, 2);
+      expect(result.period).toEqual({ from: '2026-08-01', to: '2027-01-31' });
+    });
+
+    it('saves several grades in one call, reusing existing evaluations', async () => {
+      tasksRepository.find.mockResolvedValue([
+        { id: 'task-1' },
+        { id: 'task-2' },
+      ]);
+      taskEvaluationsRepository.find.mockResolvedValue([
+        { taskId: 'task-1', grade: '50', comments: 'Bien' },
+      ]);
+
+      const result = await service.saveTaskEvaluations(
+        {
+          evaluations: [
+            { taskId: 'task-1', grade: 90 },
+            { taskId: 'task-2', grade: 70 },
+          ],
+        },
+        'manager-1',
+      );
+
+      expect(result).toEqual({ saved: 2 });
+      expect(taskEvaluationsRepository.save).toHaveBeenCalledTimes(1);
+      expect(taskEvaluationsRepository.save.mock.calls[0][0]).toEqual([
+        {
+          taskId: 'task-1',
+          grade: '90',
+          comments: 'Bien',
+          evaluatedBy: 'manager-1',
+        },
+        { taskId: 'task-2', grade: '70', evaluatedBy: 'manager-1' },
+      ]);
+    });
+
+    it('rejects the whole batch if a task does not exist', async () => {
+      tasksRepository.find.mockResolvedValue([{ id: 'task-1' }]);
+      await expect(
+        service.saveTaskEvaluations(
+          {
+            evaluations: [
+              { taskId: 'task-1', grade: 90 },
+              { taskId: 'missing', grade: 70 },
+            ],
+          },
+          'manager-1',
+        ),
+      ).rejects.toThrow('One or more tasks were not found');
+      expect(taskEvaluationsRepository.save).not.toHaveBeenCalled();
     });
   });
 });

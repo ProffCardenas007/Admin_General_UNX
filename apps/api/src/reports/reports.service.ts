@@ -23,6 +23,7 @@ import type {
 import {
   SaveSemesterWeightsDto,
   SaveTaskEvaluationDto,
+  SaveTaskEvaluationsDto,
 } from './dto/semester-evaluation.dto';
 
 const ACTIVITY_WEIGHTS: Record<TaskActivityType, number> = {
@@ -89,9 +90,11 @@ export class ReportsService {
     if (semester !== 1 && semester !== 2) {
       throw new BadRequestException('Semester must be 1 or 2');
     }
+    // Ciclo escolar: semestre 1 = febrero a julio; semestre 2 = agosto a enero
+    // del año siguiente (el año identifica al agosto con que inicia).
     return semester === 1
-      ? { from: `${year}-01-01`, to: `${year}-06-30` }
-      : { from: `${year}-07-01`, to: `${year}-12-31` };
+      ? { from: `${year}-02-01`, to: `${year}-07-31` }
+      : { from: `${year}-08-01`, to: `${year + 1}-01-31` };
   }
 
   private deliveryStatus(task: TaskEntity) {
@@ -102,9 +105,7 @@ export class ReportsService {
       return 'not_delivered';
     }
     if (!task.completedAt || !task.dueDate) return 'delivered';
-    return todayKey(task.completedAt) <= task.dueDate
-      ? 'on_time'
-      : 'late';
+    return todayKey(task.completedAt) <= task.dueDate ? 'on_time' : 'late';
   }
 
   async getSemesterEvaluation(year: number, semester: number) {
@@ -137,17 +138,13 @@ export class ReportsService {
         : [],
     ]);
     const evaluationsByTask = new Map<string, TaskEvaluationEntity>(
-      evaluations.map(
-        (evaluation): [string, TaskEvaluationEntity] => [
-          evaluation.taskId,
-          evaluation,
-        ],
-      ),
+      evaluations.map((evaluation): [string, TaskEvaluationEntity] => [
+        evaluation.taskId,
+        evaluation,
+      ]),
     );
     const projectsById = new Map<string, ProjectEntity>(
-      projects.map(
-        (project): [string, ProjectEntity] => [project.id, project],
-      ),
+      projects.map((project): [string, ProjectEntity] => [project.id, project]),
     );
     const weights = {
       ...ACTIVITY_WEIGHTS,
@@ -183,7 +180,8 @@ export class ReportsService {
             code: task.code,
             title: task.title,
             projectName:
-              projectsById.get(task.projectId)?.name ?? 'Proyecto no encontrado',
+              projectsById.get(task.projectId)?.name ??
+              'Proyecto no encontrado',
             activityType: task.activityType,
             status: task.status,
             completionOutcome: task.completionOutcome ?? null,
@@ -369,6 +367,39 @@ export class ReportsService {
     evaluation.comments = dto.comments?.trim() || null;
     evaluation.evaluatedBy = actorId;
     return this.taskEvaluationsRepository.save(evaluation);
+  }
+
+  /** Guarda varias calificaciones de una vez (todas o ninguna). */
+  async saveTaskEvaluations(dto: SaveTaskEvaluationsDto, actorId: string) {
+    const taskIds = dto.evaluations.map((item) => item.taskId);
+    if (new Set(taskIds).size !== taskIds.length) {
+      throw new BadRequestException(
+        'Each task can be graded only once per request',
+      );
+    }
+    const tasks = await this.tasksRepository.find({
+      where: { id: In(taskIds) },
+    });
+    if (tasks.length !== taskIds.length) {
+      throw new NotFoundException('One or more tasks were not found');
+    }
+    const existing = await this.taskEvaluationsRepository.find({
+      where: { taskId: In(taskIds) },
+    });
+    const existingByTask = new Map(
+      existing.map((evaluation) => [evaluation.taskId, evaluation]),
+    );
+    const rows = dto.evaluations.map((item) => {
+      const evaluation =
+        existingByTask.get(item.taskId) ??
+        this.taskEvaluationsRepository.create({ taskId: item.taskId });
+      evaluation.grade = String(item.grade);
+      evaluation.evaluatedBy = actorId;
+      return evaluation;
+    });
+    // save() con un arreglo corre en una sola transacción.
+    await this.taskEvaluationsRepository.save(rows);
+    return { saved: rows.length };
   }
 
   async getUserPerformance(filters: { from?: string; to?: string }) {

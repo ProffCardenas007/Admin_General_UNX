@@ -1,7 +1,7 @@
 "use client";
 
 import axios from "axios";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { API_URL, authHeaders } from "../../lib/api";
 
 type ActivityType =
@@ -122,10 +122,25 @@ const getErrorMessage = (error: unknown, fallback: string) => {
       : fallback;
 };
 
+const PAGE_SIZE = 10;
+
+/**
+ * Semestre escolar de una fecha: 1 = febrero a julio; 2 = agosto a enero.
+ * Enero pertenece al semestre 2 que empezó en agosto del año anterior.
+ */
+const currentSemester = (date: Date): { year: number; semester: 1 | 2 } => {
+  const month = date.getMonth(); // 0 = enero
+  if (month === 0) return { year: date.getFullYear() - 1, semester: 2 };
+  return { year: date.getFullYear(), semester: month <= 6 ? 1 : 2 };
+};
+
+const semesterLabel = (year: number, semester: 1 | 2) =>
+  semester === 1 ? `Febrero a julio ${year}` : `Agosto ${year} a enero ${year + 1}`;
+
 export default function SemesterEvaluationPanel() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [semester, setSemester] = useState<1 | 2>(now.getMonth() < 6 ? 1 : 2);
+  const [initialSemester] = useState(() => currentSemester(new Date()));
+  const [year, setYear] = useState(initialSemester.year);
+  const [semester, setSemester] = useState<1 | 2>(initialSemester.semester);
   const [report, setReport] = useState<SemesterReport | null>(null);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [weightDrafts, setWeightDrafts] = useState<Record<ActivityType, string>>(
@@ -134,7 +149,11 @@ export default function SemesterEvaluationPanel() {
   const [gradeDrafts, setGradeDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [savingWeights, setSavingWeights] = useState(false);
-  const [savingTaskId, setSavingTaskId] = useState("");
+  const [savingGrades, setSavingGrades] = useState(false);
+  const [onlyUngraded, setOnlyUngraded] = useState(true);
+  const [page, setPage] = useState(0);
+  const [fillValue, setFillValue] = useState("100");
+  const gradeInputs = useRef<Array<HTMLInputElement | null>>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -181,6 +200,97 @@ export default function SemesterEvaluationPanel() {
     [report, selectedUserId],
   );
 
+  // Calificación guardada de cada tarea, para saber qué cambió sin guardar.
+  const savedGrades = useMemo(
+    () =>
+      new Map(
+        (report?.users ?? []).flatMap((user) =>
+          user.tasks.map((task) => [task.id, task.manualGrade === null ? "" : String(task.manualGrade)] as const),
+        ),
+      ),
+    [report],
+  );
+
+  const pendingGrades = useMemo(
+    () =>
+      Object.entries(gradeDrafts)
+        .filter(([taskId, value]) => value.trim() !== "" && value.trim() !== (savedGrades.get(taskId) ?? ""))
+        .map(([taskId, value]) => ({ taskId, grade: Number(value) })),
+    [gradeDrafts, savedGrades],
+  );
+  const invalidPending = pendingGrades.filter(
+    (row) => !Number.isFinite(row.grade) || row.grade < 0 || row.grade > 100,
+  );
+  const hasUnsaved = pendingGrades.length > 0;
+
+  // Aviso del navegador si se intenta salir con calificaciones sin guardar.
+  useEffect(() => {
+    if (!hasUnsaved) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsaved]);
+
+  const visibleTasks = useMemo(
+    () =>
+      (selectedUser?.tasks ?? []).filter(
+        (task) => !onlyUngraded || (task.manualGrade === null && !task.autoZero),
+      ),
+    [onlyUngraded, selectedUser],
+  );
+  const pageCount = Math.max(1, Math.ceil(visibleTasks.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageTasks = visibleTasks.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+
+  const confirmDiscard = () =>
+    !hasUnsaved || window.confirm("Tienes calificaciones sin guardar. ¿Descartarlas?");
+
+  const changePeriod = (next: { year?: number; semester?: 1 | 2 }) => {
+    if (!confirmDiscard()) return;
+    if (next.year !== undefined) setYear(next.year);
+    if (next.semester !== undefined) setSemester(next.semester);
+    setPage(0);
+  };
+
+  const selectUser = (userId: string) => {
+    // Los borradores se conservan al cambiar de persona: se guardan todos juntos.
+    setSelectedUserId(userId);
+    setPage(0);
+  };
+
+  const onGradeKeyDown = (event: KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const next = gradeInputs.current[index + (event.shiftKey ? -1 : 1)];
+    if (next) {
+      next.focus();
+      next.select();
+    }
+  };
+
+  const fillEmptyOnPage = () => {
+    const value = Number(fillValue);
+    if (fillValue.trim() === "" || !Number.isFinite(value) || value < 0 || value > 100) {
+      setError("El valor para rellenar debe estar entre 0 y 100.");
+      return;
+    }
+    setError("");
+    setGradeDrafts((current) => {
+      const next = { ...current };
+      pageTasks.forEach((task) => {
+        if ((next[task.id] ?? "").trim() === "") next[task.id] = String(value);
+      });
+      return next;
+    });
+  };
+
+  const discardGrades = () => {
+    setGradeDrafts(Object.fromEntries(savedGrades));
+    setNotice("");
+  };
+
   const saveWeights = async () => {
     const weights = Object.fromEntries(
       activityOrder.map((activity) => [activity, Number(weightDrafts[activity])]),
@@ -207,27 +317,27 @@ export default function SemesterEvaluationPanel() {
     }
   };
 
-  const saveGrade = async (taskId: string) => {
-    const grade = Number(gradeDrafts[taskId]);
-    if (!Number.isFinite(grade) || grade < 0 || grade > 100) {
-      setError("La calificación debe estar entre 0 y 100.");
+  const saveAllGrades = async () => {
+    if (!hasUnsaved) return;
+    if (invalidPending.length > 0) {
+      setError(`Hay ${invalidPending.length} calificación(es) fuera de 0 a 100. Corrígelas antes de guardar.`);
       return;
     }
-    setSavingTaskId(taskId);
+    setSavingGrades(true);
     setError("");
     setNotice("");
     try {
       await axios.put(
-        `${API_URL}/reports/tasks/${taskId}/evaluation`,
-        { grade },
+        `${API_URL}/reports/tasks/evaluations`,
+        { evaluations: pendingGrades },
         { headers: authHeaders() },
       );
-      setNotice("Calificación guardada.");
+      setNotice(`${pendingGrades.length} calificación(es) guardada(s).`);
       await loadReport();
     } catch (caughtError) {
-      setError(getErrorMessage(caughtError, "No se pudo guardar la calificación."));
+      setError(getErrorMessage(caughtError, "No se pudieron guardar las calificaciones; no se guardó ninguna."));
     } finally {
-      setSavingTaskId("");
+      setSavingGrades(false);
     }
   };
 
@@ -238,18 +348,18 @@ export default function SemesterEvaluationPanel() {
           <div>
             <h2 className="text-lg font-semibold">Evaluación semestral</h2>
             <p className="mt-1 text-sm text-[var(--ink-muted)]">
-              Califica cada tarea de 0 a 100 y conserva una ponderación diferente por semestre.
+              Califica las tareas de 0 a 100 (Enter pasa a la siguiente) y guarda todas juntas al final.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-              Año
+              Año de inicio
               <input
                 type="number"
                 min={2000}
                 max={2100}
                 value={year}
-                onChange={(event) => setYear(Number(event.target.value))}
+                onChange={(event) => changePeriod({ year: Number(event.target.value) })}
                 className="ui-control mt-2"
               />
             </label>
@@ -257,11 +367,11 @@ export default function SemesterEvaluationPanel() {
               Semestre
               <select
                 value={semester}
-                onChange={(event) => setSemester(Number(event.target.value) as 1 | 2)}
+                onChange={(event) => changePeriod({ semester: Number(event.target.value) as 1 | 2 })}
                 className="ui-control mt-2"
               >
-                <option value={1}>Enero a junio</option>
-                <option value={2}>Julio a diciembre</option>
+                <option value={2}>{semesterLabel(year, 2)}</option>
+                <option value={1}>{semesterLabel(year, 1)}</option>
               </select>
             </label>
           </div>
@@ -307,7 +417,7 @@ export default function SemesterEvaluationPanel() {
               <div>
                 <h2 className="text-lg font-semibold">Ponderación de actividades</h2>
                 <p className="mt-1 text-sm text-[var(--ink-muted)]">
-                  Cada valor multiplica las horas estimadas de la tarea. Los cambios solo aplican a {year}, semestre {semester}.
+                  Cada valor multiplica las horas estimadas de la tarea. Los cambios solo aplican a {semesterLabel(year, semester).toLowerCase()}.
                 </p>
               </div>
               <button type="button" onClick={() => void saveWeights()} disabled={savingWeights} className="ui-btn ui-btn-primary">
@@ -369,7 +479,7 @@ export default function SemesterEvaluationPanel() {
                         {user.finalGrade === null ? "Pendiente" : `${formatNumber(user.finalGrade)} / 100`}
                       </td>
                       <td className="px-4 py-3">
-                        <button type="button" onClick={() => setSelectedUserId(user.userId)} className="ui-btn ui-btn-secondary ui-btn-sm">
+                        <button type="button" onClick={() => selectUser(user.userId)} className="ui-btn ui-btn-secondary ui-btn-sm">
                           Ver tareas
                         </button>
                       </td>
@@ -393,14 +503,43 @@ export default function SemesterEvaluationPanel() {
                     {selectedUser.gradedCount} de {selectedUser.taskCount} tareas calificadas · {formatNumber(selectedUser.estimatedHours)} h estimadas
                   </p>
                 </div>
-                <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} className="ui-control md:max-w-sm">
+                <select value={selectedUserId} onChange={(event) => selectUser(event.target.value)} className="ui-control md:max-w-sm">
                   {report.users.map((user) => (
                     <option key={user.userId} value={user.userId}>{user.fullName}</option>
                   ))}
                 </select>
               </div>
+              <div className="flex flex-col gap-3 border-b border-[var(--line)] bg-[var(--background)]/40 px-5 py-3 text-sm lg:flex-row lg:items-center lg:justify-between">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={onlyUngraded}
+                    onChange={(event) => {
+                      setOnlyUngraded(event.target.checked);
+                      setPage(0);
+                    }}
+                  />
+                  Solo tareas sin calificar
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[var(--ink-muted)]">Rellenar vacías de esta página con</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.1"
+                    value={fillValue}
+                    onChange={(event) => setFillValue(event.target.value)}
+                    aria-label="Calificación para rellenar"
+                    className="ui-control w-20"
+                  />
+                  <button type="button" onClick={fillEmptyOnPage} disabled={pageTasks.length === 0} className="ui-btn ui-btn-secondary ui-btn-sm">
+                    Rellenar
+                  </button>
+                </div>
+              </div>
               <div className="overflow-x-auto">
-                <table className="ui-table min-w-[1150px] w-full">
+                <table className="ui-table min-w-[1050px] w-full">
                   <thead>
                     <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
                       <th className="px-4 py-3">Tarea</th>
@@ -410,12 +549,25 @@ export default function SemesterEvaluationPanel() {
                       <th className="px-4 py-3">Horas</th>
                       <th className="px-4 py-3">Base</th>
                       <th className="px-4 py-3">Calificación</th>
-                      <th className="px-4 py-3">Guardar</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedUser.tasks.map((task) => (
-                      <tr key={task.id} className="border-b border-[var(--line)]/60">
+                    {pageTasks.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-6 text-center text-sm text-[var(--ink-muted)]">
+                          {onlyUngraded
+                            ? "Todas las tareas de esta persona ya están calificadas."
+                            : "Esta persona no tiene tareas en el semestre."}
+                        </td>
+                      </tr>
+                    ) : null}
+                    {pageTasks.map((task, index) => {
+                      const draft = gradeDrafts[task.id] ?? "";
+                      const changed = draft.trim() !== "" && draft.trim() !== (savedGrades.get(task.id) ?? "");
+                      const draftNumber = Number(draft);
+                      const invalid = changed && (!Number.isFinite(draftNumber) || draftNumber < 0 || draftNumber > 100);
+                      return (
+                      <tr key={task.id} className={`border-b border-[var(--line)]/60 ${changed ? "bg-amber-50/60" : ""}`}>
                         <td className="px-4 py-3">
                           <p className="font-semibold">{task.title}</p>
                           <p className="text-xs text-[var(--ink-muted)]">{task.code} · {task.projectName}</p>
@@ -432,11 +584,21 @@ export default function SemesterEvaluationPanel() {
                             max={100}
                             step="0.1"
                             aria-label={`Calificación de ${task.title}`}
-                            value={gradeDrafts[task.id] ?? ""}
+                            ref={(element) => {
+                              gradeInputs.current[index] = element;
+                            }}
+                            value={draft}
                             onChange={(event) => setGradeDrafts((current) => ({ ...current, [task.id]: event.target.value }))}
-                            className="ui-control w-28"
+                            onKeyDown={(event) => onGradeKeyDown(event, index)}
+                            onFocus={(event) => event.target.select()}
+                            className={`ui-control w-28 ${invalid ? "border-[var(--danger)]" : ""}`}
                             placeholder="0-100"
                           />
+                          {changed ? (
+                            <p className={`mt-1 text-xs font-semibold ${invalid ? "text-[var(--danger)]" : "text-amber-700"}`}>
+                              {invalid ? "Debe estar entre 0 y 100" : "Sin guardar"}
+                            </p>
+                          ) : null}
                           {task.autoZero ? (
                             <p className="mt-1 text-xs font-semibold text-[var(--danger)]">0 automático (no entregada)</p>
                           ) : null}
@@ -446,21 +608,28 @@ export default function SemesterEvaluationPanel() {
                             </p>
                           ) : null}
                         </td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            disabled={savingTaskId === task.id || gradeDrafts[task.id] === ""}
-                            onClick={() => void saveGrade(task.id)}
-                            className="ui-btn ui-btn-primary ui-btn-sm"
-                          >
-                            {savingTaskId === task.id ? "Guardando..." : "Guardar"}
-                          </button>
-                        </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+              {visibleTasks.length > PAGE_SIZE ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] px-5 py-3 text-sm">
+                  <span className="text-[var(--ink-muted)]">
+                    Tareas {safePage * PAGE_SIZE + 1}–{Math.min(visibleTasks.length, (safePage + 1) * PAGE_SIZE)} de {visibleTasks.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => setPage(safePage - 1)} disabled={safePage === 0} className="ui-btn ui-btn-secondary ui-btn-sm">
+                      Anteriores 10
+                    </button>
+                    <span className="text-[var(--ink-muted)]">Página {safePage + 1} de {pageCount}</span>
+                    <button type="button" onClick={() => setPage(safePage + 1)} disabled={safePage >= pageCount - 1} className="ui-btn ui-btn-secondary ui-btn-sm">
+                      Siguientes 10
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="border-t border-[var(--line)] bg-[var(--background)]/50 px-5 py-4 text-sm">
                 <strong>Resultado semestral: </strong>
                 {selectedUser.finalGrade === null
@@ -481,6 +650,25 @@ export default function SemesterEvaluationPanel() {
             </p>
           </section>
         </>
+      ) : null}
+
+      {hasUnsaved ? (
+        <div className="sticky bottom-4 z-20 flex flex-col gap-3 rounded-2xl border border-amber-300 bg-white px-5 py-3 shadow-lg sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm">
+            <strong>{pendingGrades.length}</strong> calificación(es) sin guardar
+            {invalidPending.length > 0 ? (
+              <span className="ml-2 font-semibold text-[var(--danger)]">· {invalidPending.length} fuera de rango</span>
+            ) : null}
+          </p>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={discardGrades} disabled={savingGrades} className="ui-btn ui-btn-secondary ui-btn-sm">
+              Descartar
+            </button>
+            <button type="button" onClick={() => void saveAllGrades()} disabled={savingGrades} className="ui-btn ui-btn-primary ui-btn-sm">
+              {savingGrades ? "Guardando..." : `Guardar ${pendingGrades.length} calificación(es)`}
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

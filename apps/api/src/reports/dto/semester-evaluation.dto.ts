@@ -1,12 +1,18 @@
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsInt,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
   Max,
+  IsUUID,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 export class SaveSemesterWeightsDto {
@@ -34,4 +40,23 @@ export class SaveTaskEvaluationDto {
   @IsString()
   @MaxLength(2000)
   comments?: string;
+}
+
+export class TaskGradeItemDto {
+  @IsUUID()
+  taskId: string;
+
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  grade: number;
+}
+
+export class SaveTaskEvaluationsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => TaskGradeItemDto)
+  evaluations: TaskGradeItemDto[];
 }
