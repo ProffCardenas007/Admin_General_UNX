@@ -90,11 +90,11 @@ export class ReportsService {
     if (semester !== 1 && semester !== 2) {
       throw new BadRequestException('Semester must be 1 or 2');
     }
-    // Ciclo escolar: semestre 1 = febrero a julio; semestre 2 = agosto a enero
-    // del año siguiente (el año identifica al agosto con que inicia).
+    // Semestre 2 = 15 de mayo al 15 de noviembre del año.
+    // Semestre 1 = 16 de noviembre del año anterior al 14 de mayo del año.
     return semester === 1
-      ? { from: `${year}-02-01`, to: `${year}-07-31` }
-      : { from: `${year}-08-01`, to: `${year + 1}-01-31` };
+      ? { from: `${year - 1}-11-16`, to: `${year}-05-14` }
+      : { from: `${year}-05-15`, to: `${year}-11-15` };
   }
 
   private deliveryStatus(task: TaskEntity) {

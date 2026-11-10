@@ -125,17 +125,22 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 const PAGE_SIZE = 10;
 
 /**
- * Semestre escolar de una fecha: 1 = febrero a julio; 2 = agosto a enero.
- * Enero pertenece al semestre 2 que empezó en agosto del año anterior.
+ * Semestre de una fecha:
+ * 2 = 15 de mayo al 15 de noviembre del año;
+ * 1 = 16 de noviembre del año anterior al 14 de mayo del año.
  */
 const currentSemester = (date: Date): { year: number; semester: 1 | 2 } => {
-  const month = date.getMonth(); // 0 = enero
-  if (month === 0) return { year: date.getFullYear() - 1, semester: 2 };
-  return { year: date.getFullYear(), semester: month <= 6 ? 1 : 2 };
+  const year = date.getFullYear();
+  const monthDay = (date.getMonth() + 1) * 100 + date.getDate(); // 515 = 15 de mayo
+  if (monthDay >= 515 && monthDay <= 1115) return { year, semester: 2 };
+  if (monthDay > 1115) return { year: year + 1, semester: 1 };
+  return { year, semester: 1 };
 };
 
 const semesterLabel = (year: number, semester: 1 | 2) =>
-  semester === 1 ? `Febrero a julio ${year}` : `Agosto ${year} a enero ${year + 1}`;
+  semester === 2
+    ? `15 mayo a 15 noviembre ${year}`
+    : `16 noviembre ${year - 1} a 14 mayo ${year}`;
 
 export default function SemesterEvaluationPanel() {
   const [initialSemester] = useState(() => currentSemester(new Date()));
@@ -353,7 +358,7 @@ export default function SemesterEvaluationPanel() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-              Año de inicio
+              Año
               <input
                 type="number"
                 min={2000}

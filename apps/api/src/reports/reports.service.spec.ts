@@ -180,8 +180,8 @@ describe('ReportsService', () => {
     const result = await service.getSemesterEvaluation(2026, 1);
 
     expect(result.period).toEqual({
-      from: '2026-02-01',
-      to: '2026-07-31',
+      from: '2025-11-16',
+      to: '2026-05-14',
     });
     expect(result.users[0]).toMatchObject({
       finalGrade: 80,
@@ -518,9 +518,9 @@ describe('ReportsService', () => {
     });
   });
   describe('semester periods and batch grading', () => {
-    it('runs the second semester from August to January of the next year', async () => {
+    it('runs the second semester from May 15 to November 15', async () => {
       const result = await service.getSemesterEvaluation(2026, 2);
-      expect(result.period).toEqual({ from: '2026-08-01', to: '2027-01-31' });
+      expect(result.period).toEqual({ from: '2026-05-15', to: '2026-11-15' });
     });
 
     it('saves several grades in one call, reusing existing evaluations', async () => {
