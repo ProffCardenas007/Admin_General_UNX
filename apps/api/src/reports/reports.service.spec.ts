@@ -162,7 +162,7 @@ describe('ReportsService', () => {
         activityType: 'revision',
         status: 'doing',
         completionOutcome: null,
-        dueDate: '2026-06-20',
+        dueDate: '2099-06-20',
         completedAt: null,
         estimatedHours: '2',
         createdAt: new Date('2026-05-02T00:00:00.000Z'),
@@ -187,7 +187,7 @@ describe('ReportsService', () => {
       possiblePoints: 40,
       earnedPoints: 32,
       onTimeCount: 1,
-      notDeliveredCount: 1,
+      pendingCount: 1,
     });
     expect(result.users[0].tasks[0]).toMatchObject({
       deliveryStatus: 'on_time',
@@ -196,6 +196,89 @@ describe('ReportsService', () => {
       grade: 80,
       earnedPoints: 32,
     });
+    expect(result.users[0].tasks[1]).toMatchObject({
+      deliveryStatus: 'pending',
+      grade: null,
+      earnedPoints: null,
+    });
+  });
+
+  it('scores overdue undelivered tasks as zero and caps late deliveries', async () => {
+    usersRepository.find.mockResolvedValue([
+      {
+        id: 'worker-1',
+        fullName: 'Ana',
+        email: 'ana@acme.com',
+        role: 'worker',
+        isActive: true,
+      },
+    ]);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'task-late',
+        code: 'TASK-1',
+        title: 'Tardía',
+        projectId: 'project-1',
+        assigneeId: 'worker-1',
+        activityType: 'creacion',
+        status: 'done',
+        completionOutcome: 'completed',
+        dueDate: '2026-06-10',
+        completedAt: new Date('2026-06-20T18:00:00.000Z'),
+        estimatedHours: '4',
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+      {
+        id: 'task-missing',
+        code: 'TASK-2',
+        title: 'Nunca entregada',
+        projectId: 'project-1',
+        assigneeId: 'worker-1',
+        activityType: 'revision',
+        status: 'doing',
+        completionOutcome: null,
+        dueDate: '2026-06-20',
+        completedAt: null,
+        estimatedHours: '2',
+        createdAt: new Date('2026-05-02T00:00:00.000Z'),
+      },
+    ]);
+    taskEvaluationsRepository.find.mockResolvedValue([
+      {
+        taskId: 'task-late',
+        grade: '90',
+        comments: null,
+      },
+    ]);
+
+    const result = await service.getSemesterEvaluation(2026, 1);
+
+    // Late delivery graded 90 counts as 70 (cap): 40 pts × 0.7 = 28.
+    expect(result.users[0].tasks[0]).toMatchObject({
+      deliveryStatus: 'late',
+      manualGrade: 90,
+      lateCapApplied: true,
+      grade: 70,
+      possiblePoints: 40,
+      earnedPoints: 28,
+    });
+    // Overdue and never delivered counts as an automatic 0.
+    expect(result.users[0].tasks[1]).toMatchObject({
+      deliveryStatus: 'not_delivered',
+      manualGrade: null,
+      autoZero: true,
+      grade: 0,
+      possiblePoints: 6,
+      earnedPoints: 0,
+    });
+    expect(result.users[0]).toMatchObject({
+      possiblePoints: 46,
+      earnedPoints: 28,
+      finalGrade: 60.9,
+      lateCount: 1,
+      notDeliveredCount: 1,
+    });
+    expect(result.lateGradeCap).toBe(70);
   });
 
   it('calculates weighted user performance and ranking', async () => {

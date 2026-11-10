@@ -37,6 +37,9 @@ const ACTIVITY_WEIGHTS: Record<TaskActivityType, number> = {
 
 const ACTIVITY_TYPES = Object.keys(ACTIVITY_WEIGHTS) as TaskActivityType[];
 
+/** A late delivery can never score above this grade. */
+const LATE_GRADE_CAP = 70;
+
 const ACTIVITY_TYPE_LABELS: Record<TaskActivityType, string> = {
   creacion: 'Creación',
   grabacion: 'Grabación',
@@ -93,7 +96,11 @@ export class ReportsService {
 
   private deliveryStatus(task: TaskEntity) {
     if (task.completionOutcome === 'not_completed') return 'not_delivered';
-    if (task.status !== 'done') return 'not_delivered';
+    if (task.status !== 'done') {
+      // Still in time: the due date has not passed yet.
+      if (task.dueDate && task.dueDate >= todayKey()) return 'pending';
+      return 'not_delivered';
+    }
     if (!task.completedAt || !task.dueDate) return 'delivered';
     return todayKey(task.completedAt) <= task.dueDate
       ? 'on_time'
@@ -158,8 +165,19 @@ export class ReportsService {
           const estimatedHours = Number(task.estimatedHours || 0);
           const weight = weights[task.activityType];
           const possiblePoints = estimatedHours * weight;
-          const grade =
+          const deliveryStatus = this.deliveryStatus(task);
+          const manualGrade =
             evaluation === undefined ? null : Number(evaluation.grade);
+          // Not-delivered tasks score 0 automatically unless graded by hand.
+          const autoZero =
+            manualGrade === null && deliveryStatus === 'not_delivered';
+          const baseGrade = autoZero ? 0 : manualGrade;
+          // A late delivery cannot score above the cap.
+          const lateCapApplied =
+            baseGrade !== null &&
+            deliveryStatus === 'late' &&
+            baseGrade > LATE_GRADE_CAP;
+          const grade = lateCapApplied ? LATE_GRADE_CAP : baseGrade;
           return {
             id: task.id,
             code: task.code,
@@ -169,12 +187,15 @@ export class ReportsService {
             activityType: task.activityType,
             status: task.status,
             completionOutcome: task.completionOutcome ?? null,
-            deliveryStatus: this.deliveryStatus(task),
+            deliveryStatus,
             dueDate: task.dueDate ?? null,
             completedAt: task.completedAt?.toISOString() ?? null,
             estimatedHours,
             weight,
             possiblePoints: Number(possiblePoints.toFixed(2)),
+            manualGrade,
+            autoZero,
+            lateCapApplied,
             grade,
             earnedPoints:
               grade === null
@@ -284,6 +305,7 @@ export class ReportsService {
       period,
       weights,
       customizedWeights: storedWeights.length > 0,
+      lateGradeCap: LATE_GRADE_CAP,
       team: {
         users: rows.length,
         tasks: rows.reduce((sum, user) => sum + user.taskCount, 0),

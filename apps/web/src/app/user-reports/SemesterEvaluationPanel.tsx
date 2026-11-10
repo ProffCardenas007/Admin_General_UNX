@@ -28,6 +28,9 @@ type SemesterTask = {
   estimatedHours: number;
   weight: number;
   possiblePoints: number;
+  manualGrade: number | null;
+  autoZero: boolean;
+  lateCapApplied: boolean;
   grade: number | null;
   earnedPoints: number | null;
 };
@@ -57,6 +60,7 @@ type SemesterReport = {
   period: { from: string; to: string };
   weights: Record<ActivityType, number>;
   customizedWeights: boolean;
+  lateGradeCap: number;
   team: {
     users: number;
     tasks: number;
@@ -151,7 +155,7 @@ export default function SemesterEvaluationPanel() {
       setGradeDrafts(
         Object.fromEntries(
           response.data.users.flatMap((user) =>
-            user.tasks.map((task) => [task.id, task.grade === null ? "" : String(task.grade)]),
+            user.tasks.map((task) => [task.id, task.manualGrade === null ? "" : String(task.manualGrade)]),
           ),
         ),
       );
@@ -332,7 +336,7 @@ export default function SemesterEvaluationPanel() {
             <div className="border-b border-[var(--line)] px-5 py-4">
               <h2 className="text-lg font-semibold">Resultados del equipo</h2>
               <p className="mt-1 text-sm text-[var(--ink-muted)]">
-                El resultado usa únicamente tareas calificadas; las pendientes se muestran por separado.
+                Las tareas no entregadas cuentan como 0 automáticamente; las pendientes (aún en tiempo) no afectan el resultado.
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -433,6 +437,14 @@ export default function SemesterEvaluationPanel() {
                             className="ui-control w-28"
                             placeholder="0-100"
                           />
+                          {task.autoZero ? (
+                            <p className="mt-1 text-xs font-semibold text-[var(--danger)]">0 automático (no entregada)</p>
+                          ) : null}
+                          {task.lateCapApplied ? (
+                            <p className="mt-1 text-xs font-semibold text-amber-700">
+                              Tope por entrega tardía: cuenta como {formatNumber(task.grade ?? 0, 0)}
+                            </p>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3">
                           <button
@@ -463,6 +475,8 @@ export default function SemesterEvaluationPanel() {
             <p className="mt-2">
               Base de cada tarea = horas estimadas × ponderación de su actividad. Puntos obtenidos = base × calificación ÷ 100.
               El resultado final es la suma de puntos obtenidos dividida entre la suma de bases de las tareas ya calificadas.
+              Las tareas no entregadas (vencidas sin terminar) cuentan como 0 automáticamente, aunque puedes capturarles una calificación manual.
+              Las entregas tardías tienen un tope de {report.lateGradeCap} de calificación.
               El estado de entrega se determina automáticamente comparando la fecha de finalización con la fecha límite.
             </p>
           </section>
