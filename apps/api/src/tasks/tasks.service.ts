@@ -442,6 +442,11 @@ export class TasksService {
     }
 
     const assigneeIds = dto.steps.map((step) => step.assigneeId);
+    if (actor.role === 'lead' && assigneeIds.includes(actor.id)) {
+      throw new ForbiddenException(
+        "Las tareas propias se registran con 'Registrar actividad' y las aprueba gerencia.",
+      );
+    }
     if (assigneeIds.some((id) => !id?.trim())) {
       throw new BadRequestException('Every task step must have an assignee');
     }
@@ -548,14 +553,22 @@ export class TasksService {
       }
     }
 
-    if (dto.teamId && dto.assigneeId) {
-      throw new BadRequestException('Use assigneeId or teamId, not both');
+    // Lo que una persona hace por su cuenta pasa por aprobación de gerencia
+    // (selfReport). Los profesores no crean tareas y los líderes no se las
+    // asignan a sí mismos.
+    if (actor.role === 'worker') {
+      throw new ForbiddenException(
+        "Las tareas propias se registran con 'Registrar actividad' y las aprueba gerencia.",
+      );
+    }
+    if (actor.role === 'lead' && dto.assigneeId === actor.id) {
+      throw new ForbiddenException(
+        "Las tareas propias se registran con 'Registrar actividad' y las aprueba gerencia.",
+      );
     }
 
-    if (dto.teamId && actor.role === 'worker') {
-      throw new ForbiddenException(
-        'Workers cannot assign tasks to complete teams',
-      );
+    if (dto.teamId && dto.assigneeId) {
+      throw new BadRequestException('Use assigneeId or teamId, not both');
     }
 
     if (dto.teamId) {
@@ -575,12 +588,14 @@ export class TasksService {
         throw new BadRequestException('The selected team has no members');
       }
 
-      const activeMembers = await this.usersRepository.find({
-        where: {
-          id: In(memberIds),
-          isActive: true,
-        },
-      });
+      const activeMembers = (
+        await this.usersRepository.find({
+          where: {
+            id: In(memberIds),
+            isActive: true,
+          },
+        })
+      ).filter((member) => actor.role !== 'lead' || member.id !== actor.id);
 
       if (activeMembers.length === 0) {
         throw new BadRequestException(
@@ -630,8 +645,7 @@ export class TasksService {
       };
     }
 
-    const resolvedAssigneeId =
-      actor.role === 'worker' ? actor.id : dto.assigneeId;
+    const resolvedAssigneeId = dto.assigneeId;
     const resolvedStatus = dto.status ?? 'todo';
 
     if (!resolvedAssigneeId && resolvedStatus !== 'todo') {
@@ -914,6 +928,13 @@ export class TasksService {
           'Solo se pueden tomar tareas pendientes sin asignar.',
         );
       }
+      // Crear una tarea sin asignar y tomarla uno mismo sería asignársela sin
+      // aprobación de gerencia.
+      if (task.createdBy === actor.id) {
+        throw new ForbiddenException(
+          "No puedes tomar una tarea que tú creaste. Para tu propio trabajo usa 'Registrar actividad'.",
+        );
+      }
 
       task.assigneeId = actor.id;
       return transactionalTasks.save(task);
@@ -963,6 +984,16 @@ export class TasksService {
 
     if (actor.role === 'worker' && task.assigneeId !== actor.id) {
       throw new ForbiddenException('Workers can only update their own tasks');
+    }
+
+    if (
+      actor.role !== 'manager' &&
+      dto.assigneeId === actor.id &&
+      task.assigneeId !== actor.id
+    ) {
+      throw new ForbiddenException(
+        "Las tareas propias se registran con 'Registrar actividad' y las aprueba gerencia.",
+      );
     }
 
     if (actor.role !== 'manager' && task.approvalStatus === 'rejected') {

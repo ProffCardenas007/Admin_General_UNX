@@ -51,7 +51,7 @@ export class TasksController {
   }
 
   @Post()
-  @Roles('manager', 'lead', 'worker')
+  @Roles('manager', 'lead')
   create(
     @Body() dto: CreateTaskDto,
     @Req()

@@ -131,6 +131,20 @@ describe('TasksService', () => {
     });
   });
 
+  it('does not let someone claim a task they created themselves', async () => {
+    tasksRepository.findOne.mockResolvedValue({
+      id: 'task-1',
+      assigneeId: null,
+      status: 'todo',
+      createdBy: 'lead-1',
+    });
+
+    await expect(
+      service.claim('task-1', { id: 'lead-1', role: 'lead' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tasksRepository.save).not.toHaveBeenCalled();
+  });
+
   it('rejects claiming a task that another user already took', async () => {
     tasksRepository.findOne.mockResolvedValue({
       id: 'task-1',
@@ -622,9 +636,42 @@ describe('TasksService', () => {
     });
 
     it('does not notify when someone assigns the task to themselves', async () => {
-      await service.create(baseDto as any, { id: 'worker-1', role: 'worker' });
+      await service.create({ ...baseDto, assigneeId: 'manager-1' } as any, {
+        id: 'manager-1',
+        role: 'manager',
+      });
 
       expect(notificationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('sends workers and self-assigning leads to the approval flow', async () => {
+      await expect(
+        service.create(baseDto as any, { id: 'worker-1', role: 'worker' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.create({ ...baseDto, assigneeId: 'lead-1' } as any, {
+          id: 'lead-1',
+          role: 'lead',
+          specialties: ['creacion'],
+        }),
+      ).rejects.toThrow('Registrar actividad');
+      expect(tasksRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('does not let a lead take an existing task by reassigning it to themselves', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-1',
+        projectId: 'project-1',
+        assigneeId: 'worker-1',
+        status: 'todo',
+      });
+      await expect(
+        service.update(
+          'task-1',
+          { assigneeId: 'lead-1' },
+          { id: 'lead-1', role: 'lead', specialties: ['creacion'] },
+        ),
+      ).rejects.toThrow('Registrar actividad');
     });
 
     it('creates team tasks in one transaction and notifies every member but the actor', async () => {
