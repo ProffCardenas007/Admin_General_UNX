@@ -171,6 +171,10 @@ export const taskPeriodDateKey = (task: { dueDate?: string | null; createdAt?: s
   return `${date.getFullYear()}-${mm}-${dd}`;
 };
 
+/** Las tareas registradas por la persona solo cuentan cuando gerencia las aprueba. */
+export const countsForReports = (task: { approvalStatus?: string | null }) =>
+  !task.approvalStatus || task.approvalStatus === "approved";
+
 export const isTaskInPeriod = (
   task: { dueDate?: string | null; createdAt?: string | null },
   range: { startKey: string; endKey: string },

@@ -51,7 +51,9 @@ describe('TasksService', () => {
       },
     };
     projectsRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'project-1', scope: 'creacion' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'project-1', scope: 'creacion' }),
     };
     notificationsRepository = {
       create: jest.fn((input) => input),
@@ -69,7 +71,9 @@ describe('TasksService', () => {
       save: jest.fn().mockResolvedValue(undefined),
     };
     usersRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'manager-1', role: 'manager' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'manager-1', role: 'manager' }),
       find: jest.fn().mockResolvedValue([{ id: 'user-1' }, { id: 'user-2' }]),
     };
     auditLogsRepository = {
@@ -515,12 +519,17 @@ describe('TasksService', () => {
       expect(tasksRepository.find).toHaveBeenCalledWith({
         where: { assigneeId: 'worker-1', status: 'doing' },
       });
-      expect(previous).toMatchObject({ status: 'paused', timerStartedAt: null });
+      expect(previous).toMatchObject({
+        status: 'paused',
+        timerStartedAt: null,
+      });
       expect(previous.activeSeconds).toBeGreaterThanOrEqual(160);
       expect(taskUpdatesRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({ taskId: 'task-old', userId: 'worker-1' }),
       );
-      expect(timeExtensionsService.flagOverrunIfNeeded).toHaveBeenCalledWith('task-old');
+      expect(timeExtensionsService.flagOverrunIfNeeded).toHaveBeenCalledWith(
+        'task-old',
+      );
       expect(result.status).toBe('doing');
       expect(result.pausedTasks.map((t: any) => t.id)).toEqual(['task-old']);
     });
@@ -559,7 +568,7 @@ describe('TasksService', () => {
       expect(tasksRepository.find).not.toHaveBeenCalled();
     });
 
-    it('only looks at the starting task\'s own assignee', async () => {
+    it("only looks at the starting task's own assignee", async () => {
       tasksRepository.findOne.mockResolvedValue({
         id: 'task-new',
         assigneeId: 'worker-2',
@@ -597,7 +606,10 @@ describe('TasksService', () => {
     });
 
     it('tells the assignee when a manager gives them a task', async () => {
-      await service.create(baseDto as any, { id: 'manager-1', role: 'manager' });
+      await service.create(baseDto as any, {
+        id: 'manager-1',
+        role: 'manager',
+      });
 
       expect(notificationsRepository.save).toHaveBeenCalledTimes(1);
       const [saved] = notificationsRepository.save.mock.calls[0][0];
@@ -651,7 +663,10 @@ describe('TasksService', () => {
         { userId: 'user-1' },
         { userId: 'user-2' },
       ]);
-      usersRepository.find.mockResolvedValue([{ id: 'user-1' }, { id: 'user-2' }]);
+      usersRepository.find.mockResolvedValue([
+        { id: 'user-1' },
+        { id: 'user-2' },
+      ]);
       tasksRepository.save
         .mockResolvedValueOnce({ id: 'task-1', assigneeId: 'user-1' })
         .mockRejectedValueOnce(new Error('db down'));
@@ -674,10 +689,10 @@ describe('TasksService', () => {
       tasksRepository.save.mockRejectedValue(duplicate);
 
       await expect(
-        service.create(
-          { ...baseDto, code: 'EDI-001' } as any,
-          { id: 'manager-1', role: 'manager' },
-        ),
+        service.create({ ...baseDto, code: 'EDI-001' } as any, {
+          id: 'manager-1',
+          role: 'manager',
+        }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -756,7 +771,11 @@ describe('TasksService', () => {
 
       await service.update(
         'task-1',
-        { status: 'done', handoffToUserId: 'worker-2', handoffMessage: 'Revisa audio' },
+        {
+          status: 'done',
+          handoffToUserId: 'worker-2',
+          handoffMessage: 'Revisa audio',
+        },
         { id: 'worker-1', role: 'worker' },
       );
 
@@ -857,7 +876,11 @@ describe('TasksService', () => {
     tasksRepository.save.mockImplementation(async (task: any) => task);
     usersRepository.findOne.mockImplementation(async ({ where }: any) => {
       if (where.id === 'worker-2') {
-        return { id: 'worker-2', fullName: 'Responsable nuevo', isActive: true };
+        return {
+          id: 'worker-2',
+          fullName: 'Responsable nuevo',
+          isActive: true,
+        };
       }
       return { id: 'manager-1', role: 'manager' };
     });
@@ -961,5 +984,159 @@ describe('TasksService', () => {
     expect(result.tasks[0].parentTaskId).toBeUndefined();
     expect(result.tasks[1].parentTaskId).toBe('task-1');
     expect(tasksRepository.manager.transaction).toHaveBeenCalled();
+  });
+
+  describe('self-reported tasks', () => {
+    const today = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'America/Mexico_City',
+    });
+
+    beforeEach(() => {
+      tasksRepository.create.mockImplementation((input: any) => input);
+      tasksRepository.save.mockImplementation(async (task: any) => ({
+        id: 'task-9',
+        ...task,
+      }));
+      usersRepository.findOne.mockResolvedValue({
+        id: 'worker-1',
+        fullName: 'Ana Ruiz',
+      });
+      usersRepository.find.mockResolvedValue([{ id: 'manager-1' }]);
+    });
+
+    it('creates an administrative task pending approval and notifies managers', async () => {
+      const created = await service.selfReport(
+        {
+          projectId: 'project-1',
+          title: 'Apoyo en inscripciones',
+          description: 'Atendí dudas de alumnos',
+          workDate: today,
+          estimatedHours: 2,
+          // A worker cannot pick the category: it is always administrativo.
+          ...({ activityType: 'creacion' } as object),
+        } as any,
+        { id: 'worker-1', role: 'worker' },
+      );
+
+      expect(created).toMatchObject({
+        activityType: 'administrativo',
+        approvalStatus: 'pending',
+        assigneeId: 'worker-1',
+        createdBy: 'worker-1',
+        status: 'done',
+        completionOutcome: 'completed',
+        dueDate: today,
+        estimatedHours: '2',
+      });
+      expect(created.code).toMatch(/^ADM-/);
+      expect(notificationsRepository.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          userId: 'manager-1',
+          type: 'task_approval_requested',
+        }),
+      ]);
+    });
+
+    it('rejects a finished activity dated in the future', async () => {
+      const future = new Date(Date.now() + 3 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+      await expect(
+        service.selfReport(
+          {
+            projectId: 'project-1',
+            title: 'X',
+            description: 'Y',
+            workDate: future,
+            estimatedHours: 1,
+            status: 'done',
+          },
+          { id: 'worker-1', role: 'worker' },
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('approves with the final category and a new code, and notifies the person', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-9',
+        code: 'ADM-004',
+        title: 'Apoyo',
+        projectId: 'project-1',
+        activityType: 'administrativo',
+        estimatedHours: '2.00',
+        assigneeId: 'worker-1',
+        status: 'done',
+        approvalStatus: 'pending',
+      });
+      tasksRepository.save.mockImplementation(async (task: any) => task);
+
+      const result = await service.review(
+        'task-9',
+        { decision: 'approve', activityType: 'creacion', estimatedHours: 1.5 },
+        'manager-1',
+      );
+
+      expect(result).toMatchObject({
+        approvalStatus: 'approved',
+        activityType: 'creacion',
+        estimatedHours: '1.5',
+        reviewedBy: 'manager-1',
+      });
+      expect(result.code).toMatch(/^CRE-/);
+      expect(notificationsRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'worker-1',
+          type: 'task_approval_approved',
+        }),
+      );
+    });
+
+    it('requires a reason to reject and only reviews pending tasks', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-9',
+        approvalStatus: 'pending',
+      });
+      await expect(
+        service.review('task-9', { decision: 'reject' }, 'manager-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-9',
+        approvalStatus: null,
+      });
+      await expect(
+        service.review('task-9', { decision: 'approve' }, 'manager-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('does not let the author reclassify a pending task or touch a rejected one', async () => {
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-9',
+        projectId: 'project-1',
+        assigneeId: 'lead-1',
+        approvalStatus: 'pending',
+      });
+      await expect(
+        service.update(
+          'task-9',
+          { activityType: 'creacion' },
+          { id: 'lead-1', role: 'lead' },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      tasksRepository.findOne.mockResolvedValue({
+        id: 'task-9',
+        projectId: 'project-1',
+        assigneeId: 'worker-1',
+        approvalStatus: 'rejected',
+      });
+      await expect(
+        service.update(
+          'task-9',
+          { status: 'doing' },
+          { id: 'worker-1', role: 'worker' },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
   });
 });

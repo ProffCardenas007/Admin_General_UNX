@@ -15,6 +15,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { CreateTaskChainDto } from './dto/create-task-chain.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MarkTaskNotCompletedDto } from './dto/mark-task-not-completed.dto';
+import { ReviewTaskDto, SelfReportTaskDto } from './dto/self-report-task.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -64,6 +65,25 @@ export class TasksController {
     },
   ) {
     return this.tasksService.create(dto, req.user);
+  }
+
+  @Post('self-report')
+  @Roles('lead', 'worker')
+  selfReport(
+    @Body() dto: SelfReportTaskDto,
+    @Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker' } },
+  ) {
+    return this.tasksService.selfReport(dto, req.user);
+  }
+
+  @Patch(':taskId/review')
+  @Roles('manager')
+  review(
+    @Param('taskId') taskId: string,
+    @Body() dto: ReviewTaskDto,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.tasksService.review(taskId, dto, req.user.id);
   }
 
   @Post('chains')

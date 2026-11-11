@@ -86,6 +86,11 @@ export function useDashboardData(fortnight: Fortnight) {
           loadedTasks = tasksResponse.data as TaskRow[];
         }
 
+        // Las tareas que gerencia rechazó no cuentan como trabajo.
+        loadedTasks = loadedTasks.filter(
+          (task) => (task as { approvalStatus?: string | null }).approvalStatus !== "rejected",
+        );
+
         let loadedUsers: UserOption[] = [];
         try {
           const usersResponse = await axios.get(`${API_URL}/users`, { headers });

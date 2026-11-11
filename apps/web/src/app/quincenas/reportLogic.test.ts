@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  buildWorkDistribution,
-  isTaskInPeriod,
-  reportTaskHours,
-  groupHoursByLabel,
-  normalizeDistributionLabel,
-} from "./reportLogic.ts";
+import { countsForReports, buildWorkDistribution, isTaskInPeriod, reportTaskHours, groupHoursByLabel, normalizeDistributionLabel } from "./reportLogic.ts";
 
 describe("report distribution labels", () => {
   it("normalizes case, whitespace and equivalent Unicode accents", () => {
@@ -124,5 +118,15 @@ describe("task hours for the management report", () => {
     assert.deepEqual(reportTaskHours(task, nowMs), { hours: 1.5, source: "timer" });
     const firstRun = { estimatedHours: "8.00", activeSeconds: 0, timerStartedAt: "2026-11-10T11:00:00Z" };
     assert.deepEqual(reportTaskHours(firstRun, nowMs), { hours: 1, source: "timer" });
+  });
+});
+
+describe("countsForReports", () => {
+  it("leaves out self-reported tasks until management approves them", () => {
+    assert.equal(countsForReports({}), true);
+    assert.equal(countsForReports({ approvalStatus: null }), true);
+    assert.equal(countsForReports({ approvalStatus: "approved" }), true);
+    assert.equal(countsForReports({ approvalStatus: "pending" }), false);
+    assert.equal(countsForReports({ approvalStatus: "rejected" }), false);
   });
 });

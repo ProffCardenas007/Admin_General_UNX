@@ -17,6 +17,26 @@ export type TaskActivityType =
   | 'plataforma'
   | 'administrativo';
 
+export const TASK_ACTIVITY_TYPES: TaskActivityType[] = [
+  'revision',
+  'edicion',
+  'creacion',
+  'presentaciones',
+  'grabacion',
+  'plataforma',
+  'administrativo',
+];
+
+/**
+ * pending/rejected: tarea registrada por la propia persona que gerencia aún no
+ * aprueba o rechazó. NULL = tarea normal.
+ */
+export type TaskApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+/** Solo cuentan en reportes y métricas las tareas normales o aprobadas. */
+export const countsForMetricsSql = (alias: string) =>
+  `(${alias}.approval_status IS NULL OR ${alias}.approval_status = 'approved')`;
+
 @Entity({ name: 'tasks' })
 export class TaskEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -90,7 +110,12 @@ export class TaskEntity {
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt?: Date | null;
 
-  @Column({ name: 'completion_outcome', type: 'varchar', length: 20, nullable: true })
+  @Column({
+    name: 'completion_outcome',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
   completionOutcome?: 'completed' | 'not_completed' | null;
 
   @Column({ name: 'active_seconds', type: 'int', default: 0 })
@@ -116,6 +141,23 @@ export class TaskEntity {
     default: 0,
   })
   authorizedExtraHours: string;
+
+  @Column({
+    name: 'approval_status',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  approvalStatus?: TaskApprovalStatus | null;
+
+  @Column({ name: 'approval_note', type: 'text', nullable: true })
+  approvalNote?: string | null;
+
+  @Column({ name: 'reviewed_by', type: 'uuid', nullable: true })
+  reviewedBy?: string | null;
+
+  @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
+  reviewedAt?: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

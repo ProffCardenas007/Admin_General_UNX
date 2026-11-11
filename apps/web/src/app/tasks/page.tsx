@@ -13,6 +13,8 @@ import EditTaskModal from "./EditTaskModal";
 import ExtensionRequestModal from "./ExtensionRequestModal";
 import FloatingTimerWidget from "./FloatingTimerWidget";
 import NotCompletedModal from "./NotCompletedModal";
+import PendingApprovalsPanel from "./PendingApprovalsPanel";
+import SelfReportModal from "./SelfReportModal";
 import { UNASSIGNED_SENTINEL, activityTypeLabels, priorityLabels, roleLabels, statusLabels } from "./labels";
 import {
   buildDisplayTasks,
@@ -54,6 +56,7 @@ export default function TasksPage() {
   const [editingTaskId, setEditingTaskId] = useState("");
   const [openedNotCompletedTaskId, setOpenedNotCompletedTaskId] = useState("");
   const [centerNoticeMessage, setCenterNoticeMessage] = useState("");
+  const [selfReportOpen, setSelfReportOpen] = useState(false);
   const showCodeAndAssigneeColumns = role !== "worker";
   const isWorker = role === "worker";
   const canManagePlanning = role === "manager" || role === "lead";
@@ -1089,6 +1092,36 @@ export default function TasksPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
+      {role === "manager" ? (
+        <PendingApprovalsPanel
+          tasks={tasks.filter((task) => task.approvalStatus === "pending")}
+          projects={projects}
+          projectLabel={projectLabel}
+          assigneeLabel={assigneeLabel}
+          onReviewed={(reviewed, decision) => {
+            setTasks((current) => current.map((item) => (item.id === reviewed.id ? { ...item, ...reviewed } : item)));
+            setInfo(
+              decision === "approve"
+                ? `Tarea ${reviewed.code} aprobada como ${activityTypeLabels[reviewed.activityType] ?? reviewed.activityType}.`
+                : `Tarea ${reviewed.code} rechazada.`,
+            );
+          }}
+        />
+      ) : null}
+
+      {selfReportOpen ? (
+        <SelfReportModal
+          projects={projects}
+          projectLabel={projectLabel}
+          onClose={() => setSelfReportOpen(false)}
+          onCreated={(created) => {
+            setSelfReportOpen(false);
+            setInfo(`Actividad ${created.code} registrada. Queda pendiente hasta que gerencia la apruebe.`);
+            void loadData(role);
+          }}
+        />
+      ) : null}
+
       <section className="glass-panel fade-up p-6 md:p-8">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
@@ -1104,6 +1137,16 @@ export default function TasksPage() {
                 : "Vista y filtrado detallado de todas las tareas."}
             </p>
           </div>
+          {role === "lead" || role === "worker" ? (
+            <button
+              type="button"
+              onClick={() => setSelfReportOpen(true)}
+              className="ui-btn ui-btn-secondary ui-btn-sm self-start md:self-auto"
+              title="Para trabajo que hiciste y nadie te asignó; gerencia lo aprueba"
+            >
+              + Registrar actividad
+            </button>
+          ) : null}
         </div>
 
         <ActiveTasksPanel
@@ -1760,6 +1803,22 @@ export default function TasksPage() {
                           <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--ink-muted)]">
                             {projectLabel(task.projectId)}
                           </p>
+                          {task.approvalStatus === "pending" ? (
+                            <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                              Pendiente de aprobación
+                            </span>
+                          ) : task.approvalStatus === "rejected" ? (
+                            <span
+                              className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800"
+                              title={task.approvalNote ?? undefined}
+                            >
+                              Rechazada{task.approvalNote ? `: ${task.approvalNote}` : ""}
+                            </span>
+                          ) : task.approvalStatus === "approved" ? (
+                            <span className="mt-1 inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                              Registrada por la persona · aprobada
+                            </span>
+                          ) : null}
                           {!isPrincipalTask ? (
                             <p className="mt-1 text-[11px] font-semibold text-[var(--accent)]">
                               Seguimiento de {parentActivityLabel} de {parentTask ? parentTask.title : "tarea principal"}

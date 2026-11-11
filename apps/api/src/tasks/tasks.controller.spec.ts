@@ -4,7 +4,11 @@ describe('TasksController', () => {
   let controller: TasksController;
   let service: Record<string, jest.Mock>;
   const req = {
-    user: { id: 'lead-1', role: 'lead' as const, specialties: ['edicion'] as any },
+    user: {
+      id: 'lead-1',
+      role: 'lead' as const,
+      specialties: ['edicion'] as any,
+    },
   };
 
   beforeEach(() => {
@@ -23,7 +27,13 @@ describe('TasksController', () => {
   it('lists tasks with the query filters and the authenticated user', async () => {
     await controller.findAll(req, 'p1', 'u1', 'doing', 'high', 'assigned');
     expect(service.findAll).toHaveBeenCalledWith(
-      { projectId: 'p1', assigneeId: 'u1', status: 'doing', priority: 'high', scope: 'assigned' },
+      {
+        projectId: 'p1',
+        assigneeId: 'u1',
+        status: 'doing',
+        priority: 'high',
+        scope: 'assigned',
+      },
       req.user,
     );
   });
@@ -41,7 +51,11 @@ describe('TasksController', () => {
     expect(service.createChain).toHaveBeenCalledWith(dto, req.user);
     expect(service.update).toHaveBeenCalledWith('t1', dto, req.user);
     expect(service.claim).toHaveBeenCalledWith('t1', req.user);
-    expect(service.markNotCompleted).toHaveBeenCalledWith('t1', { reason: 'r' }, req.user);
+    expect(service.markNotCompleted).toHaveBeenCalledWith(
+      't1',
+      { reason: 'r' },
+      req.user,
+    );
     expect(service.remove).toHaveBeenCalledWith('t1', req.user);
   });
 });

@@ -8,7 +8,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { ProjectEntity } from '../database/entities/project.entity';
-import { TaskEntity } from '../database/entities/task.entity';
+import {
+  TaskEntity,
+  countsForMetricsSql,
+} from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 import { realHoursSql } from '../common/hours';
@@ -64,104 +67,107 @@ export class DashboardService {
         actor.specialties ?? actor.specialty,
       );
 
-    const activeProjectsQb = this.projectsRepository
-      .createQueryBuilder('project')
-      .where('project.status = :status', { status: 'active' });
+      const activeProjectsQb = this.projectsRepository
+        .createQueryBuilder('project')
+        .where('project.status = :status', { status: 'active' });
 
-    if (actor.role === 'worker') {
-      activeProjectsQb
-        .innerJoin(
-          TaskEntity,
-          'task_scope',
-          'task_scope.project_id = project.id AND task_scope.assignee_id = :actorId',
-          { actorId: actor.id },
-        )
-        .distinct(true);
-    } else if (actor.role === 'lead') {
-      if (leadSpecialties.length === 0) {
-        throw new ForbiddenException('Lead specialty is required');
+      if (actor.role === 'worker') {
+        activeProjectsQb
+          .innerJoin(
+            TaskEntity,
+            'task_scope',
+            'task_scope.project_id = project.id AND task_scope.assignee_id = :actorId',
+            { actorId: actor.id },
+          )
+          .distinct(true);
+      } else if (actor.role === 'lead') {
+        if (leadSpecialties.length === 0) {
+          throw new ForbiddenException('Lead specialty is required');
+        }
+
+        activeProjectsQb.andWhere('project.scope IN (:...scopes)', {
+          scopes: leadSpecialties,
+        });
       }
 
-      activeProjectsQb.andWhere('project.scope IN (:...scopes)', {
-        scopes: leadSpecialties,
-      });
-    }
-
-    if (projectId) {
-      activeProjectsQb.andWhere('project.id = :projectId', {
-        projectId,
-      });
-    }
-    const activeProjects = await activeProjectsQb.getCount();
-
-    const tasksQb = this.tasksRepository.createQueryBuilder('task');
-    if (actor.role === 'lead') {
-      if (leadSpecialties.length === 0) {
-        throw new ForbiddenException('Lead specialty is required');
+      if (projectId) {
+        activeProjectsQb.andWhere('project.id = :projectId', {
+          projectId,
+        });
       }
+      const activeProjects = await activeProjectsQb.getCount();
 
-      tasksQb.innerJoin(
-        ProjectEntity,
-        'project_scope',
-        'project_scope.id = task.project_id',
-      );
-      tasksQb.andWhere('project_scope.scope IN (:...scopes)', {
-        scopes: leadSpecialties,
-      });
-    }
-    if (projectId) {
-      tasksQb.andWhere('task.project_id = :projectId', { projectId });
-    }
-    if (actor.role === 'worker') {
-      tasksQb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
-    }
-    const tasks = await tasksQb.getMany();
-    const totalTasks = tasks.length;
-    const doneTasks = tasks.filter((task) => task.status === 'done').length;
-    const blockedTasks = tasks.filter(
-      (task) => task.status === 'blocked',
-    ).length;
+      const tasksQb = this.tasksRepository
+        .createQueryBuilder('task')
+        .andWhere(countsForMetricsSql('task'));
+      if (actor.role === 'lead') {
+        if (leadSpecialties.length === 0) {
+          throw new ForbiddenException('Lead specialty is required');
+        }
 
-    // Due dates are calendar days: compare them with today's date in the app
-    // timezone. `new Date('2026-10-14')` is midnight UTC, which made tasks due
-    // today count as overdue from the evening before.
-    const today = todayKey();
-    const overdueTasks = tasks.filter(
-      (task) =>
-        task.status !== 'done' &&
-        !!task.dueDate &&
-        String(task.dueDate).slice(0, 10) < today,
-    ).length;
-
-    const hoursQb = this.taskUpdatesRepository
-      .createQueryBuilder('update')
-      .select(`COALESCE(SUM(${realHoursSql('update')}), 0)`, 'hoursWorked')
-      .innerJoin(TaskEntity, 'task', 'task.id = update.task_id');
-
-    if (actor.role === 'lead') {
-      hoursQb
-        .innerJoin(
+        tasksQb.innerJoin(
           ProjectEntity,
           'project_scope',
           'project_scope.id = task.project_id',
-        )
-        .andWhere('project_scope.scope IN (:...scopes)', {
+        );
+        tasksQb.andWhere('project_scope.scope IN (:...scopes)', {
           scopes: leadSpecialties,
         });
-    }
-    if (projectId) {
-      hoursQb.andWhere('task.project_id = :projectId', { projectId });
-    }
-    if (from) {
-      hoursQb.andWhere('update.update_date >= :from', { from });
-    }
-    if (to) {
-      hoursQb.andWhere('update.update_date <= :to', { to });
-    }
-    if (actor.role === 'worker') {
-      hoursQb.andWhere('update.user_id = :actorId', { actorId: actor.id });
-    }
-    const hoursResult = await hoursQb.getRawOne<{ hoursWorked: string }>();
+      }
+      if (projectId) {
+        tasksQb.andWhere('task.project_id = :projectId', { projectId });
+      }
+      if (actor.role === 'worker') {
+        tasksQb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
+      }
+      const tasks = await tasksQb.getMany();
+      const totalTasks = tasks.length;
+      const doneTasks = tasks.filter((task) => task.status === 'done').length;
+      const blockedTasks = tasks.filter(
+        (task) => task.status === 'blocked',
+      ).length;
+
+      // Due dates are calendar days: compare them with today's date in the app
+      // timezone. `new Date('2026-10-14')` is midnight UTC, which made tasks due
+      // today count as overdue from the evening before.
+      const today = todayKey();
+      const overdueTasks = tasks.filter(
+        (task) =>
+          task.status !== 'done' &&
+          !!task.dueDate &&
+          String(task.dueDate).slice(0, 10) < today,
+      ).length;
+
+      const hoursQb = this.taskUpdatesRepository
+        .createQueryBuilder('update')
+        .select(`COALESCE(SUM(${realHoursSql('update')}), 0)`, 'hoursWorked')
+        .innerJoin(TaskEntity, 'task', 'task.id = update.task_id')
+        .andWhere(countsForMetricsSql('task'));
+
+      if (actor.role === 'lead') {
+        hoursQb
+          .innerJoin(
+            ProjectEntity,
+            'project_scope',
+            'project_scope.id = task.project_id',
+          )
+          .andWhere('project_scope.scope IN (:...scopes)', {
+            scopes: leadSpecialties,
+          });
+      }
+      if (projectId) {
+        hoursQb.andWhere('task.project_id = :projectId', { projectId });
+      }
+      if (from) {
+        hoursQb.andWhere('update.update_date >= :from', { from });
+      }
+      if (to) {
+        hoursQb.andWhere('update.update_date <= :to', { to });
+      }
+      if (actor.role === 'worker') {
+        hoursQb.andWhere('update.user_id = :actorId', { actorId: actor.id });
+      }
+      const hoursResult = await hoursQb.getRawOne<{ hoursWorked: string }>();
 
       return {
         activeProjects,
@@ -193,37 +199,40 @@ export class DashboardService {
         actor.specialties ?? actor.specialty,
       );
 
-    const qb = this.tasksRepository
-      .createQueryBuilder('task')
-      .select('task.assignee_id', 'userId')
-      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'estimatedHours')
-      .addSelect('COALESCE(SUM(task.active_seconds), 0)', 'activeSecondsWorked')
-      .addSelect('COUNT(task.id)', 'tasksCount')
-      .where('task.assignee_id IS NOT NULL')
-      .groupBy('task.assignee_id')
-      .orderBy('"estimatedHours"', 'DESC');
+      const qb = this.tasksRepository
+        .createQueryBuilder('task')
+        .select('task.assignee_id', 'userId')
+        .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'estimatedHours')
+        .addSelect(
+          'COALESCE(SUM(task.active_seconds), 0)',
+          'activeSecondsWorked',
+        )
+        .addSelect('COUNT(task.id)', 'tasksCount')
+        .where('task.assignee_id IS NOT NULL')
+        .groupBy('task.assignee_id')
+        .orderBy('"estimatedHours"', 'DESC');
 
-    if (actor.role === 'lead') {
-      if (leadSpecialties.length === 0) {
-        throw new ForbiddenException('Lead specialty is required');
+      if (actor.role === 'lead') {
+        if (leadSpecialties.length === 0) {
+          throw new ForbiddenException('Lead specialty is required');
+        }
+
+        qb.innerJoin(
+          ProjectEntity,
+          'project_scope',
+          'project_scope.id = task.project_id',
+        );
+        qb.andWhere('project_scope.scope IN (:...scopes)', {
+          scopes: leadSpecialties,
+        });
       }
 
-      qb.innerJoin(
-        ProjectEntity,
-        'project_scope',
-        'project_scope.id = task.project_id',
-      );
-      qb.andWhere('project_scope.scope IN (:...scopes)', {
-        scopes: leadSpecialties,
-      });
-    }
-
-    if (projectId) {
-      qb.andWhere('task.project_id = :projectId', { projectId });
-    }
-    if (actor.role === 'worker') {
-      qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
-    }
+      if (projectId) {
+        qb.andWhere('task.project_id = :projectId', { projectId });
+      }
+      if (actor.role === 'worker') {
+        qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
+      }
 
       const workedQb = this.taskUpdatesRepository
         .createQueryBuilder('update')
@@ -293,42 +302,42 @@ export class DashboardService {
       );
       const weekStartExpression = "DATE_TRUNC('week', task.created_at::date)";
 
-    const qb = this.tasksRepository
-      .createQueryBuilder('task')
-      .select(weekStartExpression, 'weekStart')
-      .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'estimatedHours')
-      .addSelect('COUNT(task.id)', 'tasksCount')
-      .where('task.assignee_id IS NOT NULL')
-      .groupBy(weekStartExpression)
-      .orderBy('"weekStart"', 'ASC');
+      const qb = this.tasksRepository
+        .createQueryBuilder('task')
+        .select(weekStartExpression, 'weekStart')
+        .addSelect('COALESCE(SUM(task.estimated_hours), 0)', 'estimatedHours')
+        .addSelect('COUNT(task.id)', 'tasksCount')
+        .where('task.assignee_id IS NOT NULL')
+        .groupBy(weekStartExpression)
+        .orderBy('"weekStart"', 'ASC');
 
-    if (actor.role === 'lead') {
-      if (leadSpecialties.length === 0) {
-        throw new ForbiddenException('Lead specialty is required');
+      if (actor.role === 'lead') {
+        if (leadSpecialties.length === 0) {
+          throw new ForbiddenException('Lead specialty is required');
+        }
+
+        qb.innerJoin(
+          ProjectEntity,
+          'project_scope',
+          'project_scope.id = task.project_id',
+        );
+        qb.andWhere('project_scope.scope IN (:...scopes)', {
+          scopes: leadSpecialties,
+        });
       }
 
-      qb.innerJoin(
-        ProjectEntity,
-        'project_scope',
-        'project_scope.id = task.project_id',
-      );
-      qb.andWhere('project_scope.scope IN (:...scopes)', {
-        scopes: leadSpecialties,
-      });
-    }
-
-    if (projectId) {
-      qb.andWhere('task.project_id = :projectId', { projectId });
-    }
-    if (from) {
-      qb.andWhere('task.created_at::date >= :from', { from });
-    }
-    if (to) {
-      qb.andWhere('task.created_at::date <= :to', { to });
-    }
-    if (actor.role === 'worker') {
-      qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
-    }
+      if (projectId) {
+        qb.andWhere('task.project_id = :projectId', { projectId });
+      }
+      if (from) {
+        qb.andWhere('task.created_at::date >= :from', { from });
+      }
+      if (to) {
+        qb.andWhere('task.created_at::date <= :to', { to });
+      }
+      if (actor.role === 'worker') {
+        qb.andWhere('task.assignee_id = :actorId', { actorId: actor.id });
+      }
 
       const trendRows = await qb.getRawMany<{
         weekStart: string;

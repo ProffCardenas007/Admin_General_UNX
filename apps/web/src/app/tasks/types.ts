@@ -26,6 +26,12 @@ export type TaskRow = {
   activeSeconds?: number;
   timerStartedAt?: string | null;
   completionOutcome?: "completed" | "not_completed" | null;
+  /**
+   * Tarea registrada por la propia persona: pending = espera aprobación de
+   * gerencia, rejected = rechazada. null = tarea normal.
+   */
+  approvalStatus?: "pending" | "approved" | "rejected" | null;
+  approvalNote?: string | null;
   /** Only in the response to starting a task: the person's other tasks paused to start this one. */
   pausedTasks?: TaskRow[];
 };

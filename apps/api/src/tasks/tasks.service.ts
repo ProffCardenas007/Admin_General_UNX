@@ -21,6 +21,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { CreateTaskChainDto } from './dto/create-task-chain.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MarkTaskNotCompletedDto } from './dto/mark-task-not-completed.dto';
+import { ReviewTaskDto, SelfReportTaskDto } from './dto/self-report-task.dto';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 import { todayKey } from '../common/dates';
 import { TimeExtensionsService } from '../time-extensions/time-extensions.service';
@@ -100,7 +101,8 @@ export class TasksService {
     taskId: string,
     userId: string | null | undefined,
     seconds: number,
-    updatesRepository: Repository<TaskUpdateEntity> = this.taskUpdatesRepository,
+    updatesRepository: Repository<TaskUpdateEntity> = this
+      .taskUpdatesRepository,
   ) {
     if (!userId || seconds <= 0) {
       return;
@@ -158,7 +160,8 @@ export class TasksService {
         notificationsRepository.create({
           userId: task.assigneeId as string,
           taskId: task.id,
-          title: kind === 'assigned' ? 'Nueva tarea asignada' : 'Tarea reasignada',
+          title:
+            kind === 'assigned' ? 'Nueva tarea asignada' : 'Tarea reasignada',
           message:
             `${kind === 'assigned' ? 'Se te asigno' : 'Se te reasigno'} ${task.code} - ${task.title}.` +
             (task.dueDate ? ` Vence ${task.dueDate}.` : ''),
@@ -271,9 +274,12 @@ export class TasksService {
     }
 
     // Keep future chain steps hidden from every role until activation.
-    qb.andWhere('(task.chain_id IS NULL OR task.status <> :hiddenChainStatus)', {
-      hiddenChainStatus: 'blocked',
-    });
+    qb.andWhere(
+      '(task.chain_id IS NULL OR task.status <> :hiddenChainStatus)',
+      {
+        hiddenChainStatus: 'blocked',
+      },
+    );
 
     qb.orderBy('task.created_at', 'DESC');
     return qb.getMany();
@@ -364,6 +370,9 @@ export class TasksService {
       dueDate?: string;
       estimatedHours: string;
       activatedAt?: Date;
+      approvalStatus?: 'pending';
+      completedAt?: Date;
+      completionOutcome?: 'completed';
     },
     maxAttempts = 5,
     tasksRepository: Repository<TaskEntity> = this.tasksRepository,
@@ -445,9 +454,13 @@ export class TasksService {
     });
 
     const activeAssigneeSet = new Set(activeAssignees.map((item) => item.id));
-    const missingAssignee = assigneeIds.find((item) => !activeAssigneeSet.has(item));
+    const missingAssignee = assigneeIds.find(
+      (item) => !activeAssigneeSet.has(item),
+    );
     if (missingAssignee) {
-      throw new BadRequestException('One or more assignees are invalid or inactive');
+      throw new BadRequestException(
+        'One or more assignees are invalid or inactive',
+      );
     }
 
     return this.tasksRepository.manager.transaction(async (manager) => {
@@ -546,7 +559,9 @@ export class TasksService {
     }
 
     if (dto.teamId) {
-      const team = await this.teamsRepository.findOne({ where: { id: dto.teamId } });
+      const team = await this.teamsRepository.findOne({
+        where: { id: dto.teamId },
+      });
       if (!team) {
         throw new BadRequestException('Team not found');
       }
@@ -568,7 +583,9 @@ export class TasksService {
       });
 
       if (activeMembers.length === 0) {
-        throw new BadRequestException('The selected team has no active members');
+        throw new BadRequestException(
+          'The selected team has no active members',
+        );
       }
 
       // All-or-nothing: a failure on the 3rd member must not leave 2 orphan tasks.
@@ -673,6 +690,205 @@ export class TasksService {
     });
   }
 
+  /**
+   * Una persona registra una actividad que hizo (o hará) y que nadie le
+   * asignó. Nace como "administrativo" y pendiente: no cuenta en reportes
+   * hasta que gerencia la apruebe y le asigne su categoría.
+   */
+  async selfReport(
+    dto: SelfReportTaskDto,
+    actor: { id: string; role: 'manager' | 'lead' | 'worker' },
+  ) {
+    const project = await this.projectsRepository.findOne({
+      where: { id: dto.projectId },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+    const today = todayKey();
+    const limit = new Date(`${today}T00:00:00Z`);
+    limit.setUTCDate(limit.getUTCDate() + 14);
+    if (dto.workDate > limit.toISOString().slice(0, 10)) {
+      throw new BadRequestException(
+        'La fecha de la actividad no puede ser de más de 14 días en el futuro.',
+      );
+    }
+    const status = dto.status ?? 'done';
+    if (status === 'done' && dto.workDate > today) {
+      throw new BadRequestException(
+        'Una actividad terminada no puede tener fecha futura.',
+      );
+    }
+
+    return this.tasksRepository.manager.transaction(async (manager) => {
+      const transactionalTasks = manager.getRepository(TaskEntity);
+      const created = await this.createTaskWithGeneratedCode(
+        {
+          projectId: dto.projectId,
+          activityType: 'administrativo',
+          title: dto.title.trim(),
+          description: dto.description.trim(),
+          assigneeId: actor.id,
+          createdBy: actor.id,
+          status,
+          priority: 'medium',
+          dueDate: dto.workDate,
+          estimatedHours: String(dto.estimatedHours),
+          approvalStatus: 'pending',
+          ...(status === 'done'
+            ? {
+                // Mediodía en México del día reportado.
+                completedAt: new Date(`${dto.workDate}T18:00:00Z`),
+                completionOutcome: 'completed' as const,
+              }
+            : {}),
+        },
+        5,
+        transactionalTasks,
+      );
+
+      const users = this.usersRepository;
+      const [author, managers] = await Promise.all([
+        users.findOne({ where: { id: actor.id } }),
+        users.find({ where: { role: 'manager', isActive: true } }),
+      ]);
+      const notifications = manager.getRepository(NotificationEntity);
+      if (managers.length > 0) {
+        await notifications.save(
+          managers.map((recipient) =>
+            notifications.create({
+              userId: recipient.id,
+              taskId: created.id,
+              type: 'task_approval_requested',
+              title: 'Tarea por aprobar',
+              message: `${author?.fullName ?? 'Alguien'} registró ${created.code} - ${created.title} (${dto.estimatedHours} h). Revísala para aprobarla o rechazarla.`,
+              isRead: false,
+            }),
+          ),
+        );
+      }
+      return created;
+    });
+  }
+
+  /** Gerencia aprueba (con su categoría final) o rechaza una tarea registrada por la persona. */
+  async review(taskId: string, dto: ReviewTaskDto, actorId: string) {
+    const task = await this.tasksRepository.findOne({ where: { id: taskId } });
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+    if (task.approvalStatus !== 'pending') {
+      throw new ConflictException(
+        task.approvalStatus
+          ? 'Esta tarea ya fue revisada.'
+          : 'Esta tarea no requiere aprobación.',
+      );
+    }
+    const note = dto.note?.trim() || null;
+    if (dto.decision === 'reject' && !note) {
+      throw new BadRequestException('Escribe el motivo del rechazo.');
+    }
+
+    const before = {
+      activityType: task.activityType,
+      projectId: task.projectId,
+      estimatedHours: task.estimatedHours,
+    };
+    if (dto.decision === 'approve') {
+      if (dto.projectId && dto.projectId !== task.projectId) {
+        const destination = await this.projectsRepository.findOne({
+          where: { id: dto.projectId },
+        });
+        if (!destination) {
+          throw new NotFoundException('Destination project not found');
+        }
+        task.projectId = dto.projectId;
+      }
+      if (dto.activityType) task.activityType = dto.activityType;
+      if (dto.estimatedHours !== undefined) {
+        task.estimatedHours = String(dto.estimatedHours);
+      }
+    }
+    task.approvalStatus = dto.decision === 'approve' ? 'approved' : 'rejected';
+    task.approvalNote = note;
+    task.reviewedBy = actorId;
+    task.reviewedAt = new Date();
+    if (dto.decision === 'reject' && task.status === 'doing') {
+      // Una tarea rechazada no debe seguir sumando tiempo.
+      task.activeSeconds =
+        (task.activeSeconds ?? 0) + this.elapsedTimerSeconds(task);
+      task.timerStartedAt = null;
+      task.status = 'paused';
+    }
+
+    const recode =
+      task.projectId !== before.projectId ||
+      task.activityType !== before.activityType;
+
+    const saved = await this.tasksRepository.manager.transaction(
+      async (manager) => {
+        const transactionalTasks = manager.getRepository(TaskEntity);
+        if (recode) {
+          // El código lleva el prefijo de la categoría y es único por proyecto.
+          task.code = await this.buildGeneratedCode(
+            task.projectId,
+            task.activityType,
+            transactionalTasks,
+          );
+        }
+        const result = await transactionalTasks.save(task);
+        if (task.assigneeId) {
+          const approved = dto.decision === 'approve';
+          const notifications = manager.getRepository(NotificationEntity);
+          await notifications.save(
+            notifications.create({
+              userId: task.assigneeId,
+              taskId: task.id,
+              type: approved
+                ? 'task_approval_approved'
+                : 'task_approval_rejected',
+              title: approved ? 'Tarea aprobada' : 'Tarea rechazada',
+              message: approved
+                ? `Gerencia aprobó ${result.code} - ${result.title}.${note ? ` Nota: ${note}` : ''}`
+                : `Gerencia rechazó ${result.code} - ${result.title}. Motivo: ${note}`,
+              isRead: false,
+            }),
+          );
+        }
+        return result;
+      },
+    );
+
+    const changes: Record<string, { before: unknown; after: unknown }> = {
+      approvalStatus: { before: 'pending', after: saved.approvalStatus },
+    };
+    if (before.activityType !== saved.activityType) {
+      changes.activityType = {
+        before: before.activityType,
+        after: saved.activityType,
+      };
+    }
+    if (before.projectId !== saved.projectId) {
+      changes.projectId = { before: before.projectId, after: saved.projectId };
+    }
+    if (before.estimatedHours !== saved.estimatedHours) {
+      changes.estimatedHours = {
+        before: before.estimatedHours,
+        after: saved.estimatedHours,
+      };
+    }
+    await this.recordManagerAudit({
+      actorId,
+      action: dto.decision === 'approve' ? 'task.approved' : 'task.rejected',
+      entityType: 'task',
+      entityId: saved.id,
+      entityLabel: `${saved.code} - ${saved.title}`,
+      changes,
+    });
+
+    return saved;
+  }
+
   async claim(
     taskId: string,
     actor: {
@@ -749,22 +965,34 @@ export class TasksService {
       throw new ForbiddenException('Workers can only update their own tasks');
     }
 
+    if (actor.role !== 'manager' && task.approvalStatus === 'rejected') {
+      throw new ForbiddenException('Esta tarea fue rechazada por gerencia.');
+    }
+
+    // Mientras está pendiente, la categoría la decide gerencia al aprobarla;
+    // quien la registró no puede reclasificarla ni pasarla a otra persona.
+    if (
+      actor.role !== 'manager' &&
+      task.approvalStatus === 'pending' &&
+      (dto.activityType !== undefined || dto.assigneeId !== undefined)
+    ) {
+      throw new ForbiddenException(
+        'La categoría de esta tarea la asigna gerencia al aprobarla.',
+      );
+    }
+
     if (
       actor.role === 'worker' &&
-      (
-        dto.projectId !== undefined ||
+      (dto.projectId !== undefined ||
         dto.title !== undefined ||
         dto.description !== undefined ||
         dto.activityType !== undefined ||
         dto.assigneeId !== undefined ||
         dto.priority !== undefined ||
         dto.dueDate !== undefined ||
-        dto.estimatedHours !== undefined
-      )
+        dto.estimatedHours !== undefined)
     ) {
-      throw new ForbiddenException(
-        'Workers cannot edit task planning fields',
-      );
+      throw new ForbiddenException('Workers cannot edit task planning fields');
     }
 
     if (dto.projectId !== undefined && dto.projectId !== task.projectId) {
@@ -806,7 +1034,10 @@ export class TasksService {
     if (taskFields.status === 'done' && before.status !== 'done') {
       task.completedAt = new Date();
       task.completionOutcome = 'completed';
-    } else if (taskFields.status !== undefined && taskFields.status !== 'done') {
+    } else if (
+      taskFields.status !== undefined &&
+      taskFields.status !== 'done'
+    ) {
       task.completedAt = null;
       task.completionOutcome = null;
     }
@@ -825,8 +1056,10 @@ export class TasksService {
       }
     }
 
-    const completedNow = taskFields.status === 'done' && before.status !== 'done';
-    const startedNow = taskFields.status === 'doing' && before.status !== 'doing';
+    const completedNow =
+      taskFields.status === 'done' && before.status !== 'done';
+    const startedNow =
+      taskFields.status === 'doing' && before.status !== 'doing';
     const autoPaused: TaskEntity[] = [];
     const reassignedTo =
       taskFields.assigneeId && taskFields.assigneeId !== before.assigneeId
@@ -1043,7 +1276,10 @@ export class TasksService {
         };
       }
 
-      if (taskFields.status !== undefined && before.status !== savedTask.status) {
+      if (
+        taskFields.status !== undefined &&
+        before.status !== savedTask.status
+      ) {
         changes.status = { before: before.status, after: savedTask.status };
       }
 
@@ -1051,11 +1287,17 @@ export class TasksService {
         taskFields.priority !== undefined &&
         before.priority !== savedTask.priority
       ) {
-        changes.priority = { before: before.priority, after: savedTask.priority };
+        changes.priority = {
+          before: before.priority,
+          after: savedTask.priority,
+        };
       }
 
       const resolvedDueDate = savedTask.dueDate ?? null;
-      if (taskFields.dueDate !== undefined && before.dueDate !== resolvedDueDate) {
+      if (
+        taskFields.dueDate !== undefined &&
+        before.dueDate !== resolvedDueDate
+      ) {
         changes.dueDate = { before: before.dueDate, after: resolvedDueDate };
       }
 

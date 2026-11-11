@@ -21,6 +21,7 @@ const MIGRATION_SCRIPTS = [
   'migrate-messaging.js',
   'migrate-semester-evaluations.js',
   'migrate-evaluation-cards.js',
+  'migrate-task-approval.js',
 ];
 
 export async function runStartupMigrations() {

@@ -6,7 +6,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
-import { buildWorkDistribution, isTaskInPeriod, reportTaskHours, type WorkEntry } from "./reportLogic";
+import { buildWorkDistribution, countsForReports, isTaskInPeriod, reportTaskHours, type WorkEntry } from "./reportLogic";
 
 type TaskRow = {
   id: string;
@@ -16,6 +16,7 @@ type TaskRow = {
   timerStartedAt?: string | null;
   dueDate?: string | null;
   createdAt?: string;
+  approvalStatus?: "pending" | "approved" | "rejected" | null;
 };
 
 type ProjectRow = {
@@ -105,7 +106,7 @@ export default function QuincenasPage() {
     // registraron en ella), agrupadas por programa (especialidad del proyecto) y
     // materia (academia del proyecto). Horas: las del cronómetro si ya se usó; si no,
     // las estimadas. (El reporte por usuario sigue usando solo las estimadas.)
-    const periodTasks = quincenaRange ? tasks.filter((task) => isTaskInPeriod(task, quincenaRange)) : [];
+    const periodTasks = quincenaRange ? tasks.filter((task) => countsForReports(task) && isTaskInPeriod(task, quincenaRange)) : [];
     const taskHours = periodTasks.map((task) => reportTaskHours(task, loadedAtMs));
     const timerTasks = taskHours.filter((row) => row.source === "timer").length;
     const taskEntries: WorkEntry[] = periodTasks.map((task, index) => {

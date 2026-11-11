@@ -7,7 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as ExcelJS from 'exceljs';
 import { In, Repository } from 'typeorm';
-import { TaskEntity } from '../database/entities/task.entity';
+import {
+  TaskEntity,
+  countsForMetricsSql,
+} from '../database/entities/task.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
@@ -118,6 +121,7 @@ export class ReportsService {
       this.tasksRepository
         .createQueryBuilder('task')
         .where('task.assignee_id IS NOT NULL')
+        .andWhere(countsForMetricsSql('task'))
         .andWhere('task.due_date >= :from AND task.due_date <= :to', period)
         .orderBy('task.due_date', 'ASC')
         .addOrderBy('task.created_at', 'ASC')
@@ -422,6 +426,7 @@ export class ReportsService {
     const tasksQb = this.tasksRepository
       .createQueryBuilder('task')
       .where('task.assignee_id IS NOT NULL')
+      .andWhere(countsForMetricsSql('task'))
       .orderBy('task.created_at', 'DESC');
 
     if (from && to) {
@@ -444,6 +449,7 @@ export class ReportsService {
       )
       .addSelect('COUNT(taskUpdate.id)', 'updatesCount')
       .innerJoin(TaskEntity, 'task', 'task.id = taskUpdate.task_id')
+      .andWhere(countsForMetricsSql('task'))
       .groupBy('taskUpdate.user_id')
       .addGroupBy('task.activity_type');
 
@@ -706,6 +712,7 @@ export class ReportsService {
     const tasksQb = this.tasksRepository
       .createQueryBuilder('task')
       .where('task.assignee_id = :userId', { userId })
+      .andWhere(countsForMetricsSql('task'))
       .andWhere(
         `(
           (task.due_date >= :from AND task.due_date <= :to)
@@ -904,6 +911,7 @@ export class ReportsService {
               )::float AS real
          FROM tasks t
         WHERE t.assignee_id IS NOT NULL
+          AND ${countsForMetricsSql('t')}
           AND t.estimated_hours > 0
           AND (
             (t.status = 'done'
