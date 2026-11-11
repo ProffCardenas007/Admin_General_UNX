@@ -50,7 +50,7 @@ describe("buildTeamStats", () => {
     { userId: "b", fullName: "Beto", finalGrade: 80, earnedPoints: 200, manuallyGradedCount: 1 },
     { userId: "c", fullName: "Caro", finalGrade: 70, earnedPoints: 300, manuallyGradedCount: 1 },
     { userId: "d", fullName: "Dani", finalGrade: null, earnedPoints: 0, manuallyGradedCount: 0 },
-    { userId: "e", fullName: "Ema", finalGrade: 0, earnedPoints: 0, manuallyGradedCount: 0 },
+    { userId: "e", fullName: "Ema", finalGrade: 0, earnedPoints: 0, manuallyGradedCount: 1 },
   ]);
 
   it("scores points against the top performer and the group mean", () => {
@@ -79,13 +79,14 @@ describe("buildTeamStats", () => {
     assert.equal(beto?.profile, "calidad");
   });
 
-  it("keeps a manually graded zero in the comparison", () => {
+  it("leaves a zero result out even when it was manually graded", () => {
     const result = buildTeamStats([
       { userId: "a", fullName: "Ana", finalGrade: 80, earnedPoints: 100, manuallyGradedCount: 1 },
       { userId: "b", fullName: "Beto", finalGrade: 0, earnedPoints: 0, manuallyGradedCount: 1 },
     ]);
 
-    assert.equal(result.rows.length, 2);
-    assert.equal(result.gradeSummary?.mean, 40);
+    assert.equal(result.excluded, 1);
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.gradeSummary?.mean, 80);
   });
 });

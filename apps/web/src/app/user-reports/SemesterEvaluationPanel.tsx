@@ -473,7 +473,7 @@ export default function SemesterEvaluationPanel() {
               {
                 label: "Personas evaluadas",
                 value: String(report.team.evaluatedUsers),
-                note: `${report.team.users - report.team.evaluatedUsers} sin actividades calificadas no cuentan`,
+                note: `${report.team.users - report.team.evaluatedUsers} sin resultado o con 0 no cuentan`,
               },
               { label: "Tareas", value: String(report.team.tasks), note: "con vencimiento en el periodo" },
               { label: "Tareas calificadas", value: String(report.team.gradedTasks), note: `${report.team.tasks - report.team.gradedTasks} pendientes` },
@@ -778,8 +778,8 @@ export default function SemesterEvaluationPanel() {
                           caso la mediana describe mejor al grupo típico.
                         </li>
                         <li>
-                          Solo entran personas con al menos una tarea calificada
-                          {teamStats.excluded > 0 ? ` (${teamStats.excluded} sin calificaciones quedan fuera)` : ""}. La tabla se
+                          Solo entran personas con al menos una tarea calificada y resultado mayor que 0
+                          {teamStats.excluded > 0 ? ` (${teamStats.excluded} sin resultado o con 0 quedan fuera)` : ""}. La tabla se
                           ordena por la suma de ambos z.
                         </li>
                       </ul>

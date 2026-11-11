@@ -298,8 +298,12 @@ export class ReportsService {
       .filter((user) => user.taskCount > 0)
       .sort(
         (left, right) =>
-          Number(right.manuallyGradedCount > 0) -
-            Number(left.manuallyGradedCount > 0) ||
+          Number(
+            right.manuallyGradedCount > 0 && (right.finalGrade ?? 0) > 0,
+          ) -
+            Number(
+              left.manuallyGradedCount > 0 && (left.finalGrade ?? 0) > 0,
+            ) ||
           (right.finalGrade ?? -1) - (left.finalGrade ?? -1) ||
           right.gradedCount - left.gradedCount ||
           left.fullName.localeCompare(right.fullName, 'es'),
@@ -308,10 +312,16 @@ export class ReportsService {
     let comparisonRank = 0;
     const rankedRows = rows.map((user) => ({
       ...user,
-      rank: user.manuallyGradedCount > 0 ? ++comparisonRank : null,
+      rank:
+        user.manuallyGradedCount > 0 && (user.finalGrade ?? 0) > 0
+          ? ++comparisonRank
+          : null,
     }));
     const gradedUsers = rankedRows.filter(
-      (user) => user.manuallyGradedCount > 0 && user.finalGrade !== null,
+      (user) =>
+        user.manuallyGradedCount > 0 &&
+        user.finalGrade !== null &&
+        user.finalGrade > 0,
     );
     return {
       year,

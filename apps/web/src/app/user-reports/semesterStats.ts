@@ -91,13 +91,15 @@ export const profileFor = (gradeZ: number, pointsZ: number): Profile => {
 
 /**
  * Solo entran a la estadística las personas con al menos una calificación
- * capturada. Los ceros automáticos por tareas no entregadas no bastan para
- * incluir a alguien, pero una calificación manual de cero sí cuenta.
+ * capturada y un resultado final mayor que cero. Quienes tienen 0 permanecen
+ * visibles en el reporte individual, pero no afectan la comparación.
  */
 export const buildTeamStats = (allMembers: MemberInput[]) => {
   const members = allMembers.filter(
     (member): member is MemberInput & { finalGrade: number } =>
-      member.manuallyGradedCount > 0 && member.finalGrade !== null,
+      member.manuallyGradedCount > 0 &&
+      member.finalGrade !== null &&
+      member.finalGrade > 0,
   );
   const excluded = allMembers.length - members.length;
   const grades = members.map((member) => member.finalGrade);
