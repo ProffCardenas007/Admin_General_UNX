@@ -300,7 +300,7 @@ export default function UserReportsPage() {
           {mode === "global"
             ? "Acumulado histórico completo."
             : mode === "semester"
-              ? "Evaluación de enero a junio o de julio a diciembre."
+              ? "Evaluación semestral: 16 de noviembre a 14 de mayo y 15 de mayo a 15 de noviembre."
             : range
               ? `Periodo analizado: ${range.from} al ${range.to}.`
               : "Selecciona un mes válido."}

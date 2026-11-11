@@ -3,6 +3,7 @@
 import axios from "axios";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { API_URL, authHeaders } from "../../lib/api";
+import EvaluationCardsPanel from "./EvaluationCardsPanel";
 import { buildTeamStats, type Band, type Profile, type Summary } from "./semesterStats";
 
 type ActivityType =
@@ -40,6 +41,7 @@ type SemesterUser = {
   userId: string;
   fullName: string;
   email: string;
+  role?: string;
   rank: number;
   tasks: SemesterTask[];
   taskCount: number;
@@ -938,6 +940,18 @@ export default function SemesterEvaluationPanel() {
               El estado de entrega se determina automáticamente comparando la fecha de finalización con la fecha límite.
             </p>
           </section>
+
+          <EvaluationCardsPanel
+            year={year}
+            semester={semester}
+            periodLabel={semesterLabel(year, semester)}
+            members={report.users}
+            statsByUser={statsByUser}
+            gradeSummary={teamStats.gradeSummary}
+            pointsSummary={teamStats.pointsSummary}
+            rankedCount={teamStats.rows.length}
+            profileLabels={profileLabels}
+          />
         </>
       ) : null}
 

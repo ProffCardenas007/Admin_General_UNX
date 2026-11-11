@@ -46,6 +46,9 @@ import { MessageEntity } from './database/entities/message.entity';
 import { MessagingModule } from './messaging/messaging.module';
 import { TaskEvaluationEntity } from './database/entities/task-evaluation.entity';
 import { SemesterActivityWeightEntity } from './database/entities/semester-activity-weight.entity';
+import { SurveyResponseEntity } from './database/entities/survey-response.entity';
+import { EvaluationCardNoteEntity } from './database/entities/evaluation-card-note.entity';
+import { EvaluationCardsModule } from './evaluation-cards/evaluation-cards.module';
 
 @Module({
   imports: [
@@ -105,6 +108,8 @@ import { SemesterActivityWeightEntity } from './database/entities/semester-activ
             MessageEntity,
             TaskEvaluationEntity,
             SemesterActivityWeightEntity,
+            SurveyResponseEntity,
+            EvaluationCardNoteEntity,
           ],
           synchronize: false,
         };
@@ -127,6 +132,7 @@ import { SemesterActivityWeightEntity } from './database/entities/semester-activ
     TimeExtensionsModule,
     WorkPlansModule,
     MessagingModule,
+    EvaluationCardsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
