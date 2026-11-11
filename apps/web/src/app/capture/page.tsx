@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import {
@@ -10,7 +10,6 @@ import {
   getStoredRole,
   getStoredSpecialties,
   getStoredToken,
-  getStoredUserId,
 } from "../../lib/api";
 import {
   normalizeLeadSpecialtiesInput,
@@ -147,11 +146,6 @@ export default function CapturePage() {
   const [captureMode, setCaptureMode] = useState<"" | "project" | "task" | "task-chain" | "specialty">("");
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
-  const assignableUsers = useMemo(() => {
-    if (getStoredRole() !== "lead") return users;
-    const selfId = getStoredUserId();
-    return users.filter((user) => user.id !== selfId);
-  }, [users]);
   const [teams, setTeams] = useState<TeamOption[]>([]);
   const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [specialtyOptions, setSpecialtyOptions] = useState<SpecialtyOption[]>([]);
@@ -317,10 +311,7 @@ export default function CapturePage() {
         });
       }
 
-      const assignable = (userResponse.data as UserOption[]).filter(
-        (user) => currentRole !== "lead" || user.id !== getStoredUserId(),
-      );
-      if (assignable.length > 0) {
+      if (userResponse.data?.length > 0) {
         setTaskChainForm((current) => ({
           ...current,
           steps: current.steps.map((step, index) =>
@@ -328,12 +319,10 @@ export default function CapturePage() {
               ? step
               : {
                   ...step,
-                  assigneeId: assignable[Math.min(index, assignable.length - 1)].id,
+                  assigneeId: userResponse.data[Math.min(index, userResponse.data.length - 1)].id,
                 },
           ),
         }));
-      }
-      if (userResponse.data?.length > 0) {
         setUpdateForm((current) => ({ ...current, userId: userResponse.data[0].id }));
       }
 
@@ -1024,7 +1013,7 @@ export default function CapturePage() {
             <textarea className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Descripcion" value={taskForm.description} onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })} rows={4} />
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.assigneeId} onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}>
               <option value="">Sin asignar — disponible para tomar</option>
-              {assignableUsers.map((user) => (
+              {users.map((user) => (
                 <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
               ))}
             </select>
@@ -1179,7 +1168,7 @@ export default function CapturePage() {
                       onChange={(event) => updateTaskChainStep(step.stepKey, "assigneeId", event.target.value)}
                     >
                       <option value="">Responsable</option>
-                      {assignableUsers.map((user) => (
+                      {users.map((user) => (
                         <option key={user.id} value={user.id}>
                           {user.fullName} - {roleOptions.find((item) => item.value === user.role)?.label ?? user.role}
                         </option>
