@@ -11,7 +11,10 @@ import { WorkPlanEntity } from '../database/entities/work-plan.entity';
 import { WorkPlanColumnEntity } from '../database/entities/work-plan-column.entity';
 import { WorkPlanSectionEntity } from '../database/entities/work-plan-section.entity';
 import { WorkPlanRowEntity } from '../database/entities/work-plan-row.entity';
-import { WorkPlanCellEntity } from '../database/entities/work-plan-cell.entity';
+import {
+  WorkPlanCellEntity,
+  type WorkPlanCellStatus,
+} from '../database/entities/work-plan-cell.entity';
 import {
   CreateCellTaskDto,
   CreateSectionDto,
@@ -26,6 +29,7 @@ import {
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { TasksService } from '../tasks/tasks.service';
+import { TaskEntity, type TaskStatus } from '../database/entities/task.entity';
 
 type Actor = { id: string; role: 'manager' | 'lead' | 'worker' };
 
@@ -64,6 +68,16 @@ const MANUAL_LAYOUT: Array<{
   },
 ];
 
+function cellStatusFromTask(
+  status: TaskStatus,
+  hasAssignee: boolean,
+): WorkPlanCellStatus {
+  if (status === 'done') return 'done';
+  if (status === 'doing') return 'in_progress';
+  if (status === 'blocked') return 'blocked';
+  return hasAssignee ? 'assigned' : 'unassigned';
+}
+
 @Injectable()
 export class WorkPlansService {
   constructor(
@@ -81,6 +95,8 @@ export class WorkPlansService {
     private readonly projects: Repository<ProjectEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    @InjectRepository(TaskEntity)
+    private readonly tasks: Repository<TaskEntity>,
     private readonly tasksService: TasksService,
   ) {}
 
@@ -155,6 +171,13 @@ export class WorkPlansService {
     const cells = rows.length
       ? await this.cells.find({ where: { rowId: In(rows.map((r) => r.id)) } })
       : [];
+    const taskIds = cells
+      .map((cell) => cell.taskId)
+      .filter((taskId): taskId is string => Boolean(taskId));
+    const linkedTasks = taskIds.length
+      ? await this.tasks.find({ where: { id: In(taskIds) } })
+      : [];
+    const tasksById = new Map(linkedTasks.map((task) => [task.id, task]));
 
     const counts = {
       total: 0,
@@ -168,7 +191,19 @@ export class WorkPlansService {
       const sectionRows = rows
         .filter((r) => r.sectionId === section.id)
         .map((row) => {
-          const rowCells = cells.filter((c) => c.rowId === row.id);
+          const rowCells = cells
+            .filter((cell) => cell.rowId === row.id)
+            .map((cell) => {
+              const task = cell.taskId ? tasksById.get(cell.taskId) : undefined;
+              if (!task) return cell;
+              return {
+                ...cell,
+                status: cellStatusFromTask(task.status, Boolean(task.assigneeId)),
+                taskStatus: task.status,
+                taskDueDate: task.dueDate ?? null,
+                taskCompletionOutcome: task.completionOutcome ?? null,
+              };
+            });
           const mergedSlots = rowCells.reduce(
             (total, cell) => total + Math.max(0, cell.columnSpan - 1),
             0,

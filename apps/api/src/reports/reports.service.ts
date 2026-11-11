@@ -207,6 +207,9 @@ export class ReportsService {
           };
         });
         const gradedTasks = taskRows.filter((task) => task.grade !== null);
+        const manuallyGradedCount = taskRows.filter(
+          (task) => task.manualGrade !== null,
+        ).length;
         const possiblePoints = gradedTasks.reduce(
           (sum, task) => sum + task.possiblePoints,
           0,
@@ -260,6 +263,7 @@ export class ReportsService {
           tasks: taskRows,
           taskCount: taskRows.length,
           gradedCount: gradedTasks.length,
+          manuallyGradedCount,
           completedCount: taskRows.filter(
             (task) =>
               task.deliveryStatus === 'on_time' ||
@@ -294,13 +298,21 @@ export class ReportsService {
       .filter((user) => user.taskCount > 0)
       .sort(
         (left, right) =>
+          Number(right.manuallyGradedCount > 0) -
+            Number(left.manuallyGradedCount > 0) ||
           (right.finalGrade ?? -1) - (left.finalGrade ?? -1) ||
           right.gradedCount - left.gradedCount ||
           left.fullName.localeCompare(right.fullName, 'es'),
-      )
-      .map((user, index) => ({ ...user, rank: index + 1 }));
+      );
 
-    const gradedUsers = rows.filter((user) => user.finalGrade !== null);
+    let comparisonRank = 0;
+    const rankedRows = rows.map((user) => ({
+      ...user,
+      rank: user.manuallyGradedCount > 0 ? ++comparisonRank : null,
+    }));
+    const gradedUsers = rankedRows.filter(
+      (user) => user.manuallyGradedCount > 0 && user.finalGrade !== null,
+    );
     return {
       year,
       semester,
@@ -309,9 +321,13 @@ export class ReportsService {
       customizedWeights: storedWeights.length > 0,
       lateGradeCap: LATE_GRADE_CAP,
       team: {
-        users: rows.length,
-        tasks: rows.reduce((sum, user) => sum + user.taskCount, 0),
-        gradedTasks: rows.reduce((sum, user) => sum + user.gradedCount, 0),
+        users: rankedRows.length,
+        evaluatedUsers: gradedUsers.length,
+        tasks: rankedRows.reduce((sum, user) => sum + user.taskCount, 0),
+        gradedTasks: rankedRows.reduce(
+          (sum, user) => sum + user.gradedCount,
+          0,
+        ),
         averageGrade:
           gradedUsers.length > 0
             ? Number(
@@ -324,7 +340,7 @@ export class ReportsService {
               )
             : null,
       },
-      users: rows,
+      users: rankedRows,
     };
   }
 

@@ -27,6 +27,7 @@ export type MemberInput = {
   fullName: string;
   finalGrade: number | null;
   earnedPoints: number;
+  manuallyGradedCount: number;
 };
 
 export type MemberStats = {
@@ -89,12 +90,14 @@ export const profileFor = (gradeZ: number, pointsZ: number): Profile => {
 };
 
 /**
- * Solo entran a la estadística las personas con al menos una tarea calificada:
- * quien aún no tiene calificaciones tendría 0 puntos y bajaría la media del grupo.
+ * Solo entran a la estadística las personas con al menos una calificación
+ * capturada. Los ceros automáticos por tareas no entregadas no bastan para
+ * incluir a alguien, pero una calificación manual de cero sí cuenta.
  */
 export const buildTeamStats = (allMembers: MemberInput[]) => {
   const members = allMembers.filter(
-    (member): member is MemberInput & { finalGrade: number } => member.finalGrade !== null,
+    (member): member is MemberInput & { finalGrade: number } =>
+      member.manuallyGradedCount > 0 && member.finalGrade !== null,
   );
   const excluded = allMembers.length - members.length;
   const grades = members.map((member) => member.finalGrade);

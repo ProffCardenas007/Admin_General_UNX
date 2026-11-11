@@ -13,11 +13,14 @@ import {
   STATUS_ORDER,
   STATUS_STYLES,
   type CellStatus,
+  type LinkedTaskStatus,
   type PlanCell,
   type PlanDetail,
   type PlanRow,
   type PlanSection,
 } from "../types";
+import { statusLabels as taskStatusLabels } from "../../tasks/labels";
+import { taskDueSemaforo, toDateKey } from "../../tasks/taskLogic";
 
 type Editing = {
   section: PlanSection;
@@ -81,6 +84,14 @@ const roleLabels: Record<UserOption["role"], string> = {
   manager: "Gerencia",
   lead: "Líder",
   worker: "Colaborador",
+};
+
+const taskStatusDots: Record<LinkedTaskStatus, string> = {
+  todo: "bg-slate-400",
+  doing: "bg-sky-500",
+  paused: "bg-amber-500",
+  blocked: "bg-red-500",
+  done: "bg-emerald-500",
 };
 
 function inferActivityType(editing: Editing): TaskActivityType {
@@ -190,6 +201,16 @@ function CellModal({
   const locked = Boolean(cell?.taskId);
   const columnSpan = cell?.columnSpan ?? 1;
   const createsTask = Boolean(assignment);
+  const taskDue = cell?.taskStatus
+    ? taskDueSemaforo(
+        {
+          status: cell.taskStatus,
+          dueDate: cell.taskDueDate ?? undefined,
+          completionOutcome: cell.taskCompletionOutcome,
+        },
+        toDateKey(new Date()),
+      )
+    : null;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -234,22 +255,36 @@ function CellModal({
 
         <div>
           <p className="mb-2 text-sm">Estado</p>
-          <div className="flex flex-wrap gap-2">
-            {STATUS_ORDER.map((s) => (
-              <button
-                key={s}
-                type="button"
-                disabled={locked}
-                onClick={() => setStatus(s)}
-                className={`flex items-center gap-2 rounded-full border px-3 py-1 text-sm disabled:opacity-50 ${
-                  status === s ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30" : "border-[var(--line)]"
-                }`}
-              >
-                <span className={`h-2.5 w-2.5 rounded-full ${STATUS_STYLES[s].dot}`} />
-                {STATUS_LABELS[s]}
-              </button>
-            ))}
-          </div>
+          {cell?.taskStatus ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1 text-sm font-semibold">
+                <span className={`h-2.5 w-2.5 rounded-full ${taskStatusDots[cell.taskStatus]}`} />
+                {taskStatusLabels[cell.taskStatus] ?? cell.taskStatus}
+              </span>
+              {taskDue && (
+                <span className={`inline-flex items-center gap-2 text-sm font-semibold ${taskDue.textClass}`}>
+                  <span className={`h-2.5 w-2.5 rounded-full ${taskDue.dotClass}`} />
+                  {taskDue.label}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {STATUS_ORDER.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStatus(s)}
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1 text-sm ${
+                    status === s ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30" : "border-[var(--line)]"
+                  }`}
+                >
+                  <span className={`h-2.5 w-2.5 rounded-full ${STATUS_STYLES[s].dot}`} />
+                  {STATUS_LABELS[s]}
+                </button>
+              ))}
+            </div>
+          )}
           {locked && (
             <p className="mt-2 text-xs text-[var(--ink-muted)]">Ya tiene tarea asignada; el estado lo controla la tarea.</p>
           )}
@@ -605,6 +640,19 @@ export default function PlanGridPage() {
   ) => {
     const cell = findCell(row, columnId);
     const status = cell?.status ?? "unassigned";
+    const taskDue = cell?.taskStatus
+      ? taskDueSemaforo(
+          {
+            status: cell.taskStatus,
+            dueDate: cell.taskDueDate ?? undefined,
+            completionOutcome: cell.taskCompletionOutcome,
+          },
+          toDateKey(new Date()),
+        )
+      : null;
+    const statusLabel = cell?.taskStatus
+      ? taskStatusLabels[cell.taskStatus] ?? cell.taskStatus
+      : STATUS_LABELS[status];
     const hasInfo = Boolean(cell?.note || cell?.suggestedAssignee || cell?.startDate || cell?.endDate);
     const dates = [cell?.startDate, cell?.endDate].filter(Boolean).map((d) => String(d).slice(5, 10).replace("-", "/"));
     const selectionStart = selection ? Math.min(selection.startIndex, selection.endIndex) : -1;
@@ -660,12 +708,14 @@ export default function PlanGridPage() {
           setSelection(null);
           setEditing({ section, row, columnId, columnLabel, cell });
         }}
-        title={`${STATUS_LABELS[status]}${cell?.suggestedAssignee ? ` · ${cell.suggestedAssignee}` : ""}${cell?.note ? ` · ${cell.note}` : ""}`}
+        title={`${statusLabel}${taskDue ? ` · ${taskDue.label}` : ""}${cell?.suggestedAssignee ? ` · ${cell.suggestedAssignee}` : ""}${cell?.note ? ` · ${cell.note}` : ""}`}
         className={`flex h-full min-h-[34px] w-full touch-none select-none flex-col items-center justify-center gap-0.5 px-1 py-1 text-[10px] leading-tight transition-colors ${
           selected ? "bg-blue-200 ring-2 ring-inset ring-blue-600" : STATUS_STYLES[status].cell
         }`}
       >
-        {status !== "unassigned" && <span className={`h-2 w-2 rounded-full ${STATUS_STYLES[status].dot}`} />}
+        {(status !== "unassigned" || taskDue) && (
+          <span className={`h-2 w-2 rounded-full ${taskDue?.dotClass ?? STATUS_STYLES[status].dot}`} />
+        )}
         {dates.length > 0 && <span className="font-mono">{dates.join("–")}</span>}
         {cell?.suggestedAssignee && <span className="max-w-full truncate">{cell.suggestedAssignee}</span>}
         {hasInfo && !dates.length && !cell?.suggestedAssignee && <span>•</span>}

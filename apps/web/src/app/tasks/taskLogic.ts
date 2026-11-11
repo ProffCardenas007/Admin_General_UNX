@@ -78,7 +78,10 @@ export const sortByUrgency = (tasks: TaskRow[], todayKey: string) =>
   tasks.slice().sort((a, b) => getUrgencyScore(b, todayKey) - getUrgencyScore(a, todayKey));
 
 /** Traffic light shown next to each task. */
-export const taskDueSemaforo = (task: TaskRow, todayKey: string) => {
+export const taskDueSemaforo = (
+  task: Pick<TaskRow, "status" | "dueDate" | "completionOutcome">,
+  todayKey: string,
+) => {
   if (task.status === "done") {
     if (task.completionOutcome === "not_completed") {
       return { label: "No completada", dotClass: "bg-red-500", textClass: "text-red-600" };

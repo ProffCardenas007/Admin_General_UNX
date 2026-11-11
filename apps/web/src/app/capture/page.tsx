@@ -23,6 +23,7 @@ type ProjectOption = {
   code: string;
   name: string;
   scope?: LeadSpecialty | null;
+  status: "planned" | "active" | "on_hold" | "done" | "cancelled";
 };
 
 type UserOption = {
@@ -407,6 +408,7 @@ export default function CapturePage() {
 
     const trimmedCode = projectForm.code.trim();
     const trimmedName = projectForm.name.trim();
+    const normalizedScope = normalizeLeadSpecialtyInput(projectForm.scope);
 
     if (!trimmedCode || !trimmedName) {
       setMessage("No se pudo crear el proyecto: academia y nombre son obligatorios.");
@@ -414,10 +416,16 @@ export default function CapturePage() {
     }
 
     const usedNames = new Set(
-      projects.map((project) => project.name.trim().toLowerCase()),
+      projects
+        .filter(
+          (project) =>
+            project.status !== "done" &&
+            project.scope === normalizedScope,
+        )
+        .map((project) => project.name.trim().toLowerCase()),
     );
 
-    if (usedNames.has(trimmedName.toLowerCase())) {
+    if (projectForm.status !== "done" && usedNames.has(trimmedName.toLowerCase())) {
       let suggestedName = trimmedName;
       let suffix = 2;
 
@@ -436,10 +444,6 @@ export default function CapturePage() {
     }
 
     try {
-      const normalizedScope = normalizeLeadSpecialtyInput(
-        role === "lead" ? projectForm.scope : projectForm.scope,
-      );
-
       if (role === "lead" && (!normalizedScope || !specialties.includes(normalizedScope))) {
         setMessage("No se pudo crear el proyecto: selecciona una especialidad valida de tu perfil.");
         return;

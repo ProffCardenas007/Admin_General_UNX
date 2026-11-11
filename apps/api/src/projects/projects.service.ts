@@ -196,18 +196,21 @@ export class ProjectsService {
       throw new BadRequestException('Project specialty does not exist');
     }
 
-    const existingByNameAndScope = await this.projectsRepository
-      .createQueryBuilder('project')
-      .where('LOWER(TRIM(project.name)) = LOWER(TRIM(:name))', {
-        name: normalizedName,
-      })
-      .andWhere('project.scope = :scope', { scope: resolvedScope })
-      .getOne();
+    if ((dto.status ?? 'planned') !== 'done') {
+      const existingByNameAndScope = await this.projectsRepository
+        .createQueryBuilder('project')
+        .where('LOWER(TRIM(project.name)) = LOWER(TRIM(:name))', {
+          name: normalizedName,
+        })
+        .andWhere('project.scope = :scope', { scope: resolvedScope })
+        .andWhere("project.status <> 'done'")
+        .getOne();
 
-    if (existingByNameAndScope) {
-      throw new ConflictException(
-        'Project name already exists in this specialty',
-      );
+      if (existingByNameAndScope) {
+        throw new ConflictException(
+          'Project name already exists in this specialty',
+        );
+      }
     }
 
     const project = this.projectsRepository.create({
@@ -394,8 +397,28 @@ export class ProjectsService {
       endDate: project.endDate ?? null,
     };
 
+    const updatedName = dto.name?.trim() ?? project.name;
+    const updatedStatus = dto.status ?? project.status;
+    if (updatedStatus !== 'done') {
+      const existingByNameAndScope = await this.projectsRepository
+        .createQueryBuilder('project')
+        .where('LOWER(TRIM(project.name)) = LOWER(TRIM(:name))', {
+          name: updatedName,
+        })
+        .andWhere('project.scope = :scope', { scope: project.scope })
+        .andWhere("project.status <> 'done'")
+        .andWhere('project.id <> :projectId', { projectId })
+        .getOne();
+
+      if (existingByNameAndScope) {
+        throw new ConflictException(
+          'Project name already exists in this specialty',
+        );
+      }
+    }
+
     if (dto.name !== undefined) {
-      project.name = dto.name.trim();
+      project.name = updatedName;
     }
 
     if (dto.status !== undefined) {
@@ -410,7 +433,20 @@ export class ProjectsService {
       project.endDate = dto.endDate;
     }
 
-    const savedProject = await this.projectsRepository.save(project);
+    let savedProject: ProjectEntity;
+    try {
+      savedProject = await this.projectsRepository.save(project);
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error as QueryFailedError & { code?: string }).code === '23505'
+      ) {
+        throw new ConflictException(
+          'Project name already exists in this specialty',
+        );
+      }
+      throw error;
+    }
 
     if (actor.role === 'manager') {
       const changes: Record<string, { before: unknown; after: unknown }> = {};

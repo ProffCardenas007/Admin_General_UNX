@@ -121,13 +121,16 @@ BEGIN
 END
 $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS projects_name_scope_key
-    ON projects (LOWER(TRIM(name)), scope)
-    WHERE scope IS NOT NULL;
+DROP INDEX IF EXISTS projects_name_scope_key;
+DROP INDEX IF EXISTS projects_name_without_scope_key;
 
-CREATE UNIQUE INDEX IF NOT EXISTS projects_name_without_scope_key
+CREATE UNIQUE INDEX projects_name_scope_key
+    ON projects (LOWER(TRIM(name)), scope)
+    WHERE scope IS NOT NULL AND status <> 'done';
+
+CREATE UNIQUE INDEX projects_name_without_scope_key
     ON projects (LOWER(TRIM(name)))
-    WHERE scope IS NULL;
+    WHERE scope IS NULL AND status <> 'done';
 
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

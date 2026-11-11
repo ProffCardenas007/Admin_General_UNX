@@ -10,6 +10,7 @@ import { WorkPlansService } from './work-plans.service';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { TasksModule } from '../tasks/tasks.module';
+import { TaskEntity } from '../database/entities/task.entity';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { TasksModule } from '../tasks/tasks.module';
       WorkPlanCellEntity,
       ProjectEntity,
       UserEntity,
+      TaskEntity,
     ]),
   ],
   controllers: [WorkPlansController],

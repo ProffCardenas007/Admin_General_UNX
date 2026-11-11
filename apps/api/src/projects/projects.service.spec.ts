@@ -60,8 +60,35 @@ describe('ProjectsService', () => {
       'project.scope = :scope',
       { scope: 'exani_ii' },
     );
+    expect(projectsQb.andWhere).toHaveBeenCalledWith(
+      "project.status <> 'done'",
+    );
     expect(projectsRepository.save).toHaveBeenCalled();
     expect(result.scope).toBe('exani_ii');
+  });
+
+  it('allows a project name already used by a finalized project', async () => {
+    const result = await service.create(
+      { code: 'PAA-2', name: 'Examenes', scope: 'paa' },
+      { id: 'manager-1', role: 'manager' },
+    );
+
+    expect(projectsQb.andWhere).toHaveBeenCalledWith(
+      "project.status <> 'done'",
+    );
+    expect(projectsRepository.save).toHaveBeenCalled();
+    expect(result.name).toBe('Examenes');
+  });
+
+  it('does not restrict the name of a project created as finalized', async () => {
+    const result = await service.create(
+      { code: 'PAA-2', name: 'Examenes', scope: 'paa', status: 'done' },
+      { id: 'manager-1', role: 'manager' },
+    );
+
+    expect(projectsRepository.createQueryBuilder).not.toHaveBeenCalled();
+    expect(projectsRepository.save).toHaveBeenCalled();
+    expect(result.status).toBe('done');
   });
 
   it('rejects a duplicate project name in the same specialty', async () => {

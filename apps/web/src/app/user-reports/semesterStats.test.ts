@@ -46,10 +46,11 @@ describe("bands, percentiles and profiles", () => {
 
 describe("buildTeamStats", () => {
   const stats = buildTeamStats([
-    { userId: "a", fullName: "Ana", finalGrade: 90, earnedPoints: 400 },
-    { userId: "b", fullName: "Beto", finalGrade: 80, earnedPoints: 200 },
-    { userId: "c", fullName: "Caro", finalGrade: 70, earnedPoints: 300 },
-    { userId: "d", fullName: "Dani", finalGrade: null, earnedPoints: 0 },
+    { userId: "a", fullName: "Ana", finalGrade: 90, earnedPoints: 400, manuallyGradedCount: 1 },
+    { userId: "b", fullName: "Beto", finalGrade: 80, earnedPoints: 200, manuallyGradedCount: 1 },
+    { userId: "c", fullName: "Caro", finalGrade: 70, earnedPoints: 300, manuallyGradedCount: 1 },
+    { userId: "d", fullName: "Dani", finalGrade: null, earnedPoints: 0, manuallyGradedCount: 0 },
+    { userId: "e", fullName: "Ema", finalGrade: 0, earnedPoints: 0, manuallyGradedCount: 0 },
   ]);
 
   it("scores points against the top performer and the group mean", () => {
@@ -63,7 +64,7 @@ describe("buildTeamStats", () => {
   });
 
   it("leaves people without grades out of the statistics", () => {
-    assert.equal(stats.excluded, 1);
+    assert.equal(stats.excluded, 2);
     assert.equal(stats.rows.length, 3);
     assert.equal(stats.gradeSummary?.n, 3);
     close(stats.gradeSummary?.mean, 80);
@@ -76,5 +77,15 @@ describe("buildTeamStats", () => {
     assert.equal(caro?.profile, "productivo");
     const beto = stats.rows.find((row) => row.userId === "b");
     assert.equal(beto?.profile, "calidad");
+  });
+
+  it("keeps a manually graded zero in the comparison", () => {
+    const result = buildTeamStats([
+      { userId: "a", fullName: "Ana", finalGrade: 80, earnedPoints: 100, manuallyGradedCount: 1 },
+      { userId: "b", fullName: "Beto", finalGrade: 0, earnedPoints: 0, manuallyGradedCount: 1 },
+    ]);
+
+    assert.equal(result.rows.length, 2);
+    assert.equal(result.gradeSummary?.mean, 40);
   });
 });

@@ -42,10 +42,11 @@ type SemesterUser = {
   fullName: string;
   email: string;
   role?: string;
-  rank: number;
+  rank: number | null;
   tasks: SemesterTask[];
   taskCount: number;
   gradedCount: number;
+  manuallyGradedCount: number;
   completedCount: number;
   onTimeCount: number;
   lateCount: number;
@@ -66,6 +67,7 @@ type SemesterReport = {
   lateGradeCap: number;
   team: {
     users: number;
+    evaluatedUsers: number;
     tasks: number;
     gradedTasks: number;
     averageGrade: number | null;
@@ -468,7 +470,11 @@ export default function SemesterEvaluationPanel() {
         <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              { label: "Personas evaluadas", value: String(report.team.users), note: "con tareas en el semestre" },
+              {
+                label: "Personas evaluadas",
+                value: String(report.team.evaluatedUsers),
+                note: `${report.team.users - report.team.evaluatedUsers} sin actividades calificadas no cuentan`,
+              },
               { label: "Tareas", value: String(report.team.tasks), note: "con vencimiento en el periodo" },
               { label: "Tareas calificadas", value: String(report.team.gradedTasks), note: `${report.team.tasks - report.team.gradedTasks} pendientes` },
               { label: "Promedio global", value: report.team.averageGrade === null ? "Pendiente" : formatNumber(report.team.averageGrade), note: "promedio de resultados individuales" },
@@ -560,7 +566,7 @@ export default function SemesterEvaluationPanel() {
                 <tbody>
                   {report.users.map((user) => (
                     <tr key={user.userId} className={`border-b border-[var(--line)]/60 ${selectedUserId === user.userId ? "bg-[var(--accent)]/5" : ""}`}>
-                      <td className="px-4 py-3 font-mono font-semibold">#{user.rank}</td>
+                      <td className="px-4 py-3 font-mono font-semibold">{user.rank === null ? "—" : `#${user.rank}`}</td>
                       <td className="px-4 py-3">
                         <p className="font-semibold">{user.fullName}</p>
                         <p className="text-xs text-[var(--ink-muted)]">{user.email}</p>

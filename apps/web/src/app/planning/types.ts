@@ -1,4 +1,5 @@
 export type CellStatus = "unassigned" | "assigned" | "in_progress" | "done" | "blocked";
+export type LinkedTaskStatus = "todo" | "doing" | "paused" | "blocked" | "done";
 
 export type PlanProgress = {
   total: number;
@@ -28,6 +29,9 @@ export type PlanCell = {
   suggestedAssignee: string | null;
   note: string | null;
   taskId: string | null;
+  taskStatus?: LinkedTaskStatus;
+  taskDueDate?: string | null;
+  taskCompletionOutcome?: "completed" | "not_completed" | null;
   columnSpan: number;
 };
 
@@ -56,7 +60,7 @@ export const STATUS_LABELS: Record<CellStatus, string> = {
   unassigned: "Por asignar",
   assigned: "Asignada",
   in_progress: "En curso",
-  done: "Lista",
+  done: "Finalizada",
   blocked: "Bloqueada",
 };
 

@@ -14,6 +14,7 @@ async function run() {
         scope::text AS specialty,
         COUNT(*)::int AS total
       FROM projects
+      WHERE status <> 'done'
       GROUP BY LOWER(TRIM(name)), scope
       HAVING COUNT(*) > 1
       ORDER BY total DESC, normalized_name ASC, specialty ASC
@@ -22,17 +23,19 @@ async function run() {
 
     await client.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_code_key');
     await client.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key');
+    await client.query('DROP INDEX IF EXISTS projects_name_scope_key');
+    await client.query('DROP INDEX IF EXISTS projects_name_without_scope_key');
 
     if (duplicates.rows.length === 0) {
       await client.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS projects_name_scope_key
+        CREATE UNIQUE INDEX projects_name_scope_key
         ON projects (LOWER(TRIM(name)), scope)
-        WHERE scope IS NOT NULL
+        WHERE scope IS NOT NULL AND status <> 'done'
       `);
       await client.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS projects_name_without_scope_key
+        CREATE UNIQUE INDEX projects_name_without_scope_key
         ON projects (LOWER(TRIM(name)))
-        WHERE scope IS NULL
+        WHERE scope IS NULL AND status <> 'done'
       `);
     } else {
       const examples = duplicates.rows
@@ -47,7 +50,9 @@ async function run() {
     }
 
     await client.query('COMMIT');
-    console.log('DB_OK: project uniqueness scoped by specialty (code can repeat)');
+    console.log(
+      'DB_OK: active project uniqueness scoped by specialty (finalized names and codes can repeat)',
+    );
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
