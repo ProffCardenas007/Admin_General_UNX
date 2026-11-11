@@ -182,6 +182,7 @@ export default function CapturePage() {
     title: "",
     description: "",
     assigneeId: "",
+    additionalAssigneeIds: [] as string[],
     teamId: "",
     status: "todo",
     priority: "medium",
@@ -498,13 +499,29 @@ export default function CapturePage() {
       return;
     }
 
+    const selectedAssigneeIds = [
+      taskForm.assigneeId,
+      ...taskForm.additionalAssigneeIds,
+    ].filter(Boolean);
+    if (new Set(selectedAssigneeIds).size !== selectedAssigneeIds.length) {
+      setMessage("No puedes seleccionar a la misma persona más de una vez.");
+      return;
+    }
+
     try {
       const payload = {
         projectId: taskForm.projectId,
         activityType: taskForm.activityType,
         title: taskForm.title,
         description: taskForm.description,
-        assigneeId: taskForm.teamId ? undefined : taskForm.assigneeId || undefined,
+        assigneeId:
+          !taskForm.teamId && selectedAssigneeIds.length === 1
+            ? selectedAssigneeIds[0]
+            : undefined,
+        assigneeIds:
+          !taskForm.teamId && selectedAssigneeIds.length > 1
+            ? selectedAssigneeIds
+            : undefined,
         teamId: taskForm.teamId || undefined,
         status: taskForm.status,
         priority: taskForm.priority,
@@ -513,7 +530,11 @@ export default function CapturePage() {
       };
 
       await axios.post(`${API_URL}/tasks`, payload, { headers: authHeaders() });
-      setMessage(`Tarea ${taskForm.title} creada.`);
+      setMessage(
+        selectedAssigneeIds.length > 1
+          ? `${selectedAssigneeIds.length} tareas individuales de ${taskForm.title} creadas.`
+          : `Tarea ${taskForm.title} creada.`,
+      );
       setTaskForm((current) => ({ ...current, title: "", description: "", dueDate: "", estimatedHours: "" }));
       await loadLookups();
     } catch (caughtError) {
@@ -1015,12 +1036,71 @@ export default function CapturePage() {
             </select>
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Titulo" value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} />
             <textarea className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Descripcion" value={taskForm.description} onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })} rows={4} />
-            <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.assigneeId} onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}>
-              <option value="">Sin asignar — disponible para tomar</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <select
+                  className="min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                  value={taskForm.assigneeId}
+                  disabled={Boolean(taskForm.teamId)}
+                  onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}
+                >
+                  <option value="">Sin asignar — disponible para tomar</option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  aria-label="Agregar otra persona"
+                  title="Agregar otra persona"
+                  disabled={Boolean(taskForm.teamId)}
+                  onClick={() =>
+                    setTaskForm((current) => ({
+                      ...current,
+                      additionalAssigneeIds: [...current.additionalAssigneeIds, ""],
+                    }))
+                  }
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--accent)] text-xl font-semibold text-[var(--accent)] disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
+              {taskForm.additionalAssigneeIds.map((assigneeId, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <select
+                    className="min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
+                    value={assigneeId}
+                    onChange={(event) =>
+                      setTaskForm((current) => ({
+                        ...current,
+                        additionalAssigneeIds: current.additionalAssigneeIds.map((value, itemIndex) =>
+                          itemIndex === index ? event.target.value : value,
+                        ),
+                      }))
+                    }
+                  >
+                    <option value="">Selecciona otra persona</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    aria-label="Quitar persona"
+                    title="Quitar persona"
+                    onClick={() =>
+                      setTaskForm((current) => ({
+                        ...current,
+                        additionalAssigneeIds: current.additionalAssigneeIds.filter((_, itemIndex) => itemIndex !== index),
+                      }))
+                    }
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--line)] text-lg text-[var(--danger)]"
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
-            </select>
+            </div>
             <select
               className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
               value={taskForm.teamId}
@@ -1029,6 +1109,7 @@ export default function CapturePage() {
                   ...current,
                   teamId: event.target.value,
                   assigneeId: event.target.value ? "" : current.assigneeId,
+                  additionalAssigneeIds: event.target.value ? [] : current.additionalAssigneeIds,
                 }))
               }
             >

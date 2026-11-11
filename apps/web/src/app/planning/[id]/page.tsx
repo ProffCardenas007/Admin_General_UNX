@@ -190,6 +190,9 @@ function CellModal({
   const [startDate, setStartDate] = useState(cell?.startDate?.slice(0, 10) ?? "");
   const [endDate, setEndDate] = useState(cell?.endDate?.slice(0, 10) ?? "");
   const [note, setNote] = useState(cell?.note ?? "");
+  const [plannedAssigneeId, setPlannedAssigneeId] = useState(
+    () => users.find((user) => user.fullName === cell?.suggestedAssignee)?.id ?? "",
+  );
   const [assignment, setAssignment] = useState("");
   const [activityType, setActivityType] = useState<TaskActivityType>(() => inferActivityType(editing));
   const [taskTitle, setTaskTitle] = useState(`${editing.row.label} - ${editing.columnLabel}`);
@@ -200,7 +203,7 @@ function CellModal({
   const [saving, setSaving] = useState(false);
   const locked = Boolean(cell?.taskId);
   const columnSpan = cell?.columnSpan ?? 1;
-  const createsTask = Boolean(assignment);
+  const createsTask = !locked && status === "assigned";
   const taskDue = cell?.taskStatus
     ? taskDueSemaforo(
         {
@@ -229,10 +232,15 @@ function CellModal({
         note: note || null,
       });
     } else {
+      const suggestedAssignee =
+        status === "unassigned" || status === "assigned"
+          ? users.find((user) => user.id === plannedAssigneeId)?.fullName ?? null
+          : null;
       await onSave({
         status,
         startDate: startDate || null,
         endDate: endDate || null,
+        suggestedAssignee,
         note: note || null,
       });
     }
@@ -240,17 +248,22 @@ function CellModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-2 sm:items-center sm:p-4"
+      onClick={onClose}
+    >
       <form
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel flex w-full max-w-md flex-col gap-4 bg-white p-6"
+        className={`glass-panel flex max-h-[calc(100dvh-1rem)] w-full flex-col gap-4 overflow-y-auto bg-white p-4 sm:max-h-[calc(100dvh-2rem)] sm:p-6 ${
+          createsTask ? "max-w-2xl" : "max-w-md"
+        }`}
       >
-        <div>
+        <div className="min-w-0">
           <p className="font-mono text-xs uppercase tracking-widest text-[var(--ink-muted)]">
             {editing.section.title} · {editing.columnLabel}
           </p>
-          <h2 className="text-xl font-semibold tracking-tight">{editing.row.label}</h2>
+          <h2 className="break-words text-xl font-semibold tracking-tight">{editing.row.label}</h2>
         </div>
 
         <div>
@@ -274,7 +287,12 @@ function CellModal({
                 <button
                   key={s}
                   type="button"
-                  onClick={() => setStatus(s)}
+                  onClick={() => {
+                    setStatus(s);
+                    if (s === "assigned") {
+                      setAssignment(plannedAssigneeId || AVAILABLE_TASK);
+                    }
+                  }}
                   className={`flex items-center gap-2 rounded-full border px-3 py-1 text-sm ${
                     status === s ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30" : "border-[var(--line)]"
                   }`}
@@ -290,7 +308,7 @@ function CellModal({
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
             Inicio
             <input
@@ -312,38 +330,62 @@ function CellModal({
           </label>
         </div>
 
-        {!locked && (
+        {!locked && (status === "unassigned" || status === "assigned") && (
           <label className="flex flex-col gap-1 text-sm">
-            Responsable / creación de tarea
+            Persona prevista
             <select
-              value={assignment}
-              disabled={!planHasProject}
-              onChange={(event) => setAssignment(event.target.value)}
-              className="rounded-lg border border-[var(--line)] bg-white px-3 py-2 disabled:bg-slate-100"
+              value={plannedAssigneeId}
+              onChange={(event) => {
+                setPlannedAssigneeId(event.target.value);
+                if (status === "assigned") {
+                  setAssignment(event.target.value || AVAILABLE_TASK);
+                }
+              }}
+              required={status === "assigned"}
+              className="min-w-0 rounded-lg border border-[var(--line)] bg-white px-3 py-2"
             >
-              <option value="">Solo planeación (no crear tarea)</option>
-              <option value={AVAILABLE_TASK}>Tarea disponible (sin responsable)</option>
+              <option value="">Selecciona la persona pensada para esta tarea</option>
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.fullName} ({roleLabels[user.role]})
                 </option>
               ))}
             </select>
-            {!planHasProject && (
-              <span className="text-xs text-[var(--danger)]">
-                Primero vincula este plan con un proyecto.
-              </span>
-            )}
+            <span className="text-xs text-[var(--ink-muted)]">
+              {status === "assigned"
+                ? "Esta persona será responsable de la tarea."
+                : "Puedes registrar a la persona contemplada; todavía no se crea ni asigna una tarea."}
+            </span>
           </label>
+        )}
+
+        {!locked && !planHasProject && (
+          <span className="text-xs text-[var(--danger)]">
+            Vincula este plan con un proyecto para poder crear tareas.
+          </span>
         )}
 
         {createsTask && (
           <div className="grid gap-3 rounded-xl border border-[var(--accent)]/30 bg-sky-50/50 p-4">
             <p className="text-sm font-semibold">
-              {assignment === AVAILABLE_TASK
-                ? "Publicar como tarea disponible"
-                : "Crear y asignar tarea"}
+              Crear tarea
             </p>
+            <label className="flex flex-col gap-1 text-sm">
+              Responsable
+              <select
+                value={assignment}
+                onChange={(event) => setAssignment(event.target.value)}
+                required
+                className="min-w-0 rounded-lg border border-[var(--line)] bg-white px-3 py-2"
+              >
+                <option value={AVAILABLE_TASK}>Tarea disponible (sin responsable)</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.fullName} ({roleLabels[user.role]})
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="flex flex-col gap-1 text-sm">
               Actividad
               <select
@@ -452,8 +494,12 @@ function CellModal({
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm">
+        <div className="sticky -bottom-4 -mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-[var(--line)] bg-white p-4 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:flex-row sm:justify-end sm:p-6">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm"
+          >
             Cancelar
           </button>
           <button
@@ -481,6 +527,9 @@ export default function PlanGridPage() {
   const [newSection, setNewSection] = useState("");
   const [selection, setSelection] = useState<CellSelection | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
+  const [selectedColumnIds, setSelectedColumnIds] = useState<string[]>([]);
+  const [bulkEditing, setBulkEditing] = useState(false);
   const dragRangeRef = useRef<{ rowId: string; startIndex: number; endIndex: number } | null>(null);
 
   const base = `${API_URL}/work-plans`;
@@ -543,15 +592,42 @@ export default function PlanGridPage() {
   const rename = (url: string, field: "label" | "title" | "name", value: string) =>
     mutate(() => axios.patch(url, { [field]: value }, { headers: authHeaders() }), "No se pudo renombrar");
 
+  const bulkTargets = () => {
+    if (!plan) return [];
+    const selectedRows = plan.sections.flatMap((section) =>
+      section.rows
+        .filter((row) => selectedRowIds.includes(row.id))
+        .map((row) => ({ section, row })),
+    );
+    return selectedRows.flatMap(({ section, row }) =>
+      section.spansAll
+        ? [{ rowId: row.id }]
+        : selectedColumnIds.map((columnId) => ({ rowId: row.id, columnId })),
+    );
+  };
+
   const saveCell = async (patch: Partial<PlanCell>) => {
     if (!editing) return;
     try {
-      await axios.put(
-        `${base}/cells`,
-        { rowId: editing.row.id, columnId: editing.columnId ?? undefined, ...patch },
-        { headers: authHeaders() },
-      );
+      if (bulkEditing) {
+        await axios.put(
+          `${base}/cells/bulk`,
+          { targets: bulkTargets(), ...patch },
+          { headers: authHeaders() },
+        );
+      } else {
+        await axios.put(
+          `${base}/cells`,
+          { rowId: editing.row.id, columnId: editing.columnId ?? undefined, ...patch },
+          { headers: authHeaders() },
+        );
+      }
       setEditing(null);
+      setBulkEditing(false);
+      if (bulkEditing) {
+        setSelectedRowIds([]);
+        setSelectedColumnIds([]);
+      }
       await load();
     } catch (caught) {
       setError(extractErrorMessage(caught, "No se pudo guardar la celda"));
@@ -587,16 +663,29 @@ export default function PlanGridPage() {
   }) => {
     if (!editing) return;
     try {
-      await axios.post(
-        `${base}/cells/task`,
-        {
-          rowId: editing.row.id,
-          columnId: editing.columnId ?? undefined,
-          ...input,
-        },
-        { headers: authHeaders() },
-      );
+      if (bulkEditing) {
+        await axios.post(
+          `${base}/cells/tasks`,
+          { targets: bulkTargets(), ...input },
+          { headers: authHeaders() },
+        );
+      } else {
+        await axios.post(
+          `${base}/cells/task`,
+          {
+            rowId: editing.row.id,
+            columnId: editing.columnId ?? undefined,
+            ...input,
+          },
+          { headers: authHeaders() },
+        );
+      }
       setEditing(null);
+      setBulkEditing(false);
+      if (bulkEditing) {
+        setSelectedRowIds([]);
+        setSelectedColumnIds([]);
+      }
       await load();
     } catch (caught) {
       setError(extractErrorMessage(caught, "No se pudo crear la tarea"));
@@ -662,6 +751,10 @@ export default function PlanGridPage() {
       selection?.row.id === row.id &&
       columnIndex <= selectionEnd &&
       columnIndex + columnSpan - 1 >= selectionStart;
+    const bulkSelected =
+      selectedRowIds.includes(row.id) &&
+      (section.spansAll ||
+        (columnId !== null && selectedColumnIds.includes(columnId)));
 
     return (
       <button
@@ -710,7 +803,7 @@ export default function PlanGridPage() {
         }}
         title={`${statusLabel}${taskDue ? ` · ${taskDue.label}` : ""}${cell?.suggestedAssignee ? ` · ${cell.suggestedAssignee}` : ""}${cell?.note ? ` · ${cell.note}` : ""}`}
         className={`flex h-full min-h-[34px] w-full touch-none select-none flex-col items-center justify-center gap-0.5 px-1 py-1 text-[10px] leading-tight transition-colors ${
-          selected ? "bg-blue-200 ring-2 ring-inset ring-blue-600" : STATUS_STYLES[status].cell
+          selected || bulkSelected ? "bg-blue-200 ring-2 ring-inset ring-blue-600" : STATUS_STYLES[status].cell
         }`}
       >
         {(status !== "unassigned" || taskDue) && (
@@ -750,6 +843,37 @@ export default function PlanGridPage() {
   const selectionIsMergedCell =
     Boolean(selectedAnchor && selectedAnchor.columnSpan > 1) &&
     selectedAnchor?.columnSpan === selectionEndIndex - selectionStartIndex + 1;
+  const allRows = plan.sections.flatMap((section) => section.rows);
+  const allRowsSelected =
+    allRows.length > 0 && selectedRowIds.length === allRows.length;
+  const allColumnsSelected =
+    plan.columns.length > 0 &&
+    selectedColumnIds.length === plan.columns.length;
+  const bulkTargetCount = plan.sections.reduce(
+    (total, section) =>
+      total +
+      section.rows.filter((row) => selectedRowIds.includes(row.id)).length *
+        (section.spansAll ? 1 : selectedColumnIds.length),
+    0,
+  );
+  const openBulkEditor = () => {
+    const selected = plan.sections
+      .flatMap((section) =>
+        section.rows.map((row) => ({ section, row })),
+      )
+      .find(({ row }) => selectedRowIds.includes(row.id));
+    if (!selected || selectedColumnIds.length === 0) return;
+    const column = selected.section.spansAll
+      ? null
+      : plan.columns.find((item) => item.id === selectedColumnIds[0]) ?? null;
+    setBulkEditing(true);
+    setEditing({
+      section: selected.section,
+      row: selected.row,
+      columnId: column?.id ?? null,
+      columnLabel: `${bulkTargetCount} celdas seleccionadas`,
+    });
+  };
 
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 px-4 py-6 md:px-8 md:py-10">
@@ -854,14 +978,70 @@ export default function PlanGridPage() {
         </section>
       )}
 
+      {selectedRowIds.length > 0 || selectedColumnIds.length > 0 ? (
+        <section className="glass-panel fade-up flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <p className="text-sm font-semibold">Edición masiva</p>
+            <p className="text-xs text-[var(--ink-muted)]">
+              {selectedRowIds.length} fila(s) × {selectedColumnIds.length} columna(s) · {bulkTargetCount} celda(s)
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedRowIds([]);
+                setSelectedColumnIds([]);
+              }}
+              className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+            >
+              Limpiar selección
+            </button>
+            <button
+              type="button"
+              disabled={bulkTargetCount === 0 || selectedColumnIds.length === 0}
+              onClick={openBulkEditor}
+              className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Editar selección
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <section className="glass-panel fade-up overflow-x-auto p-0">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="bg-[#0b4f6c] text-white">
-              <th className="sticky left-0 z-10 min-w-[220px] bg-[#0b4f6c] px-3 py-2 text-left font-medium">Etapa</th>
+              <th className="sticky left-0 z-10 min-w-[220px] bg-[#0b4f6c] px-3 py-2 text-left font-medium">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={allRowsSelected}
+                    onChange={(event) =>
+                      setSelectedRowIds(
+                        event.target.checked ? allRows.map((row) => row.id) : [],
+                      )
+                    }
+                  />
+                  Etapa
+                </label>
+              </th>
               {plan.columns.map((col) => (
                 <th key={col.id} className="group min-w-[96px] border-l border-white/30 px-2 py-2 font-medium">
                   <div className="flex items-center justify-center gap-1">
+                    <input
+                      type="checkbox"
+                      aria-label={`Seleccionar columna ${col.label}`}
+                      checked={selectedColumnIds.includes(col.id)}
+                      onChange={(event) =>
+                        setSelectedColumnIds((current) =>
+                          event.target.checked
+                            ? [...current, col.id]
+                            : current.filter((id) => id !== col.id),
+                        )
+                      }
+                    />
                     <InlineText value={col.label} onSave={(v) => rename(`${base}/columns/${col.id}`, "label", v)} />
                     <button
                       type="button"
@@ -880,6 +1060,21 @@ export default function PlanGridPage() {
                 </th>
               ))}
               <th className="min-w-[70px] border-l border-white/30 px-2 py-2">
+                <label className="mb-1 flex cursor-pointer items-center justify-center gap-1 text-[10px]">
+                  <input
+                    type="checkbox"
+                    aria-label="Seleccionar todas las columnas"
+                    checked={allColumnsSelected}
+                    onChange={(event) =>
+                      setSelectedColumnIds(
+                        event.target.checked
+                          ? plan.columns.map((column) => column.id)
+                          : [],
+                      )
+                    }
+                  />
+                  Todas
+                </label>
                 <button
                   type="button"
                   onClick={() =>
@@ -917,6 +1112,14 @@ export default function PlanGridPage() {
                     mutate(
                       () => axios.post(`${base}/sections/${section.id}/rows`, { label: "Nueva etapa" }, { headers: authHeaders() }),
                       "No se pudo agregar la fila",
+                    )
+                  }
+                  selectedRowIds={selectedRowIds}
+                  onToggleRow={(rowId, selected) =>
+                    setSelectedRowIds((current) =>
+                      selected
+                        ? [...current, rowId]
+                        : current.filter((id) => id !== rowId),
                     )
                   }
                 />
@@ -962,7 +1165,10 @@ export default function PlanGridPage() {
           editing={editing}
           users={users}
           planHasProject={Boolean(plan.projectId)}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setBulkEditing(false);
+          }}
           onSave={saveCell}
           onMerge={mergeCell}
           onCreateTask={createCellTask}
@@ -983,6 +1189,8 @@ function SectionRows({
   onRenameRow,
   onDeleteRow,
   onAddRow,
+  selectedRowIds,
+  onToggleRow,
 }: {
   section: PlanSection;
   colCount: number;
@@ -1001,6 +1209,8 @@ function SectionRows({
   onRenameRow: (rowId: string, value: string) => void;
   onDeleteRow: (row: PlanRow) => void;
   onAddRow: () => void;
+  selectedRowIds: string[];
+  onToggleRow: (rowId: string, selected: boolean) => void;
 }) {
   return (
     <>
@@ -1022,7 +1232,15 @@ function SectionRows({
         <tr key={row.id} className="group border-b border-[var(--line)]">
           <td className="sticky left-0 z-10 bg-sky-100 px-3 py-1 font-medium text-[#0b4f6c]">
             <div className="flex items-center justify-between gap-2">
-              <InlineText value={row.label} onSave={(v) => onRenameRow(row.id, v)} />
+              <div className="flex min-w-0 items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label={`Seleccionar fila ${row.label}`}
+                  checked={selectedRowIds.includes(row.id)}
+                  onChange={(event) => onToggleRow(row.id, event.target.checked)}
+                />
+                <InlineText value={row.label} onSave={(v) => onRenameRow(row.id, v)} />
+              </div>
               <button
                 type="button"
                 aria-label={`Eliminar ${row.label}`}

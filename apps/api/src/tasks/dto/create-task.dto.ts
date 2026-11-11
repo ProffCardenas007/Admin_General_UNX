@@ -1,4 +1,6 @@
 import {
+  ArrayUnique,
+  IsArray,
   IsIn,
   IsNotEmpty,
   IsNumber,
@@ -46,6 +48,12 @@ export class CreateTaskDto {
   @IsOptional()
   @IsString()
   assigneeId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  assigneeIds?: string[];
 
   @IsOptional()
   @IsString()

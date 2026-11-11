@@ -15,6 +15,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
+  BulkUpsertCellsDto,
+  CreateBulkCellTasksDto,
   CreateCellTaskDto,
   CreateSectionDto,
   CreateWorkPlanDto,
@@ -63,6 +65,22 @@ export class WorkPlansController {
     @Req() req: AuthedRequest,
   ) {
     return this.service.createCellTask(dto, req.user);
+  }
+
+  @Put('cells/bulk')
+  upsertCellsBulk(
+    @Body() dto: BulkUpsertCellsDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.service.upsertCellsBulk(dto, req.user);
+  }
+
+  @Post('cells/tasks')
+  createCellTasksBulk(
+    @Body() dto: CreateBulkCellTasksDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.service.createCellTasksBulk(dto, req.user);
   }
 
   @Patch('sections/:id')

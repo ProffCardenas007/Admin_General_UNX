@@ -1,4 +1,6 @@
 import {
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -11,7 +13,9 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -153,6 +157,108 @@ export class CreateCellTaskDto {
   @IsOptional()
   @IsUUID()
   columnId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  assigneeId?: string;
+
+  @IsIn([
+    'revision',
+    'edicion',
+    'creacion',
+    'presentaciones',
+    'grabacion',
+    'plataforma',
+    'administrativo',
+  ])
+  activityType:
+    | 'revision'
+    | 'edicion'
+    | 'creacion'
+    | 'presentaciones'
+    | 'grabacion'
+    | 'plataforma'
+    | 'administrativo';
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(220)
+  title: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  description: string;
+
+  @IsIn(['low', 'medium', 'high', 'urgent'])
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+
+  @Matches(DATE)
+  dueDate: string;
+
+  @IsNumber()
+  @Min(0)
+  estimatedHours: number;
+
+  @IsOptional()
+  @Matches(DATE)
+  startDate?: string | null;
+
+  @IsOptional()
+  @Matches(DATE)
+  endDate?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  note?: string | null;
+}
+
+export class BulkCellTargetDto {
+  @IsUUID()
+  rowId: string;
+
+  @IsOptional()
+  @IsUUID()
+  columnId?: string;
+}
+
+export class BulkUpsertCellsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => BulkCellTargetDto)
+  targets: BulkCellTargetDto[];
+
+  @IsOptional()
+  @IsIn(['unassigned', 'assigned', 'in_progress', 'done', 'blocked'])
+  status?: 'unassigned' | 'assigned' | 'in_progress' | 'done' | 'blocked';
+
+  @IsOptional()
+  @Matches(DATE)
+  startDate?: string | null;
+
+  @IsOptional()
+  @Matches(DATE)
+  endDate?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  suggestedAssignee?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  note?: string | null;
+}
+
+export class CreateBulkCellTasksDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => BulkCellTargetDto)
+  targets: BulkCellTargetDto[];
 
   @IsOptional()
   @IsUUID()

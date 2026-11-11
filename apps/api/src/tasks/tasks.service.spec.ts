@@ -740,6 +740,38 @@ describe('TasksService', () => {
       expect(recipients).toEqual(['user-1', 'user-2']);
     });
 
+    it('creates an independent task with the same estimate for each selected person', async () => {
+      usersRepository.find.mockResolvedValue([
+        { id: 'user-1' },
+        { id: 'user-2' },
+      ]);
+      tasksRepository.save.mockImplementation(async (task: any) => ({
+        id: `task-${task.assigneeId}`,
+        code: task.assigneeId === 'user-1' ? 'EDI-001' : 'EDI-002',
+        ...task,
+      }));
+
+      const result = await service.create(
+        {
+          ...baseDto,
+          assigneeId: undefined,
+          assigneeIds: ['user-1', 'user-2'],
+          estimatedHours: 4,
+        } as any,
+        { id: 'manager-1', role: 'manager' },
+      );
+
+      expect((result as any).createdCount).toBe(2);
+      expect((result as any).tasks).toEqual([
+        expect.objectContaining({ assigneeId: 'user-1', estimatedHours: '4' }),
+        expect.objectContaining({ assigneeId: 'user-2', estimatedHours: '4' }),
+      ]);
+      expect(notificationsRepository.save).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'user-1' }),
+        expect.objectContaining({ userId: 'user-2' }),
+      ]);
+    });
+
     it('does not notify anyone if creating a team task fails midway', async () => {
       teamsRepository.findOne.mockResolvedValue({ id: 'team-1' });
       teamMembersRepository.find.mockResolvedValue([

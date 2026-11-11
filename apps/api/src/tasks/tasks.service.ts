@@ -8,7 +8,13 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, QueryFailedError, Repository } from 'typeorm';
+import {
+  EntityManager,
+  In,
+  Not,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { NotificationEntity } from '../database/entities/notification.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
@@ -613,6 +619,7 @@ export class TasksService {
     },
     maxAttempts = 5,
     tasksRepository: Repository<TaskEntity> = this.tasksRepository,
+    saveDirectly = false,
   ) {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const generatedCode = await this.buildGeneratedCode(
@@ -627,9 +634,11 @@ export class TasksService {
       });
 
       try {
-        return await tasksRepository.manager.transaction((manager) =>
-          manager.getRepository(TaskEntity).save(task),
-        );
+        return saveDirectly
+          ? await tasksRepository.save(task)
+          : await tasksRepository.manager.transaction((manager) =>
+              manager.getRepository(TaskEntity).save(task),
+            );
       } catch (error) {
         if (this.isTaskCodeConflict(error) && attempt < maxAttempts - 1) {
           continue;
@@ -641,6 +650,97 @@ export class TasksService {
     throw new ConflictException(
       'No se pudo generar un codigo unico para la tarea. Intenta nuevamente.',
     );
+  }
+
+  async createWorkPlanTaskBatch(
+    inputs: Array<{
+      projectId: string;
+      activityType: CreateTaskDto['activityType'];
+      title: string;
+      description: string;
+      assigneeId?: string;
+      priority: 'low' | 'medium' | 'high' | 'urgent';
+      dueDate: string;
+      estimatedHours: number;
+    }>,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+    manager: EntityManager,
+  ) {
+    if (inputs.length === 0) {
+      return [];
+    }
+    const projectId = inputs[0].projectId;
+    if (inputs.some((input) => input.projectId !== projectId)) {
+      throw new BadRequestException(
+        'Todas las tareas masivas deben pertenecer al mismo proyecto',
+      );
+    }
+    const project = await manager.getRepository(ProjectEntity).findOne({
+      where: { id: projectId },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+    if (actor.role === 'worker') {
+      throw new ForbiddenException(
+        "Registra tu trabajo con 'Registrar actividad'; gerencia lo aprueba.",
+      );
+    }
+    if (actor.role === 'lead') {
+      const specialties = await this.resolveLeadSpecialties(actor);
+      if (!project.scope || !specialties.includes(project.scope)) {
+        throw new ForbiddenException(
+          'Leads can only create tasks within their specialties',
+        );
+      }
+    }
+
+    const assigneeIds = [
+      ...new Set(
+        inputs
+          .map((input) => input.assigneeId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (assigneeIds.length > 0) {
+      const activeUsers = await manager.getRepository(UserEntity).find({
+        where: { id: In(assigneeIds), isActive: true },
+      });
+      if (activeUsers.length !== assigneeIds.length) {
+        throw new BadRequestException(
+          'Una o más personas seleccionadas no existen o están inactivas',
+        );
+      }
+    }
+
+    const tasksRepository = manager.getRepository(TaskEntity);
+    const created: TaskEntity[] = [];
+    for (const input of inputs) {
+      created.push(
+        await this.createTaskWithGeneratedCode(
+          {
+            ...input,
+            createdBy: actor.id,
+            status: 'todo',
+            estimatedHours: String(input.estimatedHours),
+          },
+          5,
+          tasksRepository,
+          true,
+        ),
+      );
+    }
+    await this.notifyAssignees(
+      created,
+      actor.id,
+      manager.getRepository(NotificationEntity),
+    );
+    return created;
   }
 
   async createChain(
@@ -792,8 +892,19 @@ export class TasksService {
       );
     }
 
-    if (dto.teamId && dto.assigneeId) {
-      throw new BadRequestException('Use assigneeId or teamId, not both');
+    if (dto.assigneeId && dto.assigneeIds?.length) {
+      throw new BadRequestException(
+        'Use assigneeId or assigneeIds, not both',
+      );
+    }
+
+    if (
+      dto.teamId &&
+      (dto.assigneeId || (dto.assigneeIds?.length ?? 0) > 0)
+    ) {
+      throw new BadRequestException(
+        'Use assigneeId, assigneeIds or teamId, not more than one',
+      );
     }
 
     if (dto.teamId) {
@@ -863,6 +974,60 @@ export class TasksService {
 
       return {
         teamId: dto.teamId,
+        createdCount: createdTasks.length,
+        tasks: createdTasks,
+      };
+    }
+
+    if (dto.assigneeIds && dto.assigneeIds.length > 0) {
+      const activeAssignees = await this.usersRepository.find({
+        where: {
+          id: In(dto.assigneeIds),
+          isActive: true,
+        },
+      });
+      if (activeAssignees.length !== dto.assigneeIds.length) {
+        throw new BadRequestException(
+          'Una o más personas seleccionadas no existen o están inactivas',
+        );
+      }
+
+      const createdTasks = await this.tasksRepository.manager.transaction(
+        async (manager) => {
+          const transactionalTasks = manager.getRepository(TaskEntity);
+          const created: TaskEntity[] = [];
+          for (const assigneeId of dto.assigneeIds ?? []) {
+            created.push(
+              await this.createTaskWithGeneratedCode(
+                {
+                  projectId: dto.projectId,
+                  activityType: dto.activityType,
+                  title: dto.title,
+                  description: dto.description,
+                  assigneeId,
+                  createdBy: actor.id,
+                  status: dto.status ?? 'todo',
+                  priority: dto.priority ?? 'medium',
+                  dueDate: dto.dueDate,
+                  estimatedHours: String(dto.estimatedHours ?? 0),
+                },
+                5,
+                transactionalTasks,
+              ),
+            );
+          }
+
+          await this.notifyAssignees(
+            created,
+            actor.id,
+            manager.getRepository(NotificationEntity),
+          );
+          return created;
+        },
+      );
+
+      return {
+        assigneeIds: dto.assigneeIds,
         createdCount: createdTasks.length,
         tasks: createdTasks,
       };

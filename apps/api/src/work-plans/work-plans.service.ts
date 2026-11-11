@@ -16,6 +16,9 @@ import {
   type WorkPlanCellStatus,
 } from '../database/entities/work-plan-cell.entity';
 import {
+  type BulkCellTargetDto,
+  BulkUpsertCellsDto,
+  CreateBulkCellTasksDto,
   CreateCellTaskDto,
   CreateSectionDto,
   CreateWorkPlanDto,
@@ -441,6 +444,11 @@ export class WorkPlansService {
       cell.suggestedAssignee = dto.suggestedAssignee?.trim() || null;
     }
     if (dto.note !== undefined) cell.note = dto.note?.trim() || null;
+    if (cell.status === 'assigned' && !cell.suggestedAssignee) {
+      throw new BadRequestException(
+        'Selecciona la persona prevista para una celda asignada',
+      );
+    }
     if (cell.startDate && cell.endDate && cell.endDate < cell.startDate) {
       throw new BadRequestException('La fecha fin es anterior al inicio');
     }
@@ -618,5 +626,215 @@ export class WorkPlansService {
       }
       throw error;
     }
+  }
+
+  private async resolveBulkCellTargets(
+    targets: BulkCellTargetDto[],
+    actor: Actor,
+  ) {
+    const rowIds = [...new Set(targets.map((target) => target.rowId))];
+    const rows = await this.rows.find({ where: { id: In(rowIds) } });
+    if (rows.length !== rowIds.length) {
+      throw new BadRequestException('Una o más filas no existen');
+    }
+    const sections = await this.sections.find({
+      where: { id: In([...new Set(rows.map((row) => row.sectionId))]) },
+    });
+    const planIds = [...new Set(sections.map((section) => section.planId))];
+    if (planIds.length !== 1) {
+      throw new BadRequestException(
+        'Todas las celdas deben pertenecer al mismo plan',
+      );
+    }
+    const plan = await this.assertPlan(planIds[0], actor);
+    const columns = await this.columns.find({
+      where: { planId: plan.id },
+      order: { position: 'ASC' },
+    });
+    const columnIndexes = new Map(
+      columns.map((column, index) => [column.id, index]),
+    );
+    const cells = await this.cells.find({ where: { rowId: In(rowIds) } });
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+    const sectionById = new Map(
+      sections.map((section) => [section.id, section]),
+    );
+    const resolved = new Map<
+      string,
+      {
+        rowId: string;
+        columnId: string | null;
+        cell?: WorkPlanCellEntity;
+      }
+    >();
+
+    for (const target of targets) {
+      const row = rowById.get(target.rowId);
+      const section = row ? sectionById.get(row.sectionId) : undefined;
+      if (!row || !section) {
+        throw new BadRequestException('La fila no pertenece al plan');
+      }
+
+      let columnId: string | null = null;
+      let cell: WorkPlanCellEntity | undefined;
+      if (section.spansAll) {
+        cell = cells.find(
+          (item) => item.rowId === row.id && !item.columnId,
+        );
+      } else {
+        if (!target.columnId || !columnIndexes.has(target.columnId)) {
+          throw new BadRequestException(
+            'Una o más columnas no pertenecen al plan',
+          );
+        }
+        const selectedIndex = columnIndexes.get(target.columnId) as number;
+        cell = cells.find(
+          (item) =>
+            item.rowId === row.id && item.columnId === target.columnId,
+        );
+        if (!cell) {
+          cell = cells.find((item) => {
+            if (item.rowId !== row.id || !item.columnId) return false;
+            const anchorIndex = columnIndexes.get(item.columnId);
+            return (
+              anchorIndex !== undefined &&
+              anchorIndex < selectedIndex &&
+              anchorIndex + item.columnSpan > selectedIndex
+            );
+          });
+        }
+        columnId = cell?.columnId ?? target.columnId;
+      }
+
+      resolved.set(`${row.id}:${columnId ?? ''}`, {
+        rowId: row.id,
+        columnId,
+        cell,
+      });
+    }
+
+    return { plan, targets: [...resolved.values()] };
+  }
+
+  async upsertCellsBulk(dto: BulkUpsertCellsDto, actor: Actor) {
+    const { plan, targets } = await this.resolveBulkCellTargets(
+      dto.targets,
+      actor,
+    );
+    if (dto.startDate && dto.endDate && dto.endDate < dto.startDate) {
+      throw new BadRequestException('La fecha fin es anterior al inicio');
+    }
+    const blocked = targets.find(
+      (target) =>
+        target.cell?.taskId &&
+        dto.status !== undefined &&
+        dto.status !== target.cell.status,
+    );
+    if (blocked) {
+      throw new BadRequestException(
+        'La selección contiene una celda con tarea; su estado lo controla la tarea',
+      );
+    }
+
+    return this.cells.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(WorkPlanCellEntity);
+      const saved: WorkPlanCellEntity[] = [];
+      for (const target of targets) {
+        const cell =
+          target.cell ??
+          repository.create({
+            rowId: target.rowId,
+            columnId: target.columnId,
+          });
+        if (dto.status !== undefined) cell.status = dto.status;
+        if (dto.startDate !== undefined) cell.startDate = dto.startDate;
+        if (dto.endDate !== undefined) cell.endDate = dto.endDate;
+        if (dto.suggestedAssignee !== undefined) {
+          cell.suggestedAssignee =
+            dto.suggestedAssignee?.trim() || null;
+        }
+        if (dto.note !== undefined) cell.note = dto.note?.trim() || null;
+        if (cell.status === 'assigned' && !cell.suggestedAssignee) {
+          throw new BadRequestException(
+            'Selecciona la persona prevista para una celda asignada',
+          );
+        }
+        saved.push(await repository.save(cell));
+      }
+      await manager
+        .getRepository(WorkPlanEntity)
+        .update({ id: plan.id }, { updatedAt: new Date() });
+      return { updatedCount: saved.length, cells: saved };
+    });
+  }
+
+  async createCellTasksBulk(dto: CreateBulkCellTasksDto, actor: Actor) {
+    const { plan, targets } = await this.resolveBulkCellTargets(
+      dto.targets,
+      actor,
+    );
+    if (!plan.projectId) {
+      throw new BadRequestException(
+        'Vincula este plan con un proyecto antes de crear tareas',
+      );
+    }
+    if (dto.startDate && dto.endDate && dto.endDate < dto.startDate) {
+      throw new BadRequestException('La fecha fin es anterior al inicio');
+    }
+    if (targets.some((target) => target.cell?.taskId)) {
+      throw new BadRequestException(
+        'La selección contiene una o más celdas que ya tienen tarea',
+      );
+    }
+
+    const assignee = dto.assigneeId
+      ? await this.users.findOne({
+          where: { id: dto.assigneeId, isActive: true },
+        })
+      : null;
+    if (dto.assigneeId && !assignee) {
+      throw new BadRequestException(
+        'El responsable no existe o está inactivo',
+      );
+    }
+
+    return this.cells.manager.transaction(async (manager) => {
+      const tasks = await this.tasksService.createWorkPlanTaskBatch(
+        targets.map(() => ({
+          projectId: plan.projectId as string,
+          activityType: dto.activityType,
+          title: dto.title.trim(),
+          description: dto.description.trim(),
+          assigneeId: dto.assigneeId,
+          priority: dto.priority,
+          dueDate: dto.dueDate,
+          estimatedHours: dto.estimatedHours,
+        })),
+        actor,
+        manager,
+      );
+      const repository = manager.getRepository(WorkPlanCellEntity);
+      const cells: WorkPlanCellEntity[] = [];
+      for (let index = 0; index < targets.length; index += 1) {
+        const target = targets[index];
+        const cell =
+          target.cell ??
+          repository.create({
+            rowId: target.rowId,
+            columnId: target.columnId,
+          });
+        cell.taskId = tasks[index].id;
+        cell.status = dto.assigneeId ? 'assigned' : 'unassigned';
+        cell.startDate = dto.startDate ?? null;
+        cell.endDate = dto.endDate ?? null;
+        cell.suggestedAssignee = assignee?.fullName ?? null;
+        cell.note = dto.note?.trim() || null;
+        cells.push(await repository.save(cell));
+      }
+      await manager
+        .getRepository(WorkPlanEntity)
+        .update({ id: plan.id }, { updatedAt: new Date() });
+      return { createdCount: tasks.length, tasks, cells };
+    });
   }
 }
