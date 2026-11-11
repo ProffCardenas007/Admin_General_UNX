@@ -17,6 +17,7 @@ describe('TasksService', () => {
   let auditLogsRepository: any;
   let teamsRepository: any;
   let teamMembersRepository: any;
+  let specialtiesRepository: any;
   let timeExtensionsService: any;
   let loggedRowsQb: any;
 
@@ -54,6 +55,9 @@ describe('TasksService', () => {
       findOne: jest
         .fn()
         .mockResolvedValue({ id: 'project-1', scope: 'creacion' }),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((input) => input),
+      save: jest.fn(async (input) => ({ id: 'project-1', ...input })),
     };
     notificationsRepository = {
       create: jest.fn((input) => input),
@@ -82,6 +86,11 @@ describe('TasksService', () => {
     };
     teamsRepository = { findOne: jest.fn() };
     teamMembersRepository = { find: jest.fn() };
+    specialtiesRepository = {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ code: 'paa', name: 'PAA Matemáticas', isActive: true }),
+    };
     timeExtensionsService = {
       flagOverrunIfNeeded: jest.fn().mockResolvedValue(null),
     };
@@ -95,8 +104,61 @@ describe('TasksService', () => {
       auditLogsRepository,
       teamsRepository,
       teamMembersRepository,
+      specialtiesRepository,
       timeExtensionsService,
     );
+  });
+
+  it('creates and starts one administrative task for the current fortnight', async () => {
+    projectsRepository.findOne.mockResolvedValue({
+      id: 'admin-project',
+      name: 'Administración - PAA Matemáticas',
+      scope: 'paa',
+      status: 'active',
+    });
+    tasksRepository.findOne.mockResolvedValue(null);
+    tasksRepository.create.mockImplementation((input: any) => input);
+    tasksRepository.save.mockImplementation(async (input: any) => ({
+      id: 'admin-task',
+      ...input,
+    }));
+    const update = jest
+      .spyOn(service, 'update')
+      .mockResolvedValue({ id: 'admin-task', status: 'doing' } as any);
+
+    const result = await service.startAdministrativeTimer('paa', {
+      id: '11111111-2222-3333-4444-555555555555',
+      role: 'lead',
+      specialties: ['paa'],
+    });
+
+    expect(tasksRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'admin-project',
+        activityType: 'administrativo',
+        assigneeId: '11111111-2222-3333-4444-555555555555',
+        status: 'paused',
+      }),
+    );
+    expect(update).toHaveBeenCalledWith(
+      'admin-task',
+      { status: 'doing' },
+      expect.objectContaining({ id: '11111111-2222-3333-4444-555555555555' }),
+    );
+    expect(result).toEqual({ id: 'admin-task', status: 'doing' });
+  });
+
+  it('rejects administrative time for an academy not assigned to the lead', async () => {
+    await expect(
+      service.startAdministrativeTimer('exani_ii', {
+        id: 'lead-1',
+        role: 'lead',
+        specialties: ['paa'],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(projectsRepository.save).not.toHaveBeenCalled();
+    expect(tasksRepository.save).not.toHaveBeenCalled();
   });
 
   it('shows workers their own tasks and unassigned tasks', async () => {

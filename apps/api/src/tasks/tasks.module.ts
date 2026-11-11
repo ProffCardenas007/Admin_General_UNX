@@ -11,6 +11,7 @@ import { AuditLogEntity } from '../database/entities/audit-log.entity';
 import { TeamEntity } from '../database/entities/team.entity';
 import { TeamMemberEntity } from '../database/entities/team-member.entity';
 import { TimeExtensionsModule } from '../time-extensions/time-extensions.module';
+import { SpecialtyEntity } from '../database/entities/specialty.entity';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { TimeExtensionsModule } from '../time-extensions/time-extensions.module'
       AuditLogEntity,
       TeamEntity,
       TeamMemberEntity,
+      SpecialtyEntity,
     ]),
     TimeExtensionsModule,
   ],

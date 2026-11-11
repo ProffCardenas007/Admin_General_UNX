@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, QueryFailedError, Repository } from 'typeorm';
+import { In, Not, QueryFailedError, Repository } from 'typeorm';
 import { TaskEntity } from '../database/entities/task.entity';
 import { NotificationEntity } from '../database/entities/notification.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
@@ -25,6 +25,7 @@ import { ReviewTaskDto, SelfReportTaskDto } from './dto/self-report-task.dto';
 import { ProjectScope, normalizeLeadSpecialties } from '../common/specialties';
 import { todayKey } from '../common/dates';
 import { TimeExtensionsService } from '../time-extensions/time-extensions.service';
+import { SpecialtyEntity } from '../database/entities/specialty.entity';
 
 @Injectable()
 export class TasksService {
@@ -47,8 +48,244 @@ export class TasksService {
     private readonly teamsRepository: Repository<TeamEntity>,
     @InjectRepository(TeamMemberEntity)
     private readonly teamMembersRepository: Repository<TeamMemberEntity>,
+    @InjectRepository(SpecialtyEntity)
+    private readonly specialtiesRepository: Repository<SpecialtyEntity>,
     private readonly timeExtensionsService: TimeExtensionsService,
   ) {}
+
+  private administrativeFortnight(actorId: string, date = todayKey()) {
+    const [year, month, dayText] = date.split('-');
+    const day = Number(dayText);
+    const secondHalf = day > 15;
+    const endDay = secondHalf
+      ? new Date(Number(year), Number(month), 0).getDate()
+      : 15;
+    const half = secondHalf ? 'Q2' : 'Q1';
+
+    return {
+      code: `ADM-${year}${month}-${half}-${actorId.replaceAll('-', '')}`,
+      title: `Administración · ${secondHalf ? '2.a' : '1.a'} quincena de ${month}/${year}`,
+      dueDate: `${year}-${month}-${String(endDay).padStart(2, '0')}`,
+    };
+  }
+
+  private async assertAdministrativeSpecialty(
+    scope: ProjectScope,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    if (actor.role !== 'lead') {
+      throw new ForbiddenException(
+        'El cronómetro administrativo es exclusivo para líderes',
+      );
+    }
+
+    const leadSpecialties = await this.resolveLeadSpecialties(actor);
+    if (!leadSpecialties.includes(scope)) {
+      throw new ForbiddenException(
+        'Solo puedes registrar tiempo en tus academias asignadas',
+      );
+    }
+
+    const specialty = await this.specialtiesRepository.findOne({
+      where: { code: scope, isActive: true },
+    });
+    if (!specialty) {
+      throw new BadRequestException('La especialidad no existe o está inactiva');
+    }
+    return specialty;
+  }
+
+  private async findOrCreateAdministrativeProject(
+    scope: ProjectScope,
+    specialtyName: string,
+    actorId: string,
+  ) {
+    const name = `Administración - ${specialtyName}`;
+    const existing = await this.projectsRepository.findOne({
+      where: { name, scope, status: Not('done') },
+    });
+    if (existing) {
+      if (existing.status !== 'active') {
+        existing.status = 'active';
+        return this.projectsRepository.save(existing);
+      }
+      return existing;
+    }
+
+    try {
+      return await this.projectsRepository.save(
+        this.projectsRepository.create({
+          code: `ADM-${scope}`.slice(0, 40),
+          name,
+          scope,
+          status: 'active',
+          createdBy: actorId,
+        }),
+      );
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error as QueryFailedError & { code?: string }).code === '23505'
+      ) {
+        const concurrentProject = await this.projectsRepository.findOne({
+          where: { name, scope, status: Not('done') },
+        });
+        if (concurrentProject) {
+          return concurrentProject;
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async findAdministrativeTask(
+    scope: ProjectScope,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const specialty = await this.assertAdministrativeSpecialty(scope, actor);
+    const project = await this.findOrCreateAdministrativeProject(
+      scope,
+      specialty.name,
+      actor.id,
+    );
+    const period = this.administrativeFortnight(actor.id);
+    const task = await this.tasksRepository.findOne({
+      where: { projectId: project.id, code: period.code },
+    });
+    return { project, period, task };
+  }
+
+  async listAdministrativeTimers(actor: {
+    id: string;
+    role: 'manager' | 'lead' | 'worker';
+    specialty?: ProjectScope | null;
+    specialties?: ProjectScope[] | null;
+  }) {
+    if (actor.role !== 'lead') {
+      throw new ForbiddenException(
+        'El cronómetro administrativo es exclusivo para líderes',
+      );
+    }
+    const scopes = await this.resolveLeadSpecialties(actor);
+    const period = this.administrativeFortnight(actor.id);
+    const projects = await this.projectsRepository.find({
+      where: scopes.map((scope) => ({
+        scope,
+        status: 'active' as const,
+      })),
+    });
+    const projectByScope = new Map(
+      projects
+        .filter((project) => project.name.startsWith('Administración - '))
+        .map((project) => [project.scope, project]),
+    );
+    const tasks = projects.length
+      ? await this.tasksRepository.find({
+          where: projects.map((project) => ({
+            projectId: project.id,
+            assigneeId: actor.id,
+            code: period.code,
+          })),
+        })
+      : [];
+    const taskByProject = new Map(tasks.map((task) => [task.projectId, task]));
+
+    return scopes.map((scope) => {
+      const project = projectByScope.get(scope);
+      return {
+        scope,
+        projectId: project?.id ?? null,
+        task: project ? (taskByProject.get(project.id) ?? null) : null,
+        dueDate: period.dueDate,
+      };
+    });
+  }
+
+  async startAdministrativeTimer(
+    scope: ProjectScope,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const { project, period, task: existingTask } =
+      await this.findAdministrativeTask(scope, actor);
+    let task = existingTask;
+
+    if (!task) {
+      try {
+        task = await this.tasksRepository.save(
+          this.tasksRepository.create({
+            projectId: project.id,
+            code: period.code,
+            activityType: 'administrativo',
+            title: period.title,
+            description: `Tiempo de organización y planeación administrativa de ${project.name}.`,
+            assigneeId: actor.id,
+            createdBy: actor.id,
+            status: 'paused',
+            priority: 'medium',
+            dueDate: period.dueDate,
+            estimatedHours: '0',
+            activeSeconds: 0,
+          }),
+        );
+      } catch (error) {
+        if (!this.isTaskCodeConflict(error)) {
+          throw error;
+        }
+        task = await this.tasksRepository.findOne({
+          where: { projectId: project.id, code: period.code },
+        });
+        if (!task) {
+          throw error;
+        }
+      }
+    }
+
+    if (task.status === 'doing' && task.timerStartedAt) {
+      return task;
+    }
+    return this.update(task.id, { status: 'doing' }, actor);
+  }
+
+  async pauseAdministrativeTimer(
+    scope: ProjectScope,
+    actor: {
+      id: string;
+      role: 'manager' | 'lead' | 'worker';
+      specialty?: ProjectScope | null;
+      specialties?: ProjectScope[] | null;
+    },
+  ) {
+    const { task } = await this.findAdministrativeTask(scope, actor);
+    if (!task) {
+      throw new NotFoundException(
+        'No hay una tarea administrativa para esta quincena',
+      );
+    }
+    if (task.assigneeId !== actor.id) {
+      throw new ForbiddenException(
+        'La tarea administrativa pertenece a otro líder',
+      );
+    }
+    if (task.status !== 'doing') {
+      return task;
+    }
+    return this.update(task.id, { status: 'paused' }, actor);
+  }
 
   private async recordManagerAudit(input: {
     actorId: string;

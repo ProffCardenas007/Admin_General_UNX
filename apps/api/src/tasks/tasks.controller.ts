@@ -19,7 +19,7 @@ import { ReviewTaskDto, SelfReportTaskDto } from './dto/self-report-task.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { ProjectScope } from '../common/specialties';
+import type { ProjectScope } from '../common/specialties';
 
 @Controller('tasks')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -74,6 +74,56 @@ export class TasksController {
     @Req() req: { user: { id: string; role: 'manager' | 'lead' | 'worker' } },
   ) {
     return this.tasksService.selfReport(dto, req.user);
+  }
+
+  @Get('administrative-timers')
+  @Roles('lead')
+  listAdministrativeTimers(
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
+  ) {
+    return this.tasksService.listAdministrativeTimers(req.user);
+  }
+
+  @Post('administrative-timers/:scope/start')
+  @Roles('lead')
+  startAdministrativeTimer(
+    @Param('scope') scope: ProjectScope,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
+  ) {
+    return this.tasksService.startAdministrativeTimer(scope, req.user);
+  }
+
+  @Post('administrative-timers/:scope/pause')
+  @Roles('lead')
+  pauseAdministrativeTimer(
+    @Param('scope') scope: ProjectScope,
+    @Req()
+    req: {
+      user: {
+        id: string;
+        role: 'manager' | 'lead' | 'worker';
+        specialty?: ProjectScope | null;
+        specialties?: ProjectScope[] | null;
+      };
+    },
+  ) {
+    return this.tasksService.pauseAdministrativeTimer(scope, req.user);
   }
 
   @Patch(':taskId/review')

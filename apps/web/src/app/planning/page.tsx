@@ -13,11 +13,28 @@ import {
 } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import type { PlanSummary } from "./types";
+import { formatClock, totalTimerSeconds } from "../tasks/timer";
 
 type SpecialtyOption = {
   code: string;
   name: string;
   isActive: boolean;
+};
+
+type AdministrativeTask = {
+  id: string;
+  title: string;
+  status: "todo" | "doing" | "paused" | "blocked" | "done";
+  activeSeconds?: number;
+  timerStartedAt?: string | null;
+  dueDate?: string | null;
+};
+
+type AdministrativeTimerSlot = {
+  scope: string;
+  projectId: string | null;
+  task: AdministrativeTask | null;
+  dueDate: string;
 };
 
 const statusOptions = [
@@ -45,6 +62,9 @@ export default function PlanningPage() {
   const [template, setTemplate] = useState<"blank" | "manual">("manual");
   const [topics, setTopics] = useState(12);
   const [creating, setCreating] = useState(false);
+  const [administrativeTimers, setAdministrativeTimers] = useState<AdministrativeTimerSlot[]>([]);
+  const [administrativeTimerLoading, setAdministrativeTimerLoading] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +83,18 @@ export default function PlanningPage() {
     }
   }, []);
 
+  const loadAdministrativeTimers = useCallback(async () => {
+    try {
+      const { data } = await axios.get<AdministrativeTimerSlot[]>(
+        `${API_URL}/tasks/administrative-timers`,
+        { headers: authHeaders() },
+      );
+      setAdministrativeTimers(data);
+    } catch (caught) {
+      setError(extractErrorMessage(caught, "No se pudo cargar el tiempo administrativo"));
+    }
+  }, []);
+
   useEffect(() => {
     if (!getStoredToken()) {
       router.replace("/");
@@ -78,9 +110,40 @@ export default function PlanningPage() {
     setSpecialties(storedSpecialties);
     if (storedRole === "lead" && storedSpecialties.length > 0) {
       setScope(storedSpecialties[0]);
+      void loadAdministrativeTimers();
     }
     void load();
-  }, [load, router]);
+  }, [load, loadAdministrativeTimers, router]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const toggleAdministrativeTimer = async (slot: AdministrativeTimerSlot) => {
+    const running = slot.task?.status === "doing" && Boolean(slot.task.timerStartedAt);
+    setAdministrativeTimerLoading(slot.scope);
+    setError("");
+    try {
+      await axios.post(
+        `${API_URL}/tasks/administrative-timers/${encodeURIComponent(slot.scope)}/${running ? "pause" : "start"}`,
+        undefined,
+        { headers: authHeaders() },
+      );
+      await loadAdministrativeTimers();
+    } catch (caught) {
+      setError(
+        extractErrorMessage(
+          caught,
+          running
+            ? "No se pudo pausar el tiempo administrativo"
+            : "No se pudo iniciar el tiempo administrativo",
+        ),
+      );
+    } finally {
+      setAdministrativeTimerLoading("");
+    }
+  };
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -258,6 +321,60 @@ export default function PlanningPage() {
           Planea todo lo que hay que producir antes de asignarlo. Crea un proyecto, ábrelo y arma su cuadrícula de etapas y
           temas; solo se crean tareas cuando tú asignas.
         </p>
+
+        {role === "lead" && administrativeTimers.length > 0 ? (
+          <div className="mt-6 rounded-2xl border border-[var(--line)] bg-white/70 p-4">
+            <div>
+              <h2 className="font-semibold">Tiempo administrativo de la quincena</h2>
+              <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                Inicia el cronómetro cuando organices o planees. El proyecto y la tarea administrativa se crean automáticamente.
+              </p>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {administrativeTimers.map((slot) => {
+                const specialtyName =
+                  specialtyOptions.find((item) => item.code === slot.scope)?.name ?? slot.scope;
+                const running = slot.task?.status === "doing" && Boolean(slot.task.timerStartedAt);
+                const elapsed = slot.task ? totalTimerSeconds(slot.task, nowMs) : 0;
+                return (
+                  <article key={slot.scope} className="rounded-xl border border-[var(--line)] bg-white p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">{specialtyName}</p>
+                        <p className="mt-1 font-mono text-2xl font-semibold tabular-nums">
+                          {formatClock(elapsed)}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                          Tarea de la quincena · vence {slot.dueDate}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={administrativeTimerLoading === slot.scope}
+                        onClick={() => void toggleAdministrativeTimer(slot)}
+                        className={`ui-btn ${running ? "ui-btn-secondary" : "ui-btn-primary"}`}
+                      >
+                        {administrativeTimerLoading === slot.scope
+                          ? "Guardando…"
+                          : running
+                            ? "Pausar"
+                            : elapsed > 0
+                              ? "Continuar"
+                              : "Iniciar"}
+                      </button>
+                    </div>
+                    {running ? (
+                      <p className="mt-3 flex items-center gap-2 text-xs font-semibold text-emerald-700">
+                        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
+                        Cronómetro activo
+                      </p>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <form onSubmit={create} className="mt-6 flex flex-wrap items-end gap-3">
           {projectFields}
