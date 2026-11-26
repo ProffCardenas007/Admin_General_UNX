@@ -49,6 +49,16 @@ import { SemesterActivityWeightEntity } from './database/entities/semester-activ
 import { SurveyResponseEntity } from './database/entities/survey-response.entity';
 import { EvaluationCardNoteEntity } from './database/entities/evaluation-card-note.entity';
 import { EvaluationCardsModule } from './evaluation-cards/evaluation-cards.module';
+import { MaterialGroupEntity } from './database/entities/material-group.entity';
+import { MaterialItemEntity } from './database/entities/material-item.entity';
+import { MaterialAssignmentEntity } from './database/entities/material-assignment.entity';
+import { MaterialKitItemEntity } from './database/entities/material-kit-item.entity';
+import { MaterialScheduleEntryEntity } from './database/entities/material-schedule-entry.entity';
+import { MaterialNoteEntity } from './database/entities/material-note.entity';
+import { MaterialCourseStartEntity } from './database/entities/material-course-start.entity';
+import { MaterialSupplyEntity } from './database/entities/material-supply.entity';
+import { MaterialSupplyMovementEntity } from './database/entities/material-supply-movement.entity';
+import { MaterialPlanningModule }from './material-planning/material-planning.module';
 
 @Module({
   imports: [
@@ -110,6 +120,15 @@ import { EvaluationCardsModule } from './evaluation-cards/evaluation-cards.modul
             SemesterActivityWeightEntity,
             SurveyResponseEntity,
             EvaluationCardNoteEntity,
+            MaterialGroupEntity,
+            MaterialItemEntity,
+            MaterialAssignmentEntity,
+            MaterialKitItemEntity,
+            MaterialScheduleEntryEntity,
+            MaterialNoteEntity,
+            MaterialCourseStartEntity,
+            MaterialSupplyEntity,
+            MaterialSupplyMovementEntity,
           ],
           synchronize: false,
         };
@@ -133,6 +152,7 @@ import { EvaluationCardsModule } from './evaluation-cards/evaluation-cards.modul
     WorkPlansModule,
     MessagingModule,
     EvaluationCardsModule,
+    MaterialPlanningModule,
   ],
   controllers: [AppController],
   providers: [AppService],

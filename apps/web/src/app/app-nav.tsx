@@ -98,6 +98,13 @@ const IconGrid = () => (
   </svg>
 );
 
+const IconMaterial = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+    <path d="M8 1.5l6 3v7l-6 3-6-3v-7l6-3z" strokeLinejoin="round" />
+    <path d="M2 4.5l6 3 6-3M8 7.5v7" strokeLinejoin="round" />
+  </svg>
+);
+
 const IconLogout = () => (
   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
     <path d="M10.5 5l3 3-3 3M13.5 8H5.5M7.5 2.5H3.5A1.5 1.5 0 002 4v8a1.5 1.5 0 001.5 1.5h4" strokeLinecap="round" strokeLinejoin="round" />
@@ -147,6 +154,7 @@ const MAIN_NAV: NavItem[] = [
 
 const MANAGER_NAV: NavItem[] = [
   { label: "Usuarios",  href: "/users",   icon: <IconUsers /> },
+  { label: "Planeación de material", href: "/material-planning", icon: <IconMaterial /> },
   { label: "Reporte por Usuario", href: "/user-reports", icon: <IconQuincena /> },
   { label: "Programación de clases", href: "/class-availability", icon: <IconClassAvailability /> },
   { label: "Cursos y sesiones", href: "/class-planning", icon: <IconClassSchedule /> },

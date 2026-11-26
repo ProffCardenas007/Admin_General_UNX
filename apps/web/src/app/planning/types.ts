@@ -32,6 +32,9 @@ export type PlanCell = {
   taskStatus?: LinkedTaskStatus;
   taskDueDate?: string | null;
   taskCompletionOutcome?: "completed" | "not_completed" | null;
+  taskAssigneeId?: string | null;
+  taskEstimatedHours?: string;
+  taskPriority?: "low" | "medium" | "high" | "urgent";
   columnSpan: number;
 };
 

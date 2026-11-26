@@ -50,6 +50,12 @@ export class TasksController {
     );
   }
 
+  @Get('fortnight-load')
+  @Roles('manager', 'lead')
+  fortnightLoad(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.tasksService.findFortnightLoad(from, to);
+  }
+
   @Post()
   @Roles('manager', 'lead')
   create(

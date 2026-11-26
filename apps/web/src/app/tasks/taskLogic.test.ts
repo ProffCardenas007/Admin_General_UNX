@@ -11,6 +11,7 @@ import {
   getQuincenaRange,
   getUrgencyScore,
   groupConsequentTasks,
+  groupTasksByProject,
   listAvailableAcademies,
   peopleForProject,
   countPeopleWithTasks,
@@ -341,5 +342,40 @@ describe("timer", () => {
 
   it("formats a short duration for the list", () => {
     assert.equal(formatActiveDuration({ activeSeconds: 4500 }, NOW), "1h 15m");
+  });
+});
+
+describe("task grouping", () => {
+  const projects = [
+    { id: "a", code: "Matemáticas", name: "Álgebra", scope: "paa" },
+    { id: "b", code: "matemáticas ", name: "Geometría", scope: "paa" },
+    { id: "c", code: "Inglés", name: "Videos", scope: "unam" },
+  ] as ProjectRow[];
+  const row = (id: string, projectId: string, extra: Partial<TaskRow> = {}) =>
+    ({ id, projectId, status: "todo", ...extra }) as TaskRow;
+
+  const tree = groupTasksByProject(
+    [
+      row("1", "c"),
+      row("2", "b", { dueDate: "2026-11-01" }),
+      row("3", "a", { dueDate: "2026-11-01", status: "done" }),
+      row("4", "x"),
+    ],
+    projects,
+    (scope) => scope.toUpperCase(),
+    "2026-11-25",
+  );
+
+  it("nests specialty, academy and project, merging academy spellings", () => {
+    assert.deepEqual(tree.map((group) => group.label), ["PAA", "Sin especialidad", "UNAM"]);
+    assert.equal(tree[0].groups.length, 1);
+    assert.deepEqual(tree[0].groups[0].groups.map((group) => group.label), ["Álgebra", "Geometría"]);
+    assert.deepEqual(tree[2].groups[0].groups[0].tasks.map((task) => task.id), ["1"]);
+  });
+
+  it("counts tasks and open overdue ones at every level", () => {
+    assert.equal(tree[0].total, 2);
+    assert.equal(tree[0].overdue, 1);
+    assert.equal(tree[0].groups[0].overdue, 1);
   });
 });

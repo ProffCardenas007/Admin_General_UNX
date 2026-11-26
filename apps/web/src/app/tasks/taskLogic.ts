@@ -124,6 +124,12 @@ export type TaskFilters = {
 
 /** Visible tasks: managers/leads filter by planning fields, workers just search. Open ones first. */
 export const filterTasks = (tasks: TaskRow[], projects: ProjectRow[], filters: TaskFilters) => {
+  const query = filters.search.trim().toLowerCase();
+  const matchesSearch = (task: TaskRow) =>
+    query.length === 0 ||
+    task.code.toLowerCase().includes(query) ||
+    task.title.toLowerCase().includes(query);
+
   const result = tasks.filter((task) => {
     const byDoneStatus = filters.showDoneTasks || task.status !== "done";
 
@@ -149,15 +155,18 @@ export const filterTasks = (tasks: TaskRow[], projects: ProjectRow[], filters: T
           task.dueDate >= filters.activityRange.startKey &&
           task.dueDate <= filters.activityRange.endKey);
 
-      return bySpecialty && byAcademy && byProject && byAssignee && byActivityQuincena && byDoneStatus;
+      return (
+        matchesSearch(task) &&
+        bySpecialty &&
+        byAcademy &&
+        byProject &&
+        byAssignee &&
+        byActivityQuincena &&
+        byDoneStatus
+      );
     }
 
-    const bySearch =
-      filters.search.trim().length === 0 ||
-      task.code.toLowerCase().includes(filters.search.toLowerCase()) ||
-      task.title.toLowerCase().includes(filters.search.toLowerCase());
-
-    return !!task.assigneeId && bySearch && byDoneStatus;
+    return !!task.assigneeId && matchesSearch(task) && byDoneStatus;
   });
 
   return result.sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
@@ -293,6 +302,69 @@ export const groupConsequentTasks = (tasks: TaskRow[]) =>
     });
     return accumulator;
   }, {});
+
+// -------------------------------------------------------------------- grouping
+export type TaskGroup = {
+  /** Unique within the tree; used to remember what is open. */
+  key: string;
+  label: string;
+  total: number;
+  overdue: number;
+  groups: TaskGroup[];
+  tasks: TaskRow[];
+};
+
+/** Specialty → academy → project. Tasks keep the order they arrive in. */
+export const groupTasksByProject = (
+  tasks: TaskRow[],
+  projects: ProjectRow[],
+  specialtyLabel: (scope: string) => string,
+  todayKey: string,
+): TaskGroup[] => {
+  const projectsById = new Map(projects.map((project) => [project.id, project]));
+  const roots: TaskGroup[] = [];
+
+  const child = (siblings: TaskGroup[], key: string, label: string) => {
+    let group = siblings.find((item) => item.key === key);
+    if (!group) {
+      group = { key, label, total: 0, overdue: 0, groups: [], tasks: [] };
+      siblings.push(group);
+    }
+    return group;
+  };
+
+  tasks.forEach((task) => {
+    const project = projectsById.get(task.projectId);
+    const scope = project?.scope ?? "";
+    const academy = project?.code.trim() ?? "";
+
+    const specialtyGroup = child(roots, scope, scope ? specialtyLabel(scope) : "Sin especialidad");
+    const academyGroup = child(
+      specialtyGroup.groups,
+      `${scope}|${normalizeAcademy(academy)}`,
+      academy || "Sin academia",
+    );
+    const projectGroup = child(
+      academyGroup.groups,
+      `${academyGroup.key}|${task.projectId}`,
+      project?.name ?? "Proyecto no encontrado",
+    );
+
+    const overdue = task.status !== "done" && !!task.dueDate && task.dueDate.slice(0, 10) < todayKey;
+    [specialtyGroup, academyGroup, projectGroup].forEach((group) => {
+      group.total += 1;
+      group.overdue += overdue ? 1 : 0;
+    });
+    projectGroup.tasks.push(task);
+  });
+
+  const sortTree = (groups: TaskGroup[]) => {
+    groups.sort((a, b) => a.label.localeCompare(b.label, "es"));
+    groups.forEach((group) => sortTree(group.groups));
+  };
+  sortTree(roots);
+  return roots;
+};
 
 // ---------------------------------------------------------------- worker panel
 export const computeWorkerKpis = (visibleTasks: TaskRow[], todayKey: string) => {

@@ -22,6 +22,7 @@ import {
   CreateWorkPlanDto,
   LabelDto,
   MergeCellDto,
+  UpdateCellTaskDto,
   UpdateLabelDto,
   UpdateSectionDto,
   UpdateWorkPlanDto,
@@ -65,6 +66,15 @@ export class WorkPlansController {
     @Req() req: AuthedRequest,
   ) {
     return this.service.createCellTask(dto, req.user);
+  }
+
+  @Patch('cells/:id/task')
+  updateCellTask(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateCellTaskDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.service.updateCellTask(id, dto, req.user);
   }
 
   @Put('cells/bulk')

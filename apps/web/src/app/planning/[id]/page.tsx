@@ -61,6 +61,13 @@ type TaskActivityType =
 
 type TaskPriority = "low" | "medium" | "high" | "urgent";
 
+type TaskChanges = {
+  assigneeId?: string;
+  dueDate?: string;
+  estimatedHours?: number;
+  priority?: TaskPriority;
+};
+
 const AVAILABLE_TASK = "__available__";
 
 const activityTypeOptions: Array<{ value: TaskActivityType; label: string }> = [
@@ -170,7 +177,7 @@ function CellModal({
   users: UserOption[];
   planHasProject: boolean;
   onClose: () => void;
-  onSave: (patch: Partial<PlanCell>) => Promise<void>;
+  onSave: (patch: Partial<PlanCell>, taskChanges?: TaskChanges) => Promise<void>;
   onMerge: (columnSpan: number) => Promise<void>;
   onCreateTask: (input: {
     assigneeId?: string;
@@ -202,6 +209,17 @@ function CellModal({
   const [estimatedHours, setEstimatedHours] = useState("");
   const [saving, setSaving] = useState(false);
   const locked = Boolean(cell?.taskId);
+  // Una tarea terminada con éxito ya no se edita; una "no completada" sí.
+  const taskEditable =
+    Boolean(cell?.taskStatus) &&
+    (cell?.taskStatus !== "done" || cell?.taskCompletionOutcome === "not_completed");
+  const [taskAssigneeId, setTaskAssigneeId] = useState(cell?.taskAssigneeId ?? "");
+  const [taskDueDate, setTaskDueDate] = useState(cell?.taskDueDate?.slice(0, 10) ?? "");
+  const [taskHours, setTaskHours] = useState(
+    cell?.taskEstimatedHours !== undefined ? String(Number(cell.taskEstimatedHours)) : "",
+  );
+  const [taskPriority, setTaskPriority] = useState<TaskPriority>(cell?.taskPriority ?? "medium");
+  const reassigning = taskEditable && taskAssigneeId !== (cell?.taskAssigneeId ?? "");
   const columnSpan = cell?.columnSpan ?? 1;
   const createsTask = !locked && status === "assigned";
   const taskDue = cell?.taskStatus
@@ -231,6 +249,23 @@ function CellModal({
         endDate: endDate || null,
         note: note || null,
       });
+    } else if (locked) {
+      // Estado y persona los controla la tarea: solo se mandan sus cambios.
+      const changes: TaskChanges = {};
+      if (taskEditable) {
+        if (reassigning && taskAssigneeId) changes.assigneeId = taskAssigneeId;
+        if (taskDueDate && taskDueDate !== (cell?.taskDueDate?.slice(0, 10) ?? "")) {
+          changes.dueDate = taskDueDate;
+        }
+        if (taskHours !== "" && Number(taskHours) !== Number(cell?.taskEstimatedHours)) {
+          changes.estimatedHours = Number(taskHours);
+        }
+        if (taskPriority !== cell?.taskPriority) changes.priority = taskPriority;
+      }
+      await onSave(
+        { startDate: startDate || null, endDate: endDate || null, note: note || null },
+        Object.keys(changes).length > 0 ? changes : undefined,
+      );
     } else {
       const suggestedAssignee =
         status === "unassigned" || status === "assigned"
@@ -304,9 +339,72 @@ function CellModal({
             </div>
           )}
           {locked && (
-            <p className="mt-2 text-xs text-[var(--ink-muted)]">Ya tiene tarea asignada; el estado lo controla la tarea.</p>
+            <p className="mt-2 text-xs text-[var(--ink-muted)]">El estado lo controla la tarea.</p>
           )}
         </div>
+
+        {taskEditable && (
+          <div className="grid gap-3 rounded-xl border border-[var(--accent)]/30 bg-sky-50/50 p-4">
+            <p className="text-sm font-semibold">Editar o reasignar tarea</p>
+            <label className="flex flex-col gap-1 text-sm">
+              Responsable
+              <select
+                value={taskAssigneeId}
+                onChange={(event) => setTaskAssigneeId(event.target.value)}
+                className="min-w-0 rounded-lg border border-[var(--line)] bg-white px-3 py-2"
+              >
+                {!cell?.taskAssigneeId && <option value="">Tarea disponible (sin responsable)</option>}
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.fullName} ({roleLabels[user.role]})
+                  </option>
+                ))}
+              </select>
+              {reassigning && (
+                <span className="text-xs text-[var(--ink-muted)]">
+                  La tarea pasará a la nueva persona como &quot;por hacer&quot;. El tiempo ya trabajado queda registrado a
+                  quien lo hizo.
+                </span>
+              )}
+            </label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="flex flex-col gap-1 text-sm">
+                Prioridad
+                <select
+                  value={taskPriority}
+                  onChange={(event) => setTaskPriority(event.target.value as TaskPriority)}
+                  className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
+                >
+                  {priorityOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                Fecha límite
+                <input
+                  type="date"
+                  value={taskDueDate}
+                  onChange={(event) => setTaskDueDate(event.target.value)}
+                  className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                Horas estimadas
+                <input
+                  type="number"
+                  min={0}
+                  step={0.25}
+                  value={taskHours}
+                  onChange={(event) => setTaskHours(event.target.value)}
+                  className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
+                />
+              </label>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -606,7 +704,7 @@ export default function PlanGridPage() {
     );
   };
 
-  const saveCell = async (patch: Partial<PlanCell>) => {
+  const saveCell = async (patch: Partial<PlanCell>, taskChanges?: TaskChanges) => {
     if (!editing) return;
     try {
       if (bulkEditing) {
@@ -621,6 +719,11 @@ export default function PlanGridPage() {
           { rowId: editing.row.id, columnId: editing.columnId ?? undefined, ...patch },
           { headers: authHeaders() },
         );
+        if (taskChanges && editing.cell) {
+          await axios.patch(`${base}/cells/${editing.cell.id}/task`, taskChanges, {
+            headers: authHeaders(),
+          });
+        }
       }
       setEditing(null);
       setBulkEditing(false);

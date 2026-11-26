@@ -528,6 +528,47 @@ export class TasksService {
     return qb.getMany();
   }
 
+  /**
+   * Carga de trabajo de todo el equipo en un periodo. A diferencia de findAll,
+   * no depende de quién consulta ni de quién asignó la tarea: gerencia y todos
+   * los líderes deben ver las mismas horas de cada persona.
+   */
+  async findFortnightLoad(from?: string, to?: string) {
+    const dayPattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!from || !to || !dayPattern.test(from) || !dayPattern.test(to)) {
+      throw new BadRequestException('from y to deben tener formato YYYY-MM-DD');
+    }
+
+    return (
+      this.tasksRepository
+        .createQueryBuilder('task')
+        .leftJoin(ProjectEntity, 'project', 'project.id = task.project_id')
+        .select('task.id', 'id')
+        .addSelect('task.project_id', 'projectId')
+        .addSelect('project.name', 'projectName')
+        .addSelect('task.assignee_id', 'assigneeId')
+        .addSelect('task.title', 'title')
+        .addSelect('task.activity_type', 'activityType')
+        .addSelect('task.status', 'status')
+        .addSelect('task.completion_outcome', 'completionOutcome')
+        .addSelect('task.estimated_hours', 'estimatedHours')
+        // Sin fecha de vencimiento cuenta por su alta, igual que en el reporte.
+        .addSelect(
+          "to_char(COALESCE(task.due_date, (task.created_at AT TIME ZONE 'America/Mexico_City')::date), 'YYYY-MM-DD')",
+          'dueDate',
+        )
+        .where('task.assignee_id IS NOT NULL')
+        .andWhere(
+          "COALESCE(task.due_date, (task.created_at AT TIME ZONE 'America/Mexico_City')::date) BETWEEN :from AND :to",
+          { from, to },
+        )
+        .andWhere("task.approval_status IS DISTINCT FROM 'rejected'")
+        // Los pasos futuros de una cadena siguen ocultos hasta activarse.
+        .andWhere("(task.chain_id IS NULL OR task.status <> 'blocked')")
+        .getRawMany()
+    );
+  }
+
   private activityCodePrefix(activityType: CreateTaskDto['activityType']) {
     switch (activityType) {
       case 'revision':

@@ -11,6 +11,7 @@ import {
   filterOpenTasks,
   filterPortfolioRows,
   getCurrentFortnight,
+  getHolidayKeys,
   getRiskLevel,
   groupAssignedHoursBySpecialty,
   isDueSoon,
@@ -256,11 +257,26 @@ describe("fortnight", () => {
     assert.equal(second.endKey, "2026-10-31");
   });
 
-  it("targets 9 hours per business day", () => {
+  it("targets 7.5 hours per business day (lunch excluded)", () => {
     // Oct 16-31 2026: Fri 16, 19-23, 26-30 = 11 weekdays.
     const second = getCurrentFortnight(new Date(2026, 9, 20));
     assert.equal(second.businessDays, 11);
-    assert.equal(second.targetHours, 99);
+    assert.equal(second.targetHours, 82.5);
+  });
+
+  it("does not count mandatory holidays", () => {
+    // Nov 16-30 2026: 11 weekdays, Monday 16 is Revolution Day.
+    const november = getCurrentFortnight(new Date(2026, 10, 25));
+    assert.equal(november.holidays, 1);
+    assert.equal(november.businessDays, 10);
+    assert.equal(november.targetHours, 75);
+  });
+
+  it("computes movable and six-year holidays", () => {
+    const keys = getHolidayKeys(2027);
+    assert.ok(["2027-02-01", "2027-03-15", "2027-11-15"].every((key) => keys.has(key)));
+    assert.equal(keys.has("2027-10-01"), false);
+    assert.equal(getHolidayKeys(2030).has("2030-10-01"), true);
   });
 
   it("handles short months", () => {
@@ -269,7 +285,7 @@ describe("fortnight", () => {
 });
 
 describe("fortnight cards", () => {
-  const fortnight = { startKey: "2026-10-01", endKey: "2026-10-15", label: "", businessDays: 10, targetHours: 90 };
+  const fortnight = { startKey: "2026-10-01", endKey: "2026-10-15", label: "", businessDays: 10, holidays: 0, targetHours: 90 };
   const people = [
     user({ id: "w", fullName: "Zoe" }),
     user({ id: "l", fullName: "Álvaro", role: "lead" }),

@@ -23,6 +23,33 @@ export const addDaysToKey = (dateKey: string, days: number) => {
   return toLocalDateKey(new Date(year, month - 1, day + days));
 };
 
+/** Jornada de 9 h menos 1.5 h de comida. */
+export const WORK_HOURS_PER_DAY = 7.5;
+
+/** Día del mes del n-ésimo lunes (month: 0 = enero). */
+const nthMonday = (year: number, month: number, n: number) => {
+  const firstWeekday = new Date(year, month, 1).getDay();
+  return 1 + ((8 - firstWeekday) % 7) + (n - 1) * 7;
+};
+
+/** Descansos obligatorios en México (art. 74 de la Ley Federal del Trabajo). */
+export const getHolidayKeys = (year: number) => {
+  const days: [month: number, day: number][] = [
+    [0, 1],
+    [1, nthMonday(year, 1, 1)], // Constitución
+    [2, nthMonday(year, 2, 3)], // Benito Juárez
+    [4, 1],
+    [8, 16],
+    [10, nthMonday(year, 10, 3)], // Revolución
+    [11, 25],
+  ];
+  // Transmisión del Poder Ejecutivo Federal, cada seis años (2024, 2030…).
+  if ((year - 2024) % 6 === 0) {
+    days.push([9, 1]);
+  }
+  return new Set(days.map(([month, day]) => toLocalDateKey(new Date(year, month, day))));
+};
+
 export const getCurrentFortnight = (today: Date = new Date()): Fortnight => {
   const year = today.getFullYear();
   const month = today.getMonth();
@@ -34,12 +61,18 @@ export const getCurrentFortnight = (today: Date = new Date()): Fortnight => {
     month: "long",
     year: "numeric",
   });
+  const holidayKeys = getHolidayKeys(year);
   let businessDays = 0;
+  let holidays = 0;
   const cursor = new Date(startDate);
   while (cursor <= endDate) {
     const day = cursor.getDay();
     if (day >= 1 && day <= 5) {
-      businessDays += 1;
+      if (holidayKeys.has(toLocalDateKey(cursor))) {
+        holidays += 1;
+      } else {
+        businessDays += 1;
+      }
     }
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -49,7 +82,8 @@ export const getCurrentFortnight = (today: Date = new Date()): Fortnight => {
     endKey: toLocalDateKey(endDate),
     label: `${startDay} al ${endDay} de ${monthAndYear}`,
     businessDays,
-    targetHours: businessDays * 9,
+    holidays,
+    targetHours: businessDays * WORK_HOURS_PER_DAY,
   };
 };
 

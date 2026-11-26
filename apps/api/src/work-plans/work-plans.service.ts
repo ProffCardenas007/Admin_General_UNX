@@ -24,6 +24,7 @@ import {
   CreateWorkPlanDto,
   LabelDto,
   MergeCellDto,
+  UpdateCellTaskDto,
   UpdateLabelDto,
   UpdateSectionDto,
   UpdateWorkPlanDto,
@@ -181,6 +182,17 @@ export class WorkPlansService {
       ? await this.tasks.find({ where: { id: In(taskIds) } })
       : [];
     const tasksById = new Map(linkedTasks.map((task) => [task.id, task]));
+    const assigneeIds = [
+      ...new Set(
+        linkedTasks
+          .map((task) => task.assigneeId)
+          .filter((userId): userId is string => Boolean(userId)),
+      ),
+    ];
+    const assignees = assigneeIds.length
+      ? await this.users.find({ where: { id: In(assigneeIds) } })
+      : [];
+    const namesById = new Map(assignees.map((u) => [u.id, u.fullName]));
 
     const counts = {
       total: 0,
@@ -205,6 +217,14 @@ export class WorkPlansService {
                 taskStatus: task.status,
                 taskDueDate: task.dueDate ?? null,
                 taskCompletionOutcome: task.completionOutcome ?? null,
+                taskAssigneeId: task.assigneeId ?? null,
+                taskEstimatedHours: task.estimatedHours,
+                taskPriority: task.priority,
+                // La tarea manda: una reasignación hecha desde Tareas también
+                // se ve en la planeación.
+                suggestedAssignee: task.assigneeId
+                  ? (namesById.get(task.assigneeId) ?? cell.suggestedAssignee)
+                  : null,
               };
             });
           const mergedSlots = rowCells.reduce(
@@ -626,6 +646,59 @@ export class WorkPlansService {
       }
       throw error;
     }
+  }
+
+  /** Edita o reasigna la tarea de una celda, aunque ya esté en curso. */
+  async updateCellTask(cellId: string, dto: UpdateCellTaskDto, actor: Actor) {
+    const cell = await this.cells.findOne({ where: { id: cellId } });
+    if (!cell) throw new NotFoundException('Celda no encontrada');
+    const { section } = await this.findRow(cell.rowId);
+    const plan = await this.assertPlan(section.planId, actor);
+    const task = cell.taskId
+      ? await this.tasks.findOne({ where: { id: cell.taskId } })
+      : null;
+    if (!task) throw new BadRequestException('Esta celda no tiene tarea');
+
+    const notCompleted = task.completionOutcome === 'not_completed';
+    if (task.status === 'done' && !notCompleted) {
+      throw new BadRequestException('La tarea ya está finalizada');
+    }
+
+    const reassigned = Boolean(
+      dto.assigneeId && dto.assigneeId !== task.assigneeId,
+    );
+    let assigneeName: string | null = null;
+    if (reassigned) {
+      const assignee = await this.users.findOne({
+        where: { id: dto.assigneeId, isActive: true },
+      });
+      if (!assignee) {
+        throw new BadRequestException(
+          'El responsable no existe o está inactivo',
+        );
+      }
+      assigneeName = assignee.fullName;
+    }
+
+    // Al cambiar de persona (o reabrir una no completada) la tarea vuelve a
+    // "por hacer": así se detiene el cronómetro y ese tiempo queda registrado a
+    // quien lo trabajó. Un paso bloqueado de una cadena sigue bloqueado.
+    const restart = (reassigned && task.status !== 'blocked') || notCompleted;
+    await this.tasksService.update(
+      task.id,
+      { ...dto, ...(restart ? { status: 'todo' as const } : {}) },
+      actor,
+    );
+
+    if (assigneeName) {
+      cell.suggestedAssignee = assigneeName;
+      cell.status = 'assigned';
+    }
+    if (dto.dueDate && cell.endDate && cell.endDate.slice(0, 10) < dto.dueDate) {
+      cell.endDate = dto.dueDate;
+    }
+    await this.touch(plan.id);
+    return this.cells.save(cell);
   }
 
   private async resolveBulkCellTargets(

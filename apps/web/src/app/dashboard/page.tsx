@@ -27,6 +27,8 @@ export default function DashboardPage() {
     classHours,
     tasks,
     setTasks,
+    fortnightTasks,
+    setFortnightTasks,
     projects,
     users,
     teams,
@@ -166,7 +168,7 @@ export default function DashboardPage() {
       {role === "manager" || role === "lead" ? (
         <FortnightActivities
           users={users}
-          tasks={tasks}
+          tasks={fortnightTasks}
           classHours={classHours}
           projectsById={projectsById}
           fortnight={currentFortnight}
@@ -187,6 +189,7 @@ export default function DashboardPage() {
           onClose={() => setTaskModal({ open: false })}
           onCreated={(createdTasks, choices) => {
             setTasks((current) => [...createdTasks, ...current]);
+            setFortnightTasks((current) => [...createdTasks, ...current]);
             setTaskDefaults(choices);
           }}
           setMessage={setMessage}

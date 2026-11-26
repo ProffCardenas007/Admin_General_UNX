@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { buildFortnightCards, filterCardsByName } from "./metrics";
+import { buildFortnightCards, filterCardsByName, WORK_HOURS_PER_DAY } from "./metrics";
 import {
   roleLabels,
   taskStatusLabel,
@@ -56,7 +56,7 @@ export default function FortnightActivities({
           <div>
             <h2 className="text-lg font-semibold">Actividades de la quincena actual</h2>
             <p className="mt-1 text-sm text-[var(--ink-muted)]">
-              {currentFortnight.label} · meta de {currentFortnight.targetHours} h ({currentFortnight.businessDays} días hábiles × 9 h)
+              {currentFortnight.label} · meta de {currentFortnight.targetHours} h ({currentFortnight.businessDays} días hábiles × {WORK_HOURS_PER_DAY} h, sin comida{currentFortnight.holidays > 0 ? `; ${currentFortnight.holidays} festivo(s) descontado(s)` : ""})
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
@@ -170,7 +170,7 @@ export default function FortnightActivities({
                             <div className="min-w-0">
                               <p className="break-words text-sm font-semibold">{task.title}</p>
                               <p className="mt-1 text-xs text-[var(--ink-muted)]">
-                                {projectsById[task.projectId]?.name ?? "Sin proyecto"} · {task.activityType}
+                                {task.projectName ?? projectsById[task.projectId]?.name ?? "Sin proyecto"} · {task.activityType}
                               </p>
                             </div>
                             <p className="shrink-0 text-sm font-semibold">

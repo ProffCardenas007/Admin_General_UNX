@@ -214,6 +214,25 @@ export class CreateCellTaskDto {
   note?: string | null;
 }
 
+export class UpdateCellTaskDto {
+  @IsOptional()
+  @IsUUID()
+  assigneeId?: string;
+
+  @IsOptional()
+  @Matches(DATE)
+  dueDate?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  estimatedHours?: number;
+
+  @IsOptional()
+  @IsIn(['low', 'medium', 'high', 'urgent'])
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+}
+
 export class BulkCellTargetDto {
   @IsUUID()
   rowId: string;

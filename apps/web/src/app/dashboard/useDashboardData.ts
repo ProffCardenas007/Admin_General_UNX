@@ -27,6 +27,7 @@ export function useDashboardData(fortnight: Fortnight) {
   const [workload, setWorkload] = useState<WorkloadRow[]>([]);
   const [classHours, setClassHours] = useState<ClassHoursRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [fortnightTasks, setFortnightTasks] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [teams, setTeams] = useState<TeamOption[]>([]);
@@ -99,6 +100,14 @@ export function useDashboardData(fortnight: Fortnight) {
           loadedUsers = [];
         }
 
+        if (savedRole === "manager" || savedRole === "lead") {
+          const loadResponse = await axios.get(`${API_URL}/tasks/fortnight-load`, {
+            headers,
+            params: { from: fortnight.startKey, to: fortnight.endKey },
+          });
+          setFortnightTasks(loadResponse.data as TaskRow[]);
+        }
+
         setSummary(summaryResponse.data as Summary);
         setWorkload(workloadResponse.data as WorkloadRow[]);
         setClassHours(classHoursResponse.data as ClassHoursRow[]);
@@ -159,6 +168,8 @@ export function useDashboardData(fortnight: Fortnight) {
     classHours,
     tasks,
     setTasks,
+    fortnightTasks,
+    setFortnightTasks,
     projects,
     users,
     teams,

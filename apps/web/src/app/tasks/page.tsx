@@ -15,6 +15,7 @@ import FloatingTimerWidget from "./FloatingTimerWidget";
 import NotCompletedModal from "./NotCompletedModal";
 import PendingApprovalsPanel from "./PendingApprovalsPanel";
 import SelfReportModal from "./SelfReportModal";
+import TaskFilterBar from "./TaskFilterBar";
 import { UNASSIGNED_SENTINEL, activityTypeLabels, priorityLabels, roleLabels, statusLabels } from "./labels";
 import {
   buildDisplayTasks,
@@ -26,6 +27,8 @@ import {
   filterTasks,
   getQuincenaRange,
   groupConsequentTasks,
+  groupTasksByProject,
+  type TaskGroup,
   listAvailableAcademies,
   peopleForProject,
   pickPriorityTasks,
@@ -100,6 +103,7 @@ export default function TasksPage() {
   const [exportingActivity, setExportingActivity] = useState(false);
   const [exportError, setExportError] = useState("");
   const [showDoneTasks, setShowDoneTasks] = useState(false);
+  const [showMyDoneTasks, setShowMyDoneTasks] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [operationalViewExpanded, setOperationalViewExpanded] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -252,6 +256,7 @@ export default function TasksPage() {
 
     if (showDoneFromQuery) {
       setShowDoneTasks(true);
+      setShowMyDoneTasks(true);
     }
 
     if (assigneeIdFromQuery.length > 0) {
@@ -506,6 +511,54 @@ export default function TasksPage() {
   );
 
   const taskDueSemaforo = (task: TaskRow) => dueSemaforo(task, todayIso);
+
+  // Gerencia y líderes ven primero lo suyo; la lista del equipo no lo repite,
+  // salvo que se filtre expresamente por su propio nombre.
+  const myTasks = useMemo(
+    () =>
+      buildDisplayTasks(
+        tasks.filter(
+          (task) =>
+            !!currentUserId && task.assigneeId === currentUserId && (showMyDoneTasks || task.status !== "done"),
+        ),
+        false,
+        todayIso,
+      ),
+    [tasks, currentUserId, showMyDoneTasks, todayIso],
+  );
+  const teamTasks = useMemo(
+    () =>
+      selectedAssigneeId === currentUserId
+        ? displayTasks
+        : displayTasks.filter((task) => task.assigneeId !== currentUserId),
+    [displayTasks, selectedAssigneeId, currentUserId],
+  );
+
+  const taskGroups = useMemo(
+    () => groupTasksByProject(teamTasks, projects, (scope) => specialtyLabels[scope], todayIso),
+    [teamTasks, projects, todayIso],
+  );
+  // Al buscar o elegir proyecto/persona los grupos se abren solos para que el
+  // resultado se vea; lo que la persona abra o cierre se recuerda aparte.
+  const groupsOpenByDefault = Boolean(search.trim() || selectedProjectId || selectedAssigneeId);
+  const [groupOverrides, setGroupOverrides] = useState<Record<string, boolean>>({});
+  const groupStateKey = (key: string) => `${groupsOpenByDefault}:${key}`;
+  const isGroupOpen = (key: string) => groupOverrides[groupStateKey(key)] ?? groupsOpenByDefault;
+  const setGroupsOpen = (keys: string[], open: boolean) =>
+    setGroupOverrides((current) => ({
+      ...current,
+      ...Object.fromEntries(keys.map((key) => [groupStateKey(key), open])),
+    }));
+  const allGroupKeys = (groups: TaskGroup[]): string[] =>
+    groups.flatMap((group) => [group.key, ...allGroupKeys(group.groups)]);
+  const groupPathTo = (groups: TaskGroup[], taskId: string): string[] => {
+    for (const group of groups) {
+      if (group.tasks.some((task) => task.id === taskId)) return [group.key];
+      const rest = groupPathTo(group.groups, taskId);
+      if (rest.length > 0) return [group.key, ...rest];
+    }
+    return [];
+  };
 
   const assigneeLabel = (assigneeId?: string) => {
     if (!assigneeId) {
@@ -1081,6 +1134,7 @@ export default function TasksPage() {
   };
 
   const onOpenTaskFromTimeline = (taskId: string, target: "description" | "history") => {
+    setGroupsOpen(groupPathTo(taskGroups, taskId), true);
     if (target === "description") {
       setOpenedDescriptionTaskId(taskId);
       return;
@@ -1090,703 +1144,7 @@ export default function TasksPage() {
     void loadHistory(taskId, appliedHistoryFrom, appliedHistoryTo);
   };
 
-  return (
-    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-      {role === "manager" ? (
-        <PendingApprovalsPanel
-          tasks={tasks.filter((task) => task.approvalStatus === "pending")}
-          projects={projects}
-          projectLabel={projectLabel}
-          assigneeLabel={assigneeLabel}
-          onReviewed={(reviewed, decision) => {
-            setTasks((current) => current.map((item) => (item.id === reviewed.id ? { ...item, ...reviewed } : item)));
-            setInfo(
-              decision === "approve"
-                ? `Tarea ${reviewed.code} aprobada como ${activityTypeLabels[reviewed.activityType] ?? reviewed.activityType}.`
-                : `Tarea ${reviewed.code} rechazada.`,
-            );
-          }}
-        />
-      ) : null}
-
-      {selfReportOpen ? (
-        <SelfReportModal
-          projects={projects}
-          projectLabel={projectLabel}
-          onClose={() => setSelfReportOpen(false)}
-          onCreated={(created) => {
-            setSelfReportOpen(false);
-            setInfo(`Actividad ${created.code} registrada. Queda pendiente hasta que gerencia la apruebe.`);
-            void loadData(role);
-          }}
-        />
-      ) : null}
-
-      <section className="glass-panel fade-up p-6 md:p-8">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
-              Sistema de proyectos
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
-              {isWorker ? "Mis tareas" : "Tareas individuales"}
-            </h1>
-            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
-              {isWorker
-                ? "Gestiona y actualiza tus tareas asignadas."
-                : "Vista y filtrado detallado de todas las tareas."}
-            </p>
-          </div>
-          {role === "lead" || role === "worker" ? (
-            <button
-              type="button"
-              onClick={() => setSelfReportOpen(true)}
-              className="ui-btn ui-btn-secondary ui-btn-sm self-start md:self-auto"
-              title="Para trabajo que hiciste y nadie te asignó; gerencia lo aprueba"
-            >
-              + Registrar actividad
-            </button>
-          ) : null}
-        </div>
-
-        <ActiveTasksPanel
-          tasks={myActiveTasks}
-          availableTasks={availableTasks}
-          canClaim={role === "lead" || role === "worker"}
-          projectLabel={projectLabel}
-          savingTaskId={savingTaskId}
-          onClaim={(taskId) => void onClaimTask(taskId)}
-          onStart={(taskId) => void onTimerAction(taskId, "doing")}
-          onPause={(taskId) => void onTimerAction(taskId, "paused")}
-          onFinish={(taskId) => void onTimerAction(taskId, "done")}
-          onRequestExtension={setExtensionTask}
-        />
-
-        <div className="mt-5 rounded-2xl border border-[var(--line)] bg-gradient-to-r from-white via-[var(--background)] to-white p-4">
-          <button
-            type="button"
-            aria-expanded={operationalViewExpanded}
-            aria-controls="operational-task-view"
-            onClick={() => setOperationalViewExpanded((expanded) => !expanded)}
-            className="flex w-full items-center justify-between gap-3 text-left"
-          >
-            <span>
-              <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                {isWorker ? "Mi jornada" : "Vista operativa"}
-              </span>
-              <span className="mt-1 block text-sm text-[var(--ink-muted)]">
-                {workerKpis.active} pendientes · {workerKpis.doing} en curso · {workerKpis.blocked} bloqueadas
-              </span>
-            </span>
-            <span className="flex shrink-0 items-center gap-2 text-sm font-semibold text-[var(--accent)]">
-              {operationalViewExpanded ? "Ocultar" : "Desplegar"}
-              <span aria-hidden="true" className="text-lg leading-none">
-                {operationalViewExpanded ? "−" : "+"}
-              </span>
-            </span>
-          </button>
-          {operationalViewExpanded ? (
-            <div id="operational-task-view" className="mt-4 border-t border-[var(--line)] pt-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  {isWorker ? "Mi jornada" : "Vista operativa"}
-                </p>
-                <p className="mt-1 text-lg font-semibold capitalize">
-                  {workerDisplayName ? `Hola, ${workerDisplayName}` : "Hola"}
-                </p>
-                <p className="text-sm text-[var(--ink-muted)]">{workerHeaderDate}</p>
-              </div>
-              <button
-                onClick={() => setFocusMode((current) => !current)}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                  focusMode
-                    ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                    : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                }`}
-              >
-                {focusMode ? "Modo enfoque activo" : "Activar modo enfoque"}
-              </button>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Pendientes</p>
-                <p className="mt-1 text-2xl font-semibold">{workerKpis.active}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">En curso</p>
-                <p className="mt-1 text-2xl font-semibold text-[var(--accent)]">{workerKpis.doing}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Bloqueadas</p>
-                <p className="mt-1 text-2xl font-semibold text-[var(--danger)]">{workerKpis.blocked}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Vencen hoy</p>
-                <p className="mt-1 text-2xl font-semibold text-amber-700">{workerKpis.dueToday}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-xl border border-[var(--line)] bg-white p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">Avance personal</p>
-                <p className="text-xs text-[var(--ink-muted)]">
-                  {workerKpis.done}/{workerKpis.total} finalizadas
-                </p>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--background)]">
-                <div
-                  className="h-full rounded-full bg-[var(--accent)] transition-all"
-                  style={{ width: `${workerKpis.progress}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {workerPriorityTasks.length === 0 ? (
-                <p className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-[var(--ink-muted)] md:col-span-2">
-                  Excelente, no tienes tareas activas con los filtros actuales.
-                </p>
-              ) : (
-                workerPriorityTasks.map((task) => {
-                  const due = taskDueSemaforo(task);
-                  return (
-                    <div key={task.id} className="rounded-xl border border-[var(--line)] bg-white p-3">
-                      <p className="text-sm font-semibold">{task.title}</p>
-                      <p className="mt-1 text-xs text-[var(--ink-muted)]">
-                        {activityTypeLabels[task.activityType] ?? task.activityType} · {priorityLabels[task.priority]}
-                      </p>
-                      <p className={`mt-2 text-xs font-semibold ${due.textClass}`}>{due.label}</p>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="mt-4 rounded-xl border border-[var(--line)] bg-white p-3">
-              <p className="text-sm font-semibold">Línea de tiempo rápida</p>
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border border-red-100 bg-red-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
-                    Atrasadas ({workerTimeline.overdue.length})
-                  </p>
-                  <div className="mt-2 space-y-1">
-                    {workerTimeline.overdue.slice(0, 3).map((task) => (
-                      <div key={task.id} className="flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
-                          className="text-left text-xs font-semibold text-red-700 underline-offset-2 hover:underline"
-                        >
-                          {task.title}
-                        </button>
-                        <button
-                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
-                          className="text-[11px] text-red-700/80 underline-offset-2 hover:underline"
-                        >
-                          Historial
-                        </button>
-                      </div>
-                    ))}
-                    {workerTimeline.overdue.length === 0 ? (
-                      <p className="text-xs text-red-700/70">Sin tareas atrasadas.</p>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">
-                    Hoy ({workerTimeline.today.length})
-                  </p>
-                  <div className="mt-2 space-y-1">
-                    {workerTimeline.today.slice(0, 3).map((task) => (
-                      <div key={task.id} className="flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
-                          className="text-left text-xs font-semibold text-amber-800 underline-offset-2 hover:underline"
-                        >
-                          {task.title}
-                        </button>
-                        <button
-                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
-                          className="text-[11px] text-amber-800/80 underline-offset-2 hover:underline"
-                        >
-                          Historial
-                        </button>
-                      </div>
-                    ))}
-                    {workerTimeline.today.length === 0 ? (
-                      <p className="text-xs text-amber-800/70">Sin vencimientos para hoy.</p>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                    Mañana ({workerTimeline.tomorrow.length})
-                  </p>
-                  <div className="mt-2 space-y-1">
-                    {workerTimeline.tomorrow.slice(0, 3).map((task) => (
-                      <div key={task.id} className="flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
-                          className="text-left text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                        >
-                          {task.title}
-                        </button>
-                        <button
-                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
-                          className="text-[11px] text-emerald-700/80 underline-offset-2 hover:underline"
-                        >
-                          Historial
-                        </button>
-                      </div>
-                    ))}
-                    {workerTimeline.tomorrow.length === 0 ? (
-                      <p className="text-xs text-emerald-700/70">Sin tareas programadas.</p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            </div>
-            </div>
-            ) : null}
-        </div>
-
-        {canManagePlanning ? (
-          <div className="mt-6 space-y-4">
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Vista personal
-              </p>
-              <button
-                type="button"
-                aria-pressed={selectedAssigneeId === currentUserId && selectedProjectId === ""}
-                disabled={!currentUserId}
-                onClick={() => {
-                  const shouldShowMyTasks = selectedAssigneeId !== currentUserId || selectedProjectId !== "";
-                  setSelectedAssigneeId(shouldShowMyTasks ? currentUserId : "");
-                  setSelectedSpecialty("");
-                  setSelectedAcademy("");
-                  setSelectedProjectId("");
-                  if (shouldShowMyTasks) {
-                    setShowAllActivityQuincenas(true);
-                  }
-                }}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                  selectedAssigneeId === currentUserId && selectedProjectId === ""
-                    ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                    : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                }`}
-              >
-                Mis tareas
-              </button>
-            </div>
-
-            {selectedAssigneeId && !selectedProjectId ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-2 text-sm">
-                <span>
-                  Filtrando por persona:{" "}
-                  <strong>
-                    {selectedAssigneeId === UNASSIGNED_SENTINEL
-                      ? "Sin asignar"
-                      : assigneeLabel(selectedAssigneeId)}
-                  </strong>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedAssigneeId("")}
-                  className="ui-btn ui-btn-secondary ui-btn-sm"
-                >
-                  Quitar
-                </button>
-              </div>
-            ) : null}
-
-            {role === "manager" ? (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  Personas
-                </p>
-                {peopleWithTaskCounts.length === 0 ? (
-                  <p className="ui-empty px-4 py-3 text-sm">
-                    No hay personas con tareas para los filtros actuales.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedAssigneeId("")}
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        selectedAssigneeId === ""
-                          ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                          : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                      }`}
-                    >
-                      Todas las personas
-                    </button>
-                    {peopleWithTaskCounts.map((person) => (
-                      <button
-                        key={person.id}
-                        type="button"
-                        onClick={() => {
-                          selectAssignee(person.id);
-                          setSelectedProjectId("");
-                        }}
-                        className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                          selectedAssigneeId === person.id
-                            ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                            : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                        }`}
-                      >
-                        {person.label} ({person.count})
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Especialidades
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedSpecialty("");
-                    setSelectedAcademy("");
-                    setSelectedProjectId("");
-                    setSelectedAssigneeId("");
-                  }}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    selectedSpecialty === ""
-                      ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                      : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                  }`}
-                >
-                  Todas las especialidades
-                </button>
-                {LEAD_SPECIALTIES.map((specialty) => (
-                  <button
-                    key={specialty}
-                    type="button"
-                    onClick={() => {
-                      setSelectedSpecialty((current) => (current === specialty ? "" : specialty));
-                      setSelectedAcademy("");
-                      setSelectedProjectId("");
-                      setSelectedAssigneeId("");
-                    }}
-                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                      selectedSpecialty === specialty
-                        ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                        : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                    }`}
-                  >
-                    {specialtyLabels[specialty]}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {role === "manager" && selectedSpecialty ? (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  Academias
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedAcademy("");
-                      setSelectedProjectId("");
-                      setSelectedAssigneeId("");
-                    }}
-                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                      selectedAcademy === ""
-                        ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                        : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                    }`}
-                  >
-                    Todas las academias
-                  </button>
-                  {availableAcademies.map((academy) => (
-                    <button
-                      key={academy.key}
-                      type="button"
-                      onClick={() => {
-                        setSelectedAcademy((current) => (current === academy.key ? "" : academy.key));
-                        setSelectedProjectId("");
-                        setSelectedAssigneeId("");
-                      }}
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        selectedAcademy === academy.key
-                          ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                          : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                      }`}
-                    >
-                      {academy.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                Proyectos
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedProjectId("");
-                    setSelectedAssigneeId("");
-                  }}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    selectedProjectId === ""
-                      ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                      : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                  }`}
-                >
-                  Todos los proyectos
-                </button>
-                {activeProjects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedProjectId((current) => (current === project.id ? "" : project.id));
-                      setSelectedAssigneeId("");
-                    }}
-                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                      selectedProjectId === project.id
-                        ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                        : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                    }`}
-                  >
-                    {project.code} · {project.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {selectedProjectId ? (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  Personas con tareas en este proyecto
-                </p>
-                {peopleForSelectedProject.length === 0 ? (
-                  <p className="ui-empty px-4 py-3 text-sm">Este proyecto no tiene tareas asignadas todavia.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedAssigneeId("")}
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        selectedAssigneeId === ""
-                          ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                          : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                      }`}
-                    >
-                      Todas las personas
-                    </button>
-                    {peopleForSelectedProject.map((person) => (
-                      <button
-                        key={person.id}
-                        type="button"
-                        onClick={() => selectAssignee(person.id)}
-                        className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                          selectedAssigneeId === person.id
-                            ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
-                            : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
-                        }`}
-                      >
-                        {person.label} ({person.count})
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-
-            {selectedAssigneeId ? (
-              <>
-              <div className="border-t border-[var(--line)] pt-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                  Periodo de actividades
-                </p>
-                <div className="flex flex-wrap items-end gap-3">
-                  <label className="text-xs text-[var(--ink-muted)]">
-                    Mes
-                    <input
-                      type="month"
-                      value={activityYearMonth}
-                      onChange={(event) => {
-                        setActivityYearMonth(event.target.value);
-                        setShowAllActivityQuincenas(false);
-                      }}
-                      className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                    />
-                  </label>
-                  <div className="flex flex-wrap gap-2" role="group" aria-label="Quincena de actividades">
-                    <button
-                      type="button"
-                      aria-pressed={!showAllActivityQuincenas && activityHalfMonth === "first"}
-                      onClick={() => {
-                        setActivityHalfMonth("first");
-                        setShowAllActivityQuincenas(false);
-                      }}
-                      className={`ui-btn ui-btn-sm ${
-                        !showAllActivityQuincenas && activityHalfMonth === "first"
-                          ? "ui-btn-primary"
-                          : "ui-btn-secondary"
-                      }`}
-                    >
-                      1 al 15
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={!showAllActivityQuincenas && activityHalfMonth === "second"}
-                      onClick={() => {
-                        setActivityHalfMonth("second");
-                        setShowAllActivityQuincenas(false);
-                      }}
-                      className={`ui-btn ui-btn-sm ${
-                        !showAllActivityQuincenas && activityHalfMonth === "second"
-                          ? "ui-btn-primary"
-                          : "ui-btn-secondary"
-                      }`}
-                    >
-                      16 al fin de mes
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={showAllActivityQuincenas}
-                      onClick={() => setShowAllActivityQuincenas(true)}
-                      className={`ui-btn ui-btn-sm ${
-                        showAllActivityQuincenas ? "ui-btn-primary" : "ui-btn-secondary"
-                      }`}
-                    >
-                      Ver todas
-                    </button>
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-[var(--ink-muted)]">
-                  {showAllActivityQuincenas
-                    ? "Mostrando actividades de todas las quincenas."
-                    : activityQuincenaRange
-                      ? `Mostrando actividades con fecha de entrega del ${activityQuincenaRange.startKey} al ${activityQuincenaRange.endKey}.`
-                      : "Selecciona un mes valido."}
-                </p>
-              </div>
-
-              {selectedAssigneeId !== UNASSIGNED_SENTINEL ? (
-                <div className="border-t border-[var(--line)] pt-4">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-                    Exportar actividades
-                  </p>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <label className="text-xs text-[var(--ink-muted)]">
-                      Desde
-                      <input
-                        type="date"
-                        value={exportFromDate}
-                        onChange={(event) => setExportFromDate(event.target.value)}
-                        className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                      />
-                    </label>
-                    <label className="text-xs text-[var(--ink-muted)]">
-                      Hasta
-                      <input
-                        type="date"
-                        value={exportToDate}
-                        onChange={(event) => setExportToDate(event.target.value)}
-                        className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={onExportUserActivity}
-                      disabled={exportingActivity}
-                      className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {exportingActivity ? "Exportando…" : "Exportar a Excel"}
-                    </button>
-                  </div>
-                  {exportError ? (
-                    <p className="mt-2 text-xs text-[var(--danger)]">{exportError}</p>
-                  ) : (
-                    <p className="mt-2 text-xs text-[var(--ink-muted)]">
-                      Descarga un Excel con todas las tareas (principales y consecuentes, finalizadas y no
-                      completadas) de {assigneeLabel(selectedAssigneeId)} con fecha límite o de cierre en el
-                      rango elegido, incluyendo tipo de actividad, estado, resultado y horas.
-                    </p>
-                  )}
-                </div>
-              ) : null}
-              </>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mt-6">
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="ui-control"
-              placeholder="Buscar tarea"
-            />
-          </div>
-        )}
-
-        <div className="mt-3">
-          <label className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)]">
-            <input
-              type="checkbox"
-              checked={showDoneTasks}
-              onChange={(event) => setShowDoneTasks(event.target.checked)}
-            />
-            Mostrar tareas finalizadas
-          </label>
-        </div>
-
-        {error ? (
-          <p className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">
-            {error}
-          </p>
-        ) : null}
-        {info ? (
-          <p className="mt-4 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/8 px-4 py-3 text-sm text-[var(--foreground)]">
-            {info}
-          </p>
-        ) : null}
-
-      </section>
-
-      <section className="kpi-card fade-up overflow-hidden p-0">
-        {loading ? (
-          <div className="p-5">
-            <div className="ui-skeleton h-6 w-40" />
-          </div>
-        ) : displayTasks.length === 0 ? (
-          <p className="ui-empty m-4 px-4 py-3 text-sm">No hay tareas con esos filtros.</p>
-        ) : (
-          <div className="max-w-full overflow-x-auto">
-            <table className="ui-table min-w-full w-full">
-              <thead>
-                <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
-                  <th className="px-4 py-3 font-semibold">Título</th>
-                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Actividad</th>
-                  {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Asignado</th> : null}
-                  <th className="px-4 py-3 font-semibold">Estado</th>
-                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Prioridad</th>
-                  <th className="px-4 py-3 font-semibold">Semáforo</th>
-                  <th className="px-4 py-3 font-semibold">Acción</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayTasks.map((task) => {
+  const renderTask = (task: TaskRow) => {
                   const due = taskDueSemaforo(task);
                   const canDeleteTask = role === "manager" || task.createdBy === currentUserId;
                   const consequentTasks = consequentTasksByParent[task.id] ?? [];
@@ -2111,7 +1469,599 @@ export default function TasksPage() {
                       ) : null}
                     </Fragment>
                   );
-                })}
+  };
+
+  const tableHead = (
+              <thead>
+                <tr className="border-b border-[var(--line)] bg-[var(--background)]/70 text-left">
+                  <th className="px-4 py-3 font-semibold">Título</th>
+                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Actividad</th>
+                  {showCodeAndAssigneeColumns ? <th className="px-4 py-3 font-semibold">Asignado</th> : null}
+                  <th className="px-4 py-3 font-semibold">Estado</th>
+                  <th className="px-4 py-3 font-semibold hidden xl:table-cell">Prioridad</th>
+                  <th className="px-4 py-3 font-semibold">Semáforo</th>
+                  <th className="px-4 py-3 font-semibold">Acción</th>
+                </tr>
+              </thead>
+  );
+
+  const renderGroups = (groups: TaskGroup[], depth: number) =>
+    groups.map((group) => {
+      const open = isGroupOpen(group.key);
+      return (
+        <Fragment key={group.key}>
+          <tr className={`border-b border-[var(--line)] ${depth === 0 ? "bg-[var(--background)]" : "bg-white"}`}>
+            <td colSpan={showCodeAndAssigneeColumns ? 7 : 6} className="p-0">
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setGroupsOpen([group.key], !open)}
+                className="flex w-full items-center gap-2 py-3 pr-4 text-left hover:bg-[var(--background)]/70"
+                style={{ paddingLeft: `${1 + depth * 1.25}rem` }}
+              >
+                <span aria-hidden="true" className="w-3 text-xs text-[var(--ink-muted)]">
+                  {open ? "▼" : "▶"}
+                </span>
+                <span className={depth === 0 ? "text-base font-semibold" : "text-sm font-semibold"}>{group.label}</span>
+                <span className="text-xs text-[var(--ink-muted)]">{group.total} tarea(s)</span>
+                {group.overdue > 0 ? (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800">
+                    {group.overdue} vencida(s)
+                  </span>
+                ) : null}
+              </button>
+            </td>
+          </tr>
+          {open ? renderGroups(group.groups, depth + 1) : null}
+          {open ? group.tasks.map(renderTask) : null}
+        </Fragment>
+      );
+    });
+
+  return (
+    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
+      {selfReportOpen ? (
+        <SelfReportModal
+          projects={projects}
+          projectLabel={projectLabel}
+          onClose={() => setSelfReportOpen(false)}
+          onCreated={(created) => {
+            setSelfReportOpen(false);
+            setInfo(`Actividad ${created.code} registrada. Queda pendiente hasta que gerencia la apruebe.`);
+            void loadData(role);
+          }}
+        />
+      ) : null}
+
+      <section className="glass-panel fade-up p-6 md:p-8">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink-muted)]">
+              Sistema de proyectos
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
+              {isWorker ? "Mis tareas" : "Tareas individuales"}
+            </h1>
+            <p className="mt-1.5 max-w-2xl text-sm text-[var(--ink-muted)] md:text-base">
+              {isWorker
+                ? "Gestiona y actualiza tus tareas asignadas."
+                : "Vista y filtrado detallado de todas las tareas."}
+            </p>
+          </div>
+          {role === "lead" || role === "worker" ? (
+            <button
+              type="button"
+              onClick={() => setSelfReportOpen(true)}
+              className="ui-btn ui-btn-secondary ui-btn-sm self-start md:self-auto"
+              title="Para trabajo que hiciste y nadie te asignó; gerencia lo aprueba"
+            >
+              + Registrar actividad
+            </button>
+          ) : null}
+        </div>
+
+        {error ? (
+          <p className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--danger)]">
+            {error}
+          </p>
+        ) : null}
+        {info ? (
+          <p className="mt-4 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/8 px-4 py-3 text-sm text-[var(--foreground)]">
+            {info}
+          </p>
+        ) : null}
+
+        <ActiveTasksPanel
+          tasks={myActiveTasks}
+          availableTasks={availableTasks}
+          canClaim={role === "lead" || role === "worker"}
+          projectLabel={projectLabel}
+          savingTaskId={savingTaskId}
+          onClaim={(taskId) => void onClaimTask(taskId)}
+          onStart={(taskId) => void onTimerAction(taskId, "doing")}
+          onPause={(taskId) => void onTimerAction(taskId, "paused")}
+          onFinish={(taskId) => void onTimerAction(taskId, "done")}
+          onRequestExtension={setExtensionTask}
+        />
+
+      </section>
+
+      {canManagePlanning ? (
+        <section className="kpi-card fade-up overflow-hidden p-0" aria-label="Mis tareas">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
+            <h2 className="text-lg font-semibold">
+              Mis tareas <span className="text-sm font-normal text-[var(--ink-muted)]">({myTasks.length})</span>
+            </h2>
+            <label className="flex items-center gap-2 text-sm text-[var(--ink-muted)]">
+              <input
+                type="checkbox"
+                checked={showMyDoneTasks}
+                onChange={(event) => setShowMyDoneTasks(event.target.checked)}
+              />
+              Mostrar finalizadas
+            </label>
+          </div>
+          {loading ? (
+            <div className="p-5">
+              <div className="ui-skeleton h-6 w-40" />
+            </div>
+          ) : myTasks.length === 0 ? (
+            <p className="ui-empty m-4 px-4 py-3 text-sm">No tienes tareas pendientes.</p>
+          ) : (
+            <div className="max-w-full overflow-x-auto">
+              <table className="ui-table min-w-full w-full">
+                {tableHead}
+                <tbody>{myTasks.map(renderTask)}</tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {role === "manager" ? (
+        <PendingApprovalsPanel
+          tasks={tasks.filter((task) => task.approvalStatus === "pending")}
+          projects={projects}
+          projectLabel={projectLabel}
+          assigneeLabel={assigneeLabel}
+          onReviewed={(reviewed, decision) => {
+            setTasks((current) => current.map((item) => (item.id === reviewed.id ? { ...item, ...reviewed } : item)));
+            setInfo(
+              decision === "approve"
+                ? `Tarea ${reviewed.code} aprobada como ${activityTypeLabels[reviewed.activityType] ?? reviewed.activityType}.`
+                : `Tarea ${reviewed.code} rechazada.`,
+            );
+          }}
+        />
+      ) : null}
+
+      <section className="glass-panel fade-up p-6 md:p-8">
+        {canManagePlanning ? <h2 className="text-2xl font-semibold tracking-tight">Tareas del equipo</h2> : null}
+
+        <div className="mt-5 rounded-2xl border border-[var(--line)] bg-gradient-to-r from-white via-[var(--background)] to-white p-4">
+          <button
+            type="button"
+            aria-expanded={operationalViewExpanded}
+            aria-controls="operational-task-view"
+            onClick={() => setOperationalViewExpanded((expanded) => !expanded)}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <span>
+              <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                {isWorker ? "Mi jornada" : "Vista operativa"}
+              </span>
+              <span className="mt-1 block text-sm text-[var(--ink-muted)]">
+                {workerKpis.active} pendientes · {workerKpis.doing} en curso · {workerKpis.blocked} bloqueadas
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-sm font-semibold text-[var(--accent)]">
+              {operationalViewExpanded ? "Ocultar" : "Desplegar"}
+              <span aria-hidden="true" className="text-lg leading-none">
+                {operationalViewExpanded ? "−" : "+"}
+              </span>
+            </span>
+          </button>
+          {operationalViewExpanded ? (
+            <div id="operational-task-view" className="mt-4 border-t border-[var(--line)] pt-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  {isWorker ? "Mi jornada" : "Vista operativa"}
+                </p>
+                <p className="mt-1 text-lg font-semibold capitalize">
+                  {workerDisplayName ? `Hola, ${workerDisplayName}` : "Hola"}
+                </p>
+                <p className="text-sm text-[var(--ink-muted)]">{workerHeaderDate}</p>
+              </div>
+              <button
+                onClick={() => setFocusMode((current) => !current)}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  focusMode
+                    ? "border border-[var(--accent)] bg-[var(--accent)] text-white"
+                    : "border border-[var(--line)] bg-white text-[var(--foreground)] hover:bg-[var(--background)]"
+                }`}
+              >
+                {focusMode ? "Modo enfoque activo" : "Activar modo enfoque"}
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Pendientes</p>
+                <p className="mt-1 text-2xl font-semibold">{workerKpis.active}</p>
+              </div>
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">En curso</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--accent)]">{workerKpis.doing}</p>
+              </div>
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Bloqueadas</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--danger)]">{workerKpis.blocked}</p>
+              </div>
+              <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--ink-muted)]">Vencen hoy</p>
+                <p className="mt-1 text-2xl font-semibold text-amber-700">{workerKpis.dueToday}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--line)] bg-white p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">Avance personal</p>
+                <p className="text-xs text-[var(--ink-muted)]">
+                  {workerKpis.done}/{workerKpis.total} finalizadas
+                </p>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--background)]">
+                <div
+                  className="h-full rounded-full bg-[var(--accent)] transition-all"
+                  style={{ width: `${workerKpis.progress}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {workerPriorityTasks.length === 0 ? (
+                <p className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-[var(--ink-muted)] md:col-span-2">
+                  Excelente, no tienes tareas activas con los filtros actuales.
+                </p>
+              ) : (
+                workerPriorityTasks.map((task) => {
+                  const due = taskDueSemaforo(task);
+                  return (
+                    <div key={task.id} className="rounded-xl border border-[var(--line)] bg-white p-3">
+                      <p className="text-sm font-semibold">{task.title}</p>
+                      <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                        {activityTypeLabels[task.activityType] ?? task.activityType} · {priorityLabels[task.priority]}
+                      </p>
+                      <p className={`mt-2 text-xs font-semibold ${due.textClass}`}>{due.label}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--line)] bg-white p-3">
+              <p className="text-sm font-semibold">Línea de tiempo rápida</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
+                    Atrasadas ({workerTimeline.overdue.length})
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {workerTimeline.overdue.slice(0, 3).map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
+                          className="text-left text-xs font-semibold text-red-700 underline-offset-2 hover:underline"
+                        >
+                          {task.title}
+                        </button>
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
+                          className="text-[11px] text-red-700/80 underline-offset-2 hover:underline"
+                        >
+                          Historial
+                        </button>
+                      </div>
+                    ))}
+                    {workerTimeline.overdue.length === 0 ? (
+                      <p className="text-xs text-red-700/70">Sin tareas atrasadas.</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">
+                    Hoy ({workerTimeline.today.length})
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {workerTimeline.today.slice(0, 3).map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
+                          className="text-left text-xs font-semibold text-amber-800 underline-offset-2 hover:underline"
+                        >
+                          {task.title}
+                        </button>
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
+                          className="text-[11px] text-amber-800/80 underline-offset-2 hover:underline"
+                        >
+                          Historial
+                        </button>
+                      </div>
+                    ))}
+                    {workerTimeline.today.length === 0 ? (
+                      <p className="text-xs text-amber-800/70">Sin vencimientos para hoy.</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                    Mañana ({workerTimeline.tomorrow.length})
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {workerTimeline.tomorrow.slice(0, 3).map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "description")}
+                          className="text-left text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline"
+                        >
+                          {task.title}
+                        </button>
+                        <button
+                          onClick={() => onOpenTaskFromTimeline(task.id, "history")}
+                          className="text-[11px] text-emerald-700/80 underline-offset-2 hover:underline"
+                        >
+                          Historial
+                        </button>
+                      </div>
+                    ))}
+                    {workerTimeline.tomorrow.length === 0 ? (
+                      <p className="text-xs text-emerald-700/70">Sin tareas programadas.</p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+            </div>
+            ) : null}
+        </div>
+
+        {canManagePlanning ? (
+          <div className="mt-6 space-y-4">
+            <TaskFilterBar
+              search={search}
+              onSearch={setSearch}
+              specialties={LEAD_SPECIALTIES.map((value) => ({ value, label: specialtyLabels[value] }))}
+              specialty={selectedSpecialty}
+              onSpecialty={(value) => {
+                setSelectedSpecialty(value as "" | LeadSpecialty);
+                setSelectedAcademy("");
+                setSelectedProjectId("");
+                setSelectedAssigneeId("");
+              }}
+              academies={
+                role === "manager"
+                  ? availableAcademies.map((academy) => ({ value: academy.key, label: academy.label }))
+                  : null
+              }
+              academy={selectedAcademy}
+              onAcademy={(value) => {
+                setSelectedAcademy(value);
+                setSelectedProjectId("");
+                setSelectedAssigneeId("");
+              }}
+              projects={activeProjects.map((project) => ({
+                value: project.id,
+                label: `${project.code} · ${project.name}`,
+              }))}
+              projectId={selectedProjectId}
+              onProject={(value) => {
+                setSelectedProjectId(value);
+                setSelectedAssigneeId("");
+              }}
+              people={(selectedProjectId
+                ? peopleForSelectedProject
+                : role === "manager"
+                  ? peopleWithTaskCounts
+                  : []
+              ).map((person) => ({ value: person.id, label: `${person.label} (${person.count})` }))}
+              assigneeId={selectedAssigneeId}
+              onAssignee={(value) => {
+                if (value) {
+                  if (value !== selectedAssigneeId) selectAssignee(value);
+                } else {
+                  setSelectedAssigneeId("");
+                }
+              }}
+              assigneeFallbackLabel={selectedAssigneeId ? assigneeLabel(selectedAssigneeId) : ""}
+              onClear={() => {
+                setSearch("");
+                setSelectedSpecialty("");
+                setSelectedAcademy("");
+                setSelectedProjectId("");
+                setSelectedAssigneeId("");
+              }}
+            />
+
+            {selectedAssigneeId ? (
+              <>
+              <div className="border-t border-[var(--line)] pt-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                  Periodo de actividades
+                </p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="text-xs text-[var(--ink-muted)]">
+                    Mes
+                    <input
+                      type="month"
+                      value={activityYearMonth}
+                      onChange={(event) => {
+                        setActivityYearMonth(event.target.value);
+                        setShowAllActivityQuincenas(false);
+                      }}
+                      className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Quincena de actividades">
+                    <button
+                      type="button"
+                      aria-pressed={!showAllActivityQuincenas && activityHalfMonth === "first"}
+                      onClick={() => {
+                        setActivityHalfMonth("first");
+                        setShowAllActivityQuincenas(false);
+                      }}
+                      className={`ui-btn ui-btn-sm ${
+                        !showAllActivityQuincenas && activityHalfMonth === "first"
+                          ? "ui-btn-primary"
+                          : "ui-btn-secondary"
+                      }`}
+                    >
+                      1 al 15
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={!showAllActivityQuincenas && activityHalfMonth === "second"}
+                      onClick={() => {
+                        setActivityHalfMonth("second");
+                        setShowAllActivityQuincenas(false);
+                      }}
+                      className={`ui-btn ui-btn-sm ${
+                        !showAllActivityQuincenas && activityHalfMonth === "second"
+                          ? "ui-btn-primary"
+                          : "ui-btn-secondary"
+                      }`}
+                    >
+                      16 al fin de mes
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={showAllActivityQuincenas}
+                      onClick={() => setShowAllActivityQuincenas(true)}
+                      className={`ui-btn ui-btn-sm ${
+                        showAllActivityQuincenas ? "ui-btn-primary" : "ui-btn-secondary"
+                      }`}
+                    >
+                      Ver todas
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                  {showAllActivityQuincenas
+                    ? "Mostrando actividades de todas las quincenas."
+                    : activityQuincenaRange
+                      ? `Mostrando actividades con fecha de entrega del ${activityQuincenaRange.startKey} al ${activityQuincenaRange.endKey}.`
+                      : "Selecciona un mes valido."}
+                </p>
+              </div>
+
+              {selectedAssigneeId !== UNASSIGNED_SENTINEL ? (
+                <details className="border-t border-[var(--line)] pt-4">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
+                    Exportar actividades
+                  </summary>
+                  <div className="mt-3 flex flex-wrap items-end gap-3">
+                    <label className="text-xs text-[var(--ink-muted)]">
+                      Desde
+                      <input
+                        type="date"
+                        value={exportFromDate}
+                        onChange={(event) => setExportFromDate(event.target.value)}
+                        className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-[var(--ink-muted)]">
+                      Hasta
+                      <input
+                        type="date"
+                        value={exportToDate}
+                        onChange={(event) => setExportToDate(event.target.value)}
+                        className="mt-1 block rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={onExportUserActivity}
+                      disabled={exportingActivity}
+                      className="ui-btn ui-btn-primary ui-btn-sm disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {exportingActivity ? "Exportando…" : "Exportar a Excel"}
+                    </button>
+                  </div>
+                  {exportError ? (
+                    <p className="mt-2 text-xs text-[var(--danger)]">{exportError}</p>
+                  ) : (
+                    <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                      Descarga un Excel con todas las tareas (principales y consecuentes, finalizadas y no
+                      completadas) de {assigneeLabel(selectedAssigneeId)} con fecha límite o de cierre en el
+                      rango elegido, incluyendo tipo de actividad, estado, resultado y horas.
+                    </p>
+                  )}
+                </details>
+              ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-6">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="ui-control"
+              placeholder="Buscar tarea"
+            />
+          </div>
+        )}
+
+        <div className="mt-3">
+          <label className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)]">
+            <input
+              type="checkbox"
+              checked={showDoneTasks}
+              onChange={(event) => setShowDoneTasks(event.target.checked)}
+            />
+            Mostrar tareas finalizadas
+          </label>
+        </div>
+
+      </section>
+
+      <section className="kpi-card fade-up overflow-hidden p-0">
+        {loading ? (
+          <div className="p-5">
+            <div className="ui-skeleton h-6 w-40" />
+          </div>
+        ) : (canManagePlanning ? teamTasks : displayTasks).length === 0 ? (
+          <p className="ui-empty m-4 px-4 py-3 text-sm">No hay tareas con esos filtros.</p>
+        ) : (
+          <div className="max-w-full overflow-x-auto">
+            {canManagePlanning ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] px-4 py-3">
+                <p className="text-sm text-[var(--ink-muted)]">{teamTasks.length} tarea(s)</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGroupsOpen(allGroupKeys(taskGroups), true)}
+                    className="ui-btn ui-btn-secondary ui-btn-sm"
+                  >
+                    Expandir todo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGroupsOpen(allGroupKeys(taskGroups), false)}
+                    className="ui-btn ui-btn-secondary ui-btn-sm"
+                  >
+                    Contraer todo
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            <table className="ui-table min-w-full w-full">
+              {tableHead}
+              <tbody>
+                {canManagePlanning ? renderGroups(taskGroups, 0) : displayTasks.map(renderTask)}
               </tbody>
             </table>
           </div>

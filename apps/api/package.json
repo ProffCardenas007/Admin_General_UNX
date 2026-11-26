@@ -13,6 +13,8 @@
     "migrate:specialties:v2": "node scripts/migrate-specialties-v2.js",
     "migrate:task-activity": "node scripts/migrate-task-activity.js",
     "migrate:work-plans": "node scripts/migrate-work-plans.js",
+    "migrate:material-planning": "node scripts/migrate-material-planning.js",
+    "seed:material-planning": "node scripts/seed-material-planning.js",
     "migrate:task-timer": "node scripts/migrate-task-timer.js",
     "migrate:projects:uniqueness": "node scripts/migrate-project-uniqueness.js",
     "migrate:created-by:ownership": "node scripts/migrate-created-by-ownership.js",

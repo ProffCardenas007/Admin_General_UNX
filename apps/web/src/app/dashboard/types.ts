@@ -38,6 +38,8 @@ export type TaskRow = {
   dueDate?: string;
   estimatedHours?: string;
   completionOutcome?: "completed" | "not_completed" | null;
+  /** Solo viene en la carga quincenal: el líder puede no tener acceso al proyecto. */
+  projectName?: string | null;
 };
 
 export type ProjectRow = {
@@ -78,6 +80,8 @@ export type Fortnight = {
   endKey: string;
   label: string;
   businessDays: number;
+  /** Festivos entre semana ya descontados de businessDays. */
+  holidays: number;
   targetHours: number;
 };
 
