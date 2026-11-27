@@ -2,6 +2,7 @@
 
 import { roleLabels } from "./labels";
 import type { TaskDraft, TaskRow, UserRow } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 /**
  * Hand-off form: when a task is finished, create the next ("consecuente") task
@@ -68,7 +69,7 @@ export default function ConsequenceModal({
                   disabled={!enabled}
                 >
                   <option value="">Mencionar responsable siguiente (opcional)</option>
-                  {users.map((user) => (
+                  {sortByLabel(users, (user) => user.fullName).map((user) => (
                     <option key={user.id} value={user.id}>
                       {user.fullName} ({roleLabels[user.role] ?? user.role})
                     </option>
@@ -82,13 +83,13 @@ export default function ConsequenceModal({
                   className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm"
                   disabled={!enabled}
                 >
-                  <option value="revision">revision</option>
-                  <option value="edicion">edicion</option>
+                  <option value="administrativo">administrativo</option>
                   <option value="creacion">creacion</option>
-                  <option value="presentaciones">presentaciones</option>
+                  <option value="edicion">edicion</option>
                   <option value="grabacion">grabacion</option>
                   <option value="plataforma">plataforma</option>
-                  <option value="administrativo">administrativo</option>
+                  <option value="presentaciones">presentaciones</option>
+                  <option value="revision">revision</option>
                 </select>
                 <input
                   type="date"

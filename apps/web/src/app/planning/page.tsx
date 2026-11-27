@@ -14,6 +14,7 @@ import {
 import { extractErrorMessage } from "../../lib/http";
 import type { PlanSummary } from "./types";
 import { formatClock, totalTimerSeconds } from "../tasks/timer";
+import { sortByLabel } from "../../lib/sort";
 
 type SpecialtyOption = {
   code: string;
@@ -259,7 +260,7 @@ export default function PlanningPage() {
           className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
         >
           <option value="">Selecciona una especialidad</option>
-          {availableSpecialties.map((item) => (
+          {sortByLabel(availableSpecialties, (item) => item.name).map((item) => (
             <option key={item.code} value={item.code}>
               {item.name}
             </option>
@@ -273,7 +274,7 @@ export default function PlanningPage() {
           onChange={(event) => setStatus(event.target.value as typeof status)}
           className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
         >
-          {statusOptions.map((option) => (
+          {sortByLabel(statusOptions, (option) => option.label).map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -385,8 +386,8 @@ export default function PlanningPage() {
               onChange={(e) => setTemplate(e.target.value as "blank" | "manual")}
               className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
             >
-              <option value="manual">Manual de clase</option>
               <option value="blank">En blanco</option>
+              <option value="manual">Manual de clase</option>
             </select>
           </label>
           {template === "manual" && (

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { API_URL, authHeaders } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import type { ProjectRow, TaskRow } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 type Props = {
   projects: ProjectRow[];
@@ -68,7 +69,7 @@ export default function SelfReportModal({ projects, projectLabel, onClose, onCre
           <label className="block text-sm">
             <span className="font-semibold">Proyecto</span>
             <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="ui-control mt-1">
-              {selectable.map((project) => (
+              {sortByLabel(selectable, (project) => projectLabel(project.id)).map((project) => (
                 <option key={project.id} value={project.id}>
                   {projectLabel(project.id)}
                 </option>

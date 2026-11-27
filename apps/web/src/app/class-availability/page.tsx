@@ -4,6 +4,13 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
+import WeekSchedule, { type AssignedClassRow } from "../class-schedule/WeekSchedule";
+import ImportPanel from "./ImportPanel";
+import CalendarSelect from "../class-schedule/CalendarSelect";
+import { currentCalendar } from "../../lib/calendar";
+import TeachingProfile, { EMPTY_TEACHING, type Teaching } from "../class-schedule/TeachingProfile";
+import type { PlanningNotify } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 type UserRow = {
   id: string;
@@ -25,9 +32,18 @@ type IncidenceRow = {
 type AvailabilityRegistryEntry = {
   availability: AvailabilityMap;
   incidences: IncidenceRow[];
+  teaching?: Teaching;
+  savedCalendars?: string[];
   updatedAt: string;
 };
 type AvailabilityRegistry = Record<string, AvailabilityRegistryEntry>;
+type ClassSection = "availability" | "incidences" | "schedule";
+
+const SECTIONS: Array<{ id: ClassSection; label: string }> = [
+  { id: "availability", label: "Disponibilidad" },
+  { id: "incidences", label: "Incidencias" },
+  { id: "schedule", label: "Horario" },
+];
 
 const WEEK_DAYS = [
   "Lunes",
@@ -74,9 +90,6 @@ function buildTimeSlots() {
 
   for (let hour = 7; hour <= 22; hour += 1) {
     slots.push(formatTime(hour, 0));
-    if (hour < 22) {
-      slots.push(formatTime(hour, 30));
-    }
   }
 
   return slots;
@@ -149,9 +162,11 @@ function normalizeRegistry(raw: unknown) {
       return;
     }
 
-    const entry = value as { availability?: unknown; updatedAt?: unknown };
+    const entry = value as { availability?: unknown; teaching?: Teaching; savedCalendars?: string[]; updatedAt?: unknown };
     registry[userId] = {
       availability: normalizeAvailability(entry.availability),
+      teaching: entry.teaching,
+      savedCalendars: entry.savedCalendars,
       incidences: normalizeIncidences((entry as { incidences?: unknown }).incidences),
       updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
     };
@@ -184,6 +199,50 @@ export default function ClassAvailabilityPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [registry, setRegistry] = useState<AvailabilityRegistry>({});
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [savingTeaching, setSavingTeaching] = useState(false);
+  const [calendar, setCalendar] = useState(() => currentCalendar());
+  // Sube tras importar o reiniciar para volver a pedir los datos.
+  const [dataVersion, setDataVersion] = useState(0);
+  const notify = useMemo<PlanningNotify>(
+    () => ({
+      error: setError,
+      info: setInfo,
+      clear: () => {
+        setError("");
+        setInfo("");
+      },
+    }),
+    [],
+  );
+  const [activeSection, setActiveSection] = useState<ClassSection>("availability");
+  const [wholeTeam, setWholeTeam] = useState(false);
+  // El horario guarda de quién es, para no mostrar el de otra persona mientras carga.
+  const [schedule, setSchedule] = useState<{ key: string; classes: AssignedClassRow[]; failed: boolean }>({
+    key: "",
+    classes: [],
+    failed: false,
+  });
+  const scheduleKey = wholeTeam ? "all" : selectedUserId;
+
+  useEffect(() => {
+    if (!scheduleKey || getStoredRole() !== "manager") return;
+    let cancelled = false;
+    const url =
+      scheduleKey === "all"
+        ? `${API_URL}/class-planning/sessions`
+        : `${API_URL}/class-planning/my-sessions?userId=${encodeURIComponent(scheduleKey)}`;
+    axios
+      .get(url, { headers: authHeaders() })
+      .then((response) => {
+        if (!cancelled) setSchedule({ key: scheduleKey, classes: response.data as AssignedClassRow[], failed: false });
+      })
+      .catch(() => {
+        if (!cancelled) setSchedule({ key: scheduleKey, classes: [], failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scheduleKey, dataVersion]);
 
   const timeSlots = useMemo(() => buildTimeSlots(), []);
 
@@ -206,7 +265,7 @@ export default function ClassAvailabilityPage() {
           headers: authHeaders(),
         });
 
-        const loadedUsers = usersResponse.data as UserRow[];
+        const loadedUsers = sortByLabel(usersResponse.data as UserRow[], (user) => user.fullName);
         setUsers(loadedUsers);
         setSelectedUserId((current) => {
           if (current && loadedUsers.some((user) => user.id === current)) {
@@ -215,7 +274,7 @@ export default function ClassAvailabilityPage() {
           return loadedUsers[0]?.id ?? "";
         });
 
-        const registryResponse = await axios.get(`${API_URL}/teacher-availability/registry`, {
+        const registryResponse = await axios.get(`${API_URL}/teacher-availability/registry?calendar=${calendar}`, {
           headers: authHeaders(),
         });
         setRegistry(normalizeRegistry(registryResponse.data as unknown));
@@ -227,7 +286,7 @@ export default function ClassAvailabilityPage() {
     };
 
     void loadData();
-  }, [router]);
+  }, [router, dataVersion, calendar]);
 
   const selectedUser = useMemo(
     () => users.find((user) => user.id === selectedUserId),
@@ -256,26 +315,42 @@ export default function ClassAvailabilityPage() {
     }
 
     const nextIncidences = selectedIncidences.filter((item) => item.id !== incidenceId);
-    const nextEntry: AvailabilityRegistryEntry = {
-      availability: selectedAvailability,
-      incidences: nextIncidences,
-      updatedAt: new Date().toISOString(),
-    };
-
     try {
-      await axios.put(`${API_URL}/teacher-availability/users/${selectedUserId}`, nextEntry, {
-        headers: authHeaders(),
-      });
+      await axios.put(
+        `${API_URL}/teacher-availability/users/${selectedUserId}`,
+        { incidences: nextIncidences },
+        { headers: authHeaders() },
+      );
 
       setRegistry((current) => ({
         ...current,
-        [selectedUserId]: nextEntry,
+        [selectedUserId]: { ...current[selectedUserId], incidences: nextIncidences },
       }));
       setInfo("Incidencia eliminada correctamente.");
       setError("");
     } catch {
       setError("No se pudo borrar la incidencia seleccionada.");
       setInfo("");
+    }
+  };
+
+  const onTeachingChange = async (next: Teaching) => {
+    const userId = selectedUserId;
+    setSavingTeaching(true);
+    try {
+      const response = await axios.put<AvailabilityRegistryEntry>(
+        `${API_URL}/teacher-availability/users/${userId}`,
+        { teaching: next, calendar },
+        { headers: authHeaders() },
+      );
+      setRegistry((current) => ({ ...current, [userId]: response.data }));
+      setInfo("Datos del profesor guardados.");
+      setError("");
+    } catch {
+      setError("No se pudieron guardar los datos del profesor.");
+      setInfo("");
+    } finally {
+      setSavingTeaching(false);
     }
   };
 
@@ -315,7 +390,7 @@ export default function ClassAvailabilityPage() {
           Programación de clases del equipo
         </h1>
         <p className="mt-1.5 text-sm text-[var(--ink-muted)]">
-          Consulta la disponibilidad semanal guardada por cada usuario.
+          Importa la programación y consulta la disponibilidad, las incidencias y el horario de cada persona.
         </p>
         {error ? (
           <p className="mt-3 rounded-xl border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-2 text-sm text-[var(--danger)]">
@@ -329,25 +404,71 @@ export default function ClassAvailabilityPage() {
         ) : null}
       </header>
 
+      <ImportPanel calendar={calendar} notify={notify} reload={async () => setDataVersion((current) => current + 1)} />
+
       <section className="glass-panel fade-up p-4 md:p-5" style={{ animationDelay: "90ms" }}>
-        <div className="max-w-sm">
+        <div className="flex flex-wrap items-end gap-4">
+          <CalendarSelect
+            value={calendar}
+            saved={Object.values(registry).flatMap((entry) => entry.savedCalendars ?? [])}
+            onChange={setCalendar}
+          />
+        <div className="w-full max-w-sm">
           <label htmlFor="availability-user-select" className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
             Usuario
           </label>
           <select
             id="availability-user-select"
             value={selectedUserId}
-            onChange={(event) => setSelectedUserId(event.target.value)}
+            onChange={(event) => {
+              setSelectedUserId(event.target.value);
+              setWholeTeam(false);
+            }}
             className="ui-control w-full"
           >
-            {users.map((user) => (
+            {sortByLabel(users, (user) => user.fullName).map((user) => (
               <option key={user.id} value={user.id}>
                 {user.fullName}
               </option>
             ))}
           </select>
         </div>
+        </div>
 
+        <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Secciones">
+          {SECTIONS.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              role="tab"
+              aria-selected={activeSection === section.id}
+              onClick={() => setActiveSection(section.id)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                activeSection === section.id
+                  ? "border-[var(--accent)] bg-[var(--accent)]/12 text-[var(--accent)]"
+                  : "border-white/15 bg-white/5 text-[var(--ink-soft)] hover:border-white/30"
+              }`}
+            >
+              {section.label}
+              {section.id === "incidences" && selectedIncidences.length > 0 ? ` (${selectedIncidences.length})` : ""}
+            </button>
+          ))}
+        </div>
+
+        {activeSection === "availability" ? (
+          <>
+        {!selectedEntry?.updatedAt ? (
+          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+            {selectedUser?.fullName ?? "Esta persona"} aún no ha guardado su disponibilidad de {calendar}; la cuadrícula en verde no significa que esté disponible.
+          </p>
+        ) : null}
+        <div className="mt-4">
+          <TeachingProfile
+            value={selectedEntry?.teaching ?? EMPTY_TEACHING}
+            onChange={onTeachingChange}
+            disabled={savingTeaching || !selectedUserId}
+          />
+        </div>
         <div className="mt-4 grid gap-2 md:grid-cols-3">
           {STATUS_FLOW.map((status) => (
             <div key={status} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
@@ -359,12 +480,16 @@ export default function ClassAvailabilityPage() {
           ))}
         </div>
 
+          </>
+        ) : null}
+
         <p className="mt-3 text-xs text-[var(--ink-soft)]">
           Usuario seleccionado: <span className="font-semibold text-[var(--foreground)]">{selectedUser?.fullName ?? "Sin selección"}</span>
           {" · "}
           Último guardado: <span className="font-semibold text-[var(--foreground)]">{formatDateTime(selectedEntry?.updatedAt ?? "")}</span>
         </p>
 
+        {activeSection === "incidences" ? (
         <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
             Incidencias
@@ -394,8 +519,28 @@ export default function ClassAvailabilityPage() {
             )}
           </div>
         </div>
+        ) : null}
+
+        {activeSection === "schedule" ? (
+          <div className="mt-3">
+            <WeekSchedule
+              title={wholeTeam ? "Horario de todo el equipo" : `Horario de ${selectedUser?.fullName ?? "—"}`}
+              classes={schedule.key === scheduleKey ? schedule.classes : []}
+              loading={schedule.key !== scheduleKey}
+              emptyText={schedule.failed ? "No se pudo cargar el horario." : "No hay clases programadas."}
+              showTeacher={wholeTeam}
+              controls={
+                <label className="flex h-9 items-center gap-2 text-xs text-[var(--ink-soft)]">
+                  <input type="checkbox" checked={wholeTeam} onChange={(event) => setWholeTeam(event.target.checked)} />
+                  Ver todo el equipo
+                </label>
+              }
+            />
+          </div>
+        ) : null}
       </section>
 
+      {activeSection === "availability" ? (
       <section className="glass-panel fade-up overflow-hidden p-0" style={{ animationDelay: "120ms" }}>
         <div className="overflow-auto">
           <div className="min-w-[490px]">
@@ -447,6 +592,7 @@ export default function ClassAvailabilityPage() {
           </div>
         </div>
       </section>
+      ) : null}
     </div>
   );
 }

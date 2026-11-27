@@ -4,6 +4,11 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
+import WeekSchedule, { type AssignedClassRow } from "./WeekSchedule";
+import TeachingProfile, { type Teaching } from "./TeachingProfile";
+import CalendarSelect from "./CalendarSelect";
+import { currentCalendar, previousCalendar } from "../../lib/calendar";
+import { sortByLabel } from "../../lib/sort";
 
 const WEEK_DAYS = [
   "Lunes",
@@ -24,11 +29,6 @@ type IncidenceRow = {
   endTime: string;
   reason: string;
 };
-type AvailabilityRegistryEntry = {
-  availability: AvailabilityMap;
-  incidences: IncidenceRow[];
-  updatedAt: string;
-};
 type ScheduleUser = {
   id: string;
   fullName: string;
@@ -36,22 +36,6 @@ type ScheduleUser = {
   isActive: boolean;
 };
 type ClassSection = "availability" | "incidences" | "assigned";
-type AssignedClassRow = {
-  id: string;
-  classDate: string;
-  startTime: string;
-  endTime: string;
-  courseCode: string;
-  courseName: string;
-  subjectName: string;
-  teacherName: string;
-  coverTeacherName?: string;
-  effectiveTeacherName?: string;
-  isCovered?: boolean;
-  classroom?: string;
-  notes?: string | null;
-};
-
 const STATUS_META: Record<AvailabilityStatus, { label: string; symbol: string; className: string }> = {
   full: {
     label: "Disponibilidad completa",
@@ -74,48 +58,6 @@ const STATUS_META: Record<AvailabilityStatus, { label: string; symbol: string; c
 };
 
 const STATUS_FLOW: AvailabilityStatus[] = ["full", "confirm", "busy"];
-const DAY_IN_MS = 86_400_000;
-const EVENT_STYLES = [
-  "border-cyan-300/35 bg-cyan-300/10",
-  "border-emerald-300/35 bg-emerald-300/10",
-  "border-amber-300/35 bg-amber-300/10",
-  "border-rose-300/35 bg-rose-300/10",
-];
-
-function dateFromKey(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day, 12);
-}
-
-function dateKey(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(value: Date, days: number) {
-  return new Date(value.getTime() + days * DAY_IN_MS);
-}
-
-function mondayKey(value: string) {
-  const date = dateFromKey(value);
-  const dayOffset = (date.getDay() + 6) % 7;
-  return dateKey(addDays(date, -dayOffset));
-}
-
-function formatCalendarDate(value: Date) {
-  return new Intl.DateTimeFormat("es-MX", {
-    day: "numeric",
-    month: "short",
-  }).format(value);
-}
-
-function eventStyle(value: string) {
-  const seed = [...value].reduce((total, character) => total + character.charCodeAt(0), 0);
-  return EVENT_STYLES[seed % EVENT_STYLES.length];
-}
-
 function normalizeAvailability(raw: unknown) {
   if (!raw || typeof raw !== "object") {
     return {} as AvailabilityMap;
@@ -219,6 +161,13 @@ export default function ClassSchedulePage() {
   const [availability, setAvailability] = useState<AvailabilityMap>({});
   const [incidences, setIncidences] = useState<IncidenceRow[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
+  const [calendar, setCalendar] = useState(() => currentCalendar());
+  // Calendario ya cargado y si tenía algo guardado: evita guardar la cuadrícula de otro.
+  const [loadedCalendar, setLoadedCalendar] = useState({ code: "", saved: false });
+  const [savedCalendars, setSavedCalendars] = useState<string[]>([]);
+  // null mientras no carga: así no se puede guardar vacío por encima de lo ya capturado.
+  const [teaching, setTeaching] = useState<Teaching | null>(null);
+  const [savingTeaching, setSavingTeaching] = useState(false);
   const [activeSection, setActiveSection] = useState<ClassSection>("assigned");
   const [incidenceDate, setIncidenceDate] = useState("");
   const [incidenceStartTime, setIncidenceStartTime] = useState("07:00");
@@ -231,7 +180,6 @@ export default function ClassSchedulePage() {
   const [scheduleUsers, setScheduleUsers] = useState<ScheduleUser[]>([]);
   const [selectedScheduleUserId, setSelectedScheduleUserId] = useState("all");
   const [loadingSchedule, setLoadingSchedule] = useState(false);
-  const [selectedWeekStart, setSelectedWeekStart] = useState("");
 
   useEffect(() => {
     const token = getStoredToken();
@@ -245,10 +193,7 @@ export default function ClassSchedulePage() {
 
     const loadData = async () => {
       try {
-        const [availabilityResponse, assignedResponse, usersResponse] = await Promise.all([
-          axios.get(`${API_URL}/teacher-availability/me`, {
-            headers: authHeaders(),
-          }),
+        const [assignedResponse, usersResponse] = await Promise.all([
           axios.get(
             role === "manager"
               ? `${API_URL}/class-planning/sessions`
@@ -270,13 +215,8 @@ export default function ClassSchedulePage() {
           setSelectedScheduleUserId("all");
         }
 
-        const payload = normalizeSavedPayload(availabilityResponse.data as unknown);
-        setAvailability(payload.availability);
-        setIncidences(payload.incidences);
         setAssignedClasses(assignedResponse.data as AssignedClassRow[]);
       } catch {
-        setAvailability({});
-        setIncidences([]);
         setAssignedClasses([]);
         setScheduleUsers([]);
       }
@@ -284,6 +224,29 @@ export default function ClassSchedulePage() {
 
     void loadData();
   }, [router]);
+
+  useEffect(() => {
+    if (!getStoredToken()) return;
+    let cancelled = false;
+    axios
+      .get(`${API_URL}/teacher-availability/me?calendar=${calendar}`, { headers: authHeaders() })
+      .then((response) => {
+        if (cancelled) return;
+        const payload = normalizeSavedPayload(response.data as unknown);
+        const extra = response.data as { teaching?: Teaching; savedCalendars?: string[] };
+        setAvailability(payload.availability);
+        setIncidences(payload.incidences);
+        setTeaching(extra.teaching ?? null);
+        setSavedCalendars(extra.savedCalendars ?? []);
+        setLoadedCalendar({ code: calendar, saved: payload.updatedAt !== "" });
+      })
+      .catch(() => {
+        if (!cancelled) setSaveMessage("No se pudo cargar la disponibilidad.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [calendar]);
 
   useEffect(() => {
     if (currentRole !== "manager") return;
@@ -310,50 +273,7 @@ export default function ClassSchedulePage() {
   }, [currentRole, selectedScheduleUserId]);
 
   const timeSlots = useMemo(() => buildTimeSlots(), []);
-  const availableWeekStarts = useMemo(
-    () =>
-      [...new Set(assignedClasses.map((assignedClass) => mondayKey(assignedClass.classDate)))].sort(),
-    [assignedClasses],
-  );
-  const selectedWeekDates = useMemo(() => {
-    if (!selectedWeekStart) return [];
-    const monday = dateFromKey(selectedWeekStart);
-    return WEEK_DAYS.map((day, index) => ({
-      day,
-      date: addDays(monday, index),
-      key: dateKey(addDays(monday, index)),
-    }));
-  }, [selectedWeekStart]);
-  const classesByDate = useMemo(() => {
-    const grouped = new Map<string, AssignedClassRow[]>();
-    assignedClasses.forEach((assignedClass) => {
-      const current = grouped.get(assignedClass.classDate) ?? [];
-      current.push(assignedClass);
-      grouped.set(assignedClass.classDate, current);
-    });
-    grouped.forEach((classes) =>
-      classes.sort((left, right) => left.startTime.localeCompare(right.startTime)),
-    );
-    return grouped;
-  }, [assignedClasses]);
-  const selectedWeekIndex = availableWeekStarts.indexOf(selectedWeekStart);
-  const selectedWeekClassCount = selectedWeekDates.reduce(
-    (total, day) => total + (classesByDate.get(day.key)?.length ?? 0),
-    0,
-  );
   const canDeleteIncidences = currentRole === "manager";
-
-  useEffect(() => {
-    if (availableWeekStarts.length === 0) {
-      setSelectedWeekStart("");
-      return;
-    }
-    if (availableWeekStarts.includes(selectedWeekStart)) return;
-
-    const currentWeek = mondayKey(dateKey(new Date()));
-    const nextWeek = availableWeekStarts.find((week) => week >= currentWeek);
-    setSelectedWeekStart(nextWeek ?? availableWeekStarts.at(-1) ?? "");
-  }, [availableWeekStarts, selectedWeekStart]);
 
   const buildAvailabilitySnapshot = (source: AvailabilityMap) => {
     const snapshot: AvailabilityMap = {};
@@ -367,27 +287,28 @@ export default function ClassSchedulePage() {
     return snapshot;
   };
 
-  const persistData = async (
-    nextAvailability: AvailabilityMap,
-    nextIncidences: IncidenceRow[],
-    message: string,
-  ) => {
-    const snapshot = buildAvailabilitySnapshot(nextAvailability);
-
+  /** Las incidencias van por fecha, así que no dependen del calendario ni tocan la cuadrícula. */
+  const persistIncidences = async (nextIncidences: IncidenceRow[], message: string) => {
     try {
-      const payload: AvailabilityRegistryEntry = {
-        availability: snapshot,
-        incidences: nextIncidences,
-        updatedAt: new Date().toISOString(),
-      };
-
-      await axios.put(`${API_URL}/teacher-availability/me`, payload, {
-        headers: authHeaders(),
-      });
-
+      await axios.put(`${API_URL}/teacher-availability/me`, { incidences: nextIncidences }, { headers: authHeaders() });
       setSaveMessage(message);
     } catch {
-      setSaveMessage("No se pudo guardar la disponibilidad.");
+      setSaveMessage("No se pudo guardar la incidencia.");
+    }
+  };
+
+  const onTeachingChange = async (next: Teaching) => {
+    const previous = teaching;
+    setTeaching(next);
+    setSavingTeaching(true);
+    try {
+      await axios.put(`${API_URL}/teacher-availability/me`, { teaching: next }, { headers: authHeaders() });
+      setSaveMessage("Datos guardados.");
+    } catch {
+      setTeaching(previous);
+      setSaveMessage("No se pudieron guardar los datos.");
+    } finally {
+      setSavingTeaching(false);
     }
   };
 
@@ -407,8 +328,41 @@ export default function ClassSchedulePage() {
   };
 
   const onSaveAvailability = async () => {
-    await persistData(availability, incidences, "Disponibilidad guardada correctamente.");
+    if (loadedCalendar.code !== calendar) return;
+    try {
+      await axios.put(
+        `${API_URL}/teacher-availability/me`,
+        { calendar, availability: buildAvailabilitySnapshot(availability) },
+        { headers: authHeaders() },
+      );
+      setLoadedCalendar({ code: calendar, saved: true });
+      setSavedCalendars((current) => [...new Set([...current, calendar])]);
+      setHasPendingAvailabilityChanges(false);
+      setSaveMessage(`Disponibilidad ${calendar} guardada correctamente.`);
+    } catch {
+      setSaveMessage("No se pudo guardar la disponibilidad.");
+    }
+  };
+
+  const onCalendarChange = (next: string) => {
+    if (hasPendingAvailabilityChanges && !window.confirm("Tienes cambios sin guardar. ¿Cambiar de calendario y descartarlos?")) {
+      return;
+    }
     setHasPendingAvailabilityChanges(false);
+    setSaveMessage("");
+    setCalendar(next);
+  };
+
+  const onCopyPrevious = async () => {
+    const source = previousCalendar(calendar);
+    try {
+      const response = await axios.get(`${API_URL}/teacher-availability/me?calendar=${source}`, { headers: authHeaders() });
+      setAvailability(normalizeSavedPayload(response.data as unknown).availability);
+      setHasPendingAvailabilityChanges(true);
+      setSaveMessage(`Copiada de ${source}. Revisa y guarda los cambios.`);
+    } catch {
+      setSaveMessage(`No se pudo copiar ${source}.`);
+    }
   };
 
   const onAddIncidence = async () => {
@@ -456,8 +410,7 @@ export default function ClassSchedulePage() {
 
     setIncidenceError("");
     setIncidenceReason("");
-    await persistData(availability, nextIncidences, "Incidencia guardada automáticamente.");
-    setHasPendingAvailabilityChanges(false);
+    await persistIncidences(nextIncidences, "Incidencia guardada automáticamente.");
   };
 
   const onRemoveIncidence = async (incidenceId: string) => {
@@ -468,8 +421,7 @@ export default function ClassSchedulePage() {
 
     const nextIncidences = incidences.filter((item) => item.id !== incidenceId);
     setIncidences(nextIncidences);
-    await persistData(availability, nextIncidences, "Incidencia eliminada y guardada automáticamente.");
-    setHasPendingAvailabilityChanges(false);
+    await persistIncidences(nextIncidences, "Incidencia eliminada y guardada automáticamente.");
   };
 
   return (
@@ -530,6 +482,7 @@ export default function ClassSchedulePage() {
                 <button
                   type="button"
                   onClick={onSaveAvailability}
+                  disabled={loadedCalendar.code !== calendar}
                   className="ui-btn ui-btn-primary h-8 px-3 text-xs"
                 >
                   Guardar cambios
@@ -545,6 +498,24 @@ export default function ClassSchedulePage() {
 
         {activeSection === "availability" ? (
           <>
+            <div className="flex flex-wrap items-end gap-3 border-b border-white/10 px-4 py-3 md:px-5">
+              <CalendarSelect value={calendar} saved={savedCalendars} onChange={onCalendarChange} />
+              {loadedCalendar.code === calendar && !loadedCalendar.saved ? (
+                <>
+                  <p className="text-xs font-semibold text-amber-700">Aún no has guardado tu disponibilidad de {calendar}.</p>
+                  {savedCalendars.includes(previousCalendar(calendar)) ? (
+                    <button type="button" onClick={onCopyPrevious} className="ui-btn ui-btn-secondary ui-btn-sm">
+                      Copiar de {previousCalendar(calendar)}
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            {teaching ? (
+              <div className="border-b border-white/10 px-4 py-3 md:px-5">
+                <TeachingProfile value={teaching} onChange={onTeachingChange} disabled={savingTeaching} />
+              </div>
+            ) : null}
             <div className="border-b border-white/10 px-4 py-3 md:px-5">
               <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--ink-soft)]">
                 {STATUS_FLOW.map((status) => (
@@ -714,165 +685,32 @@ export default function ClassSchedulePage() {
 
         {activeSection === "assigned" ? (
           <div className="px-4 py-3 md:px-5">
-            <div className="rounded-lg border border-white/12 bg-white/[0.03] p-3">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
-                    Mi horario
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                    {selectedWeekClassCount} clases en la semana seleccionada
-                  </p>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  {currentRole === "manager" ? (
-                    <label className="flex min-w-[230px] flex-col gap-1 text-xs text-[var(--ink-soft)]">
-                      Persona
-                      <select
-                        value={selectedScheduleUserId}
-                        onChange={(event) => setSelectedScheduleUserId(event.target.value)}
-                        className="ui-control"
-                      >
-                        <option value="all">Todos los horarios</option>
-                        {scheduleUsers.map((user) => (
-                          <option key={user.id} value={user.id}>
-                            {user.fullName}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  <label className="flex min-w-[210px] flex-col gap-1 text-xs text-[var(--ink-soft)]">
-                    Semana
+            <WeekSchedule
+              title="Mi horario"
+              classes={assignedClasses}
+              loading={loadingSchedule}
+              emptyText="Aún no tienes clases programadas."
+              showTeacher={currentRole === "manager"}
+              controls={
+                currentRole === "manager" ? (
+                  <label className="flex min-w-[230px] flex-col gap-1 text-xs text-[var(--ink-soft)]">
+                    Persona
                     <select
-                      value={selectedWeekStart}
-                      onChange={(event) => setSelectedWeekStart(event.target.value)}
+                      value={selectedScheduleUserId}
+                      onChange={(event) => setSelectedScheduleUserId(event.target.value)}
                       className="ui-control"
-                      disabled={availableWeekStarts.length === 0}
                     >
-                      {availableWeekStarts.map((weekStart) => {
-                        const monday = dateFromKey(weekStart);
-                        return (
-                          <option key={weekStart} value={weekStart}>
-                            {formatCalendarDate(monday)} - {formatCalendarDate(addDays(monday, 6))}
-                          </option>
-                        );
-                      })}
+                      <option value="all">Todos los horarios</option>
+                      {sortByLabel(scheduleUsers, (user) => user.fullName).map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.fullName}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <div className="flex h-9 items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedWeekStart(availableWeekStarts[selectedWeekIndex - 1])}
-                      disabled={selectedWeekIndex <= 0}
-                      className="ui-btn h-9 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label="Semana anterior"
-                    >
-                      Anterior
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedWeekStart(availableWeekStarts[selectedWeekIndex + 1])}
-                      disabled={selectedWeekIndex < 0 || selectedWeekIndex >= availableWeekStarts.length - 1}
-                      className="ui-btn h-9 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label="Semana siguiente"
-                    >
-                      Siguiente
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4">
-                {loadingSchedule ? (
-                  <p className="text-sm text-[var(--ink-soft)]">Cargando horario...</p>
-                ) : assignedClasses.length === 0 ? (
-                  <p className="text-sm text-[var(--ink-soft)]">Aún no tienes clases programadas.</p>
-                ) : (
-                  <>
-                    <div className="hidden overflow-x-auto pb-2 md:block">
-                      <div className="grid min-w-[980px] grid-cols-7 gap-px overflow-hidden rounded-lg border border-white/10 bg-white/10">
-                        {selectedWeekDates.map((day) => (
-                          <div key={`${day.key}-heading`} className="bg-[var(--surface-strong)] px-2 py-2 text-center">
-                            <p className="text-[10px] font-semibold uppercase text-[var(--ink-muted)]">{day.day}</p>
-                            <p className="mt-0.5 text-xs font-semibold text-[var(--foreground)]">{formatCalendarDate(day.date)}</p>
-                          </div>
-                        ))}
-                        {selectedWeekDates.map((day) => {
-                          const dayClasses = classesByDate.get(day.key) ?? [];
-                          return (
-                            <div key={day.key} className="min-h-56 space-y-1.5 bg-[var(--surface)] p-1.5">
-                              {dayClasses.length === 0 ? (
-                                <p className="py-6 text-center text-[10px] text-[var(--ink-muted)]">Sin clases</p>
-                              ) : (
-                                dayClasses.map((assignedClass) => (
-                                  <article
-                                    key={assignedClass.id}
-                                    className={`min-h-24 overflow-hidden rounded-md border p-2 text-[10px] ${eventStyle(`${assignedClass.courseName}-${assignedClass.subjectName}`)}`}
-                                  >
-                                    <p className="font-mono font-semibold text-[var(--accent)]">
-                                      {assignedClass.startTime.slice(0, 5)} - {assignedClass.endTime.slice(0, 5)}
-                                    </p>
-                                    <p className="mt-1 break-words text-xs font-semibold leading-tight text-[var(--foreground)]">
-                                      {assignedClass.courseName}
-                                    </p>
-                                    <p className="mt-1 break-words leading-tight text-[var(--ink-soft)]">{assignedClass.subjectName}</p>
-                                    <p className="mt-1 break-words leading-tight text-[var(--ink-muted)]">
-                                      {assignedClass.classroom || "Sin aula"}
-                                    </p>
-                                    {currentRole === "manager" || assignedClass.isCovered ? (
-                                      <p className="mt-1 break-words leading-tight text-[var(--ink-muted)]">
-                                        {assignedClass.effectiveTeacherName || assignedClass.teacherName}
-                                      </p>
-                                    ) : null}
-                                  </article>
-                                ))
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 md:hidden">
-                      {selectedWeekDates.map((day) => {
-                        const dayClasses = classesByDate.get(day.key) ?? [];
-                        return (
-                          <section key={day.key} className="border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <h2 className="text-xs font-semibold text-[var(--foreground)]">{day.day}</h2>
-                              <span className="text-[10px] text-[var(--ink-muted)]">{formatCalendarDate(day.date)}</span>
-                            </div>
-                            {dayClasses.length === 0 ? (
-                              <p className="mt-1 text-xs text-[var(--ink-muted)]">Sin clases</p>
-                            ) : (
-                              <div className="mt-1.5 space-y-1.5">
-                                {dayClasses.map((assignedClass) => (
-                                  <article
-                                    key={assignedClass.id}
-                                    className={`grid grid-cols-[72px_1fr] gap-2 rounded-md border p-2 text-xs ${eventStyle(`${assignedClass.courseName}-${assignedClass.subjectName}`)}`}
-                                  >
-                                    <p className="font-mono text-[10px] font-semibold text-[var(--accent)]">
-                                      {assignedClass.startTime.slice(0, 5)}<br />{assignedClass.endTime.slice(0, 5)}
-                                    </p>
-                                    <div className="min-w-0">
-                                      <p className="break-words font-semibold text-[var(--foreground)]">{assignedClass.courseName}</p>
-                                      <p className="break-words text-[var(--ink-soft)]">{assignedClass.subjectName} · {assignedClass.classroom || "Sin aula"}</p>
-                                      {currentRole === "manager" || assignedClass.isCovered ? (
-                                        <p className="break-words text-[var(--ink-muted)]">{assignedClass.effectiveTeacherName || assignedClass.teacherName}</p>
-                                      ) : null}
-                                    </div>
-                                  </article>
-                                ))}
-                              </div>
-                            )}
-                          </section>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
+                ) : null
+              }
+            />
           </div>
         ) : null}
       </section>

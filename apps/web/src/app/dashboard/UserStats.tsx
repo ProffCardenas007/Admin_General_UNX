@@ -5,6 +5,7 @@ import Link from "next/link";
 import { specialtyLabels } from "../../lib/specialties";
 import { groupAssignedHoursBySpecialty, summarizeUserTasks, toLocalDateKey } from "./metrics";
 import { roleLabels, type ProjectRow, type TaskRow, type UserOption } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 export default function UserStats({
   users,
@@ -74,9 +75,8 @@ export default function UserStats({
                 className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
               >
                 <option value="">Selecciona un usuario</option>
-                {users
-                  .filter((user) => user.role !== "manager")
-                  .map((user) => (
+                {sortByLabel(users
+                  .filter((user) => user.role !== "manager"), (user) => user.fullName).map((user) => (
                     <option key={user.id} value={user.id}>
                       {user.fullName} ({roleLabels[user.role]})
                     </option>

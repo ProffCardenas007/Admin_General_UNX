@@ -14,6 +14,7 @@ import { UserEntity } from '../database/entities/user.entity';
 import { ProjectEntity } from '../database/entities/project.entity';
 import { TaskEntity } from '../database/entities/task.entity';
 import { TaskUpdateEntity } from '../database/entities/task-update.entity';
+import { CALENDAR_PATTERN, currentCalendar } from '../common/calendar';
 import { ClassScheduleProfileEntity } from '../database/entities/class-schedule-profile.entity';
 import { ClassCourseEntity } from '../database/entities/class-course.entity';
 import { ClassCourseSubjectEntity } from '../database/entities/class-course-subject.entity';
@@ -83,7 +84,11 @@ export class ImportsService {
     private readonly classSessionsRepository: Repository<ClassSessionEntity>,
   ) {}
 
-  async processClassPlanningUpload(input: UploadInput) {
+  async processClassPlanningUpload(input: UploadInput, requestedCalendar?: string) {
+    const calendar =
+      requestedCalendar && CALENDAR_PATTERN.test(requestedCalendar)
+        ? requestedCalendar
+        : currentCalendar();
     const workbook = await this.loadPlanningWorkbook(input);
     const teacherRows = this.parseTeacherRows(workbook);
     if (teacherRows.length === 0) {
@@ -151,14 +156,20 @@ export class ImportsService {
           });
           availabilityChanged =
             !currentProfile ||
-            !this.haveSameAvailability(currentProfile.availability, availability);
+            !this.haveSameAvailability(
+              currentProfile.calendars?.[calendar]?.availability ?? {},
+              availability,
+            );
 
           if (availabilityChanged) {
             await this.classScheduleProfilesRepository.save(
               this.classScheduleProfilesRepository.create({
                 id: currentProfile?.id,
                 userId: savedUser.id,
-                availability,
+                calendars: {
+                  ...(currentProfile?.calendars ?? {}),
+                  [calendar]: { availability, updatedAt: new Date().toISOString() },
+                },
                 incidences: currentProfile?.incidences ?? [],
               }),
             );

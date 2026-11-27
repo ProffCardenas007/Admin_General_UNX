@@ -9,6 +9,7 @@ import { In, Repository } from 'typeorm';
 import { ClassCourseEntity } from '../database/entities/class-course.entity';
 import { ClassCourseSubjectEntity } from '../database/entities/class-course-subject.entity';
 import { ClassSessionEntity } from '../database/entities/class-session.entity';
+import { calendarOf } from '../common/calendar';
 import { ClassScheduleProfileEntity } from '../database/entities/class-schedule-profile.entity';
 import { UserEntity } from '../database/entities/user.entity';
 import { CreateClassCourseDto } from './dto/create-class-course.dto';
@@ -284,7 +285,7 @@ export class ClassPlanningService {
       where: { userId: dto.teacherUserId },
     });
     const availabilityStatus = this.matchAvailabilityStatus(
-      teacherProfile?.availability,
+      teacherProfile?.calendars?.[calendarOf(classDate)]?.availability,
       classDate,
       dto.startTime,
       dto.endTime,
@@ -507,7 +508,7 @@ export class ClassPlanningService {
         where: { userId: coverTeacherUserId },
       });
       const coverAvailabilityStatus = this.matchAvailabilityStatus(
-        coverProfile?.availability,
+        coverProfile?.calendars?.[calendarOf(session.classDate)]?.availability,
         session.classDate,
         session.startTime,
         session.endTime,

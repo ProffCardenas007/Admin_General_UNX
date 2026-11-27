@@ -11,6 +11,7 @@ import {
 import { EmptyState, formatNumber, KpiCard, NumberCell, Segmented, TextCell } from "./parts";
 import type { MaterialPlanningData, MovementType, Supply, SupplyMovement } from "./types";
 import type { useMaterialPlanning } from "./useMaterialPlanning";
+import { sortByLabel } from "../../lib/sort";
 
 type Actions = Pick<
   ReturnType<typeof useMaterialPlanning>,
@@ -240,7 +241,7 @@ export default function SuppliesTab({ data, actions }: { data: MaterialPlanningD
               Movimiento
               <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as MovementType | "")} className={inputClass}>
                 <option value="">Todos</option>
-                {(Object.keys(MOVEMENT_LABELS) as MovementType[]).map((type) => (
+                {sortByLabel((Object.keys(MOVEMENT_LABELS) as MovementType[]), (type) => MOVEMENT_LABELS[type]).map((type) => (
                   <option key={type} value={type}>
                     {MOVEMENT_LABELS[type]}
                   </option>
@@ -438,7 +439,7 @@ export default function SuppliesTab({ data, actions }: { data: MaterialPlanningD
                   className="ui-control min-h-[36px] w-56 py-1 text-sm"
                 >
                   <option value="">Vincular con…</option>
-                  {data.supplies.map((supply) => (
+                  {sortByLabel(data.supplies, (supply) => supply.name).map((supply) => (
                     <option key={supply.id} value={supply.id}>
                       {supply.name}
                     </option>
@@ -514,7 +515,7 @@ function MovementForm({
         Insumo
         <select value={supplyId} onChange={(event) => setSupplyId(event.target.value)} required className={inputClass}>
           <option value="">Elige uno…</option>
-          {supplies.map((row) => (
+          {sortByLabel(supplies, (row) => row.name).map((row) => (
             <option key={row.id} value={row.id}>
               {row.name} ({row.available === null ? "sin contar" : formatNumber(row.available)})
             </option>

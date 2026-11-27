@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -12,8 +12,8 @@ export class TeacherAvailabilityController {
 
   @Get('me')
   @Roles('manager', 'lead', 'worker')
-  findMine(@Req() req: { user: { id: string } }) {
-    return this.teacherAvailabilityService.findMine(req.user.id);
+  findMine(@Req() req: { user: { id: string } }, @Query('calendar') calendar?: string) {
+    return this.teacherAvailabilityService.findMine(req.user.id, calendar);
   }
 
   @Put('me')
@@ -27,8 +27,8 @@ export class TeacherAvailabilityController {
 
   @Get('registry')
   @Roles('manager')
-  findRegistry() {
-    return this.teacherAvailabilityService.findRegistry();
+  findRegistry(@Query('calendar') calendar?: string) {
+    return this.teacherAvailabilityService.findRegistry(calendar);
   }
 
   @Put('users/:userId')

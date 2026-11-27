@@ -7,15 +7,52 @@ import { planningErrorMessage } from "./errors";
 import type { PlanningNotify, TeacherImportResult } from "./types";
 
 export default function ImportPanel({
+  calendar,
   notify,
   reload,
 }: {
+  calendar: string;
   notify: PlanningNotify;
   reload: () => Promise<void>;
 }) {
   const [planningFile, setPlanningFile] = useState<File | null>(null);
   const [importingTeachers, setImportingTeachers] = useState(false);
   const [teacherImportResult, setTeacherImportResult] = useState<TeacherImportResult | null>(null);
+  const [resettingPlanning, setResettingPlanning] = useState(false);
+
+  const onResetPlanning = async () => {
+    const confirmed = window.confirm(
+      "¿Reiniciar toda la programación? Se eliminarán cursos, materias asignadas y sesiones. Los usuarios y sus disponibilidades se conservarán.",
+    );
+    if (!confirmed) return;
+
+    notify.clear();
+    setTeacherImportResult(null);
+    setResettingPlanning(true);
+
+    try {
+      const response = await axios.delete<{
+        deletedCourses: number;
+        deletedSubjects: number;
+        deletedSessions: number;
+      }>(`${API_URL}/class-planning/reset`, { headers: authHeaders() });
+
+      notify.info(
+        `Programación reiniciada: ${response.data.deletedCourses} cursos, ${response.data.deletedSubjects} materias y ${response.data.deletedSessions} sesiones eliminadas.`,
+      );
+      await reload();
+    } catch (error) {
+      notify.error(
+        planningErrorMessage(
+          error,
+          "No se pudo reiniciar la programación.",
+          "No tienes permisos de gerencia para reiniciar la programación.",
+        ),
+      );
+    } finally {
+      setResettingPlanning(false);
+    }
+  };
 
   const onImportTeachers = async () => {
     if (!planningFile) {
@@ -30,6 +67,7 @@ export default function ImportPanel({
     try {
       const formData = new FormData();
       formData.append("file", planningFile);
+      formData.append("calendar", calendar);
       const response = await axios.post<TeacherImportResult>(
         `${API_URL}/imports/class-planning`,
         formData,
@@ -61,7 +99,7 @@ export default function ImportPanel({
               Importar programación
             </p>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">
-              Sincroniza profesores, disponibilidad, cursos y sesiones programadas del archivo de Excel.
+              Sincroniza profesores, disponibilidad, cursos y sesiones programadas del archivo de Excel. La disponibilidad se carga en el calendario <strong>{calendar}</strong>.
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
@@ -81,6 +119,14 @@ export default function ImportPanel({
               className="ui-btn ui-btn-primary h-10 shrink-0 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
               {importingTeachers ? "Leyendo y programando..." : "Importar y programar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void onResetPlanning()}
+              disabled={resettingPlanning || importingTeachers}
+              className="h-10 shrink-0 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-4 text-sm text-[var(--danger)] hover:border-[var(--danger)]/60 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resettingPlanning ? "Reiniciando..." : "Reiniciar programación"}
             </button>
           </div>
         </div>

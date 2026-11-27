@@ -21,6 +21,7 @@ import {
 } from "../types";
 import { statusLabels as taskStatusLabels } from "../../tasks/labels";
 import { taskDueSemaforo, toDateKey } from "../../tasks/taskLogic";
+import { sortByLabel } from "../../../lib/sort";
 
 type Editing = {
   section: PlanSection;
@@ -354,7 +355,7 @@ function CellModal({
                 className="min-w-0 rounded-lg border border-[var(--line)] bg-white px-3 py-2"
               >
                 {!cell?.taskAssigneeId && <option value="">Tarea disponible (sin responsable)</option>}
-                {users.map((user) => (
+                {sortByLabel(users, (user) => user.fullName).map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.fullName} ({roleLabels[user.role]})
                   </option>
@@ -443,7 +444,7 @@ function CellModal({
               className="min-w-0 rounded-lg border border-[var(--line)] bg-white px-3 py-2"
             >
               <option value="">Selecciona la persona pensada para esta tarea</option>
-              {users.map((user) => (
+              {sortByLabel(users, (user) => user.fullName).map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.fullName} ({roleLabels[user.role]})
                 </option>
@@ -477,7 +478,7 @@ function CellModal({
                 className="min-w-0 rounded-lg border border-[var(--line)] bg-white px-3 py-2"
               >
                 <option value={AVAILABLE_TASK}>Tarea disponible (sin responsable)</option>
-                {users.map((user) => (
+                {sortByLabel(users, (user) => user.fullName).map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.fullName} ({roleLabels[user.role]})
                   </option>
@@ -492,7 +493,7 @@ function CellModal({
                 required
                 className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
               >
-                {activityTypeOptions.map((option) => (
+                {sortByLabel(activityTypeOptions, (option) => option.label).map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -1020,7 +1021,7 @@ export default function PlanGridPage() {
                 className="rounded-lg border border-[var(--line)] bg-white px-3 py-2"
               >
                 <option value="">Selecciona un proyecto</option>
-                {projects.map((project) => (
+                {sortByLabel(projects, (project) => `${project.code} · ${project.name}`).map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.code} · {project.name}
                   </option>

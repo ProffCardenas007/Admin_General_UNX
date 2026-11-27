@@ -21,6 +21,27 @@ async function run() {
       )
     `);
 
+    // Cursos, modalidades y sedes que puede atender cada profesor.
+    await client.query(`
+      ALTER TABLE class_schedule_profiles
+      ADD COLUMN IF NOT EXISTS teaching JSONB NOT NULL DEFAULT '{}'::jsonb
+    `);
+
+    // Disponibilidad por calendario escolar. Lo capturado antes de este cambio es de 2027A;
+    // la columna `availability` se conserva como respaldo y ya no se usa.
+    await client.query(`
+      ALTER TABLE class_schedule_profiles
+      ADD COLUMN IF NOT EXISTS calendars JSONB NOT NULL DEFAULT '{}'::jsonb
+    `);
+    await client.query(`
+      UPDATE class_schedule_profiles
+      SET calendars = jsonb_build_object('2027A', jsonb_build_object(
+        'availability', availability,
+        'updatedAt', to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+      ))
+      WHERE calendars = '{}'::jsonb AND availability <> '{}'::jsonb
+    `);
+
     await client.query(`
       CREATE OR REPLACE FUNCTION set_class_schedule_profiles_updated_at()
       RETURNS TRIGGER

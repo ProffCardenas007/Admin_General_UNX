@@ -13,6 +13,7 @@ import {
 import { EmptyState, formatNumber, KpiCard, NumberCell, Segmented } from "./parts";
 import type { Disposition, MaterialPlanningData, Program } from "./types";
 import type { useMaterialPlanning } from "./useMaterialPlanning";
+import { sortByLabel } from "../../lib/sort";
 
 type Actions = Pick<ReturnType<typeof useMaterialPlanning>, "updateItem">;
 
@@ -78,7 +79,7 @@ export default function RetiredTab({ data, actions }: { data: MaterialPlanningDa
           Programa
           <select value={program} onChange={(event) => setProgram(event.target.value as Program | "")} className="ui-control min-h-[40px] py-1.5 text-sm">
             <option value="">Todos</option>
-            {PROGRAMS.map((value) => (
+            {sortByLabel(PROGRAMS, (value) => PROGRAM_LABELS[value]).map((value) => (
               <option key={value} value={value}>
                 {PROGRAM_LABELS[value]}
               </option>
@@ -148,7 +149,7 @@ export default function RetiredTab({ data, actions }: { data: MaterialPlanningDa
                         className={`rounded-full border px-3 py-1 text-xs font-semibold ${DISPOSITION_STYLES[item.disposition ?? "pendiente"]}`}
                       >
                         <option value="">Por decidir</option>
-                        {DISPOSITIONS.map((value) => (
+                        {sortByLabel(DISPOSITIONS, (value) => DISPOSITION_LABELS[value]).map((value) => (
                           <option key={value} value={value}>
                             {DISPOSITION_LABELS[value]}
                           </option>

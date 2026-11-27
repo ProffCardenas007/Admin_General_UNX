@@ -6,6 +6,7 @@ import { API_URL, authHeaders } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import { activityTypeLabels, priorityLabels, roleLabels, statusLabels } from "./labels";
 import type { ProjectRow, TaskEditForm, TaskRow, UserRow } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 /** Full edit form for managers and leads. Owns the form and the save request. */
 export default function EditTaskModal({
@@ -121,7 +122,7 @@ export default function EditTaskModal({
                       onChange={(event) => setTaskEditForm({ ...taskEditForm, projectId: event.target.value })}
                       className="ui-control mt-1 block w-full"
                     >
-                      {projects.map((project) => (
+                      {sortByLabel(projects, (project) => projectLabel(project.id)).map((project) => (
                         <option key={project.id} value={project.id}>
                           {projectLabel(project.id)}
                         </option>
@@ -136,7 +137,7 @@ export default function EditTaskModal({
                     onChange={(event) => setTaskEditForm({ ...taskEditForm, activityType: event.target.value as TaskRow["activityType"] })}
                     className="ui-control mt-1 block w-full"
                   >
-                    {Object.entries(activityTypeLabels).map(([value, label]) => (
+                    {sortByLabel(Object.entries(activityTypeLabels), ([, label]) => label).map(([value, label]) => (
                       <option key={value} value={value}>{label}</option>
                     ))}
                   </select>
@@ -149,7 +150,7 @@ export default function EditTaskModal({
                     className="ui-control mt-1 block w-full"
                   >
                     <option value="">Sin asignar</option>
-                    {users.map((user) => (
+                    {sortByLabel(users, (user) => user.fullName).map((user) => (
                       <option key={user.id} value={user.id}>
                         {user.fullName} ({roleLabels[user.role] ?? user.role})
                       </option>
@@ -163,7 +164,7 @@ export default function EditTaskModal({
                     onChange={(event) => setTaskEditForm({ ...taskEditForm, status: event.target.value as TaskRow["status"] })}
                     className="ui-control mt-1 block w-full"
                   >
-                    {Object.entries(statusLabels).map(([value, label]) => (
+                    {sortByLabel(Object.entries(statusLabels), ([, label]) => label).map(([value, label]) => (
                       <option key={value} value={value}>{label}</option>
                     ))}
                   </select>

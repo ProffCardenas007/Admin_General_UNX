@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { sortByLabel } from "../../lib/sort";
 
 type ProjectRow = {
   id: string;
@@ -411,11 +412,11 @@ export default function ProjectsPage() {
             className="ui-control"
           >
             <option value="">Todos excepto finalizados</option>
-            <option value="planned">planificado</option>
             <option value="active">activo</option>
+            <option value="cancelled">cancelado</option>
             <option value="on_hold">en pausa</option>
             <option value="done">finalizado</option>
-            <option value="cancelled">cancelado</option>
+            <option value="planned">planificado</option>
           </select>
         </div>
 
@@ -520,11 +521,11 @@ export default function ProjectsPage() {
                               }
                               className="w-full max-w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs md:min-w-[160px]"
                             >
-                              <option value="planned">planificado</option>
                               <option value="active">activo</option>
+                              <option value="cancelled">cancelado</option>
                               <option value="on_hold">en pausa</option>
                               <option value="done">finalizado</option>
-                              <option value="cancelled">cancelado</option>
+                              <option value="planned">planificado</option>
                             </select>
                           ) : (
                             statusLabels[project.status] ?? project.status
@@ -642,13 +643,12 @@ export default function ProjectsPage() {
                                           className="ui-control min-w-0 flex-1 text-xs"
                                         >
                                           <option value="">Seleccionar proyecto destino</option>
-                                          {projects
+                                          {sortByLabel(projects
                                             .filter(
                                               (destination) =>
                                                 destination.id !== task.projectId &&
                                                 destination.status !== "done",
-                                            )
-                                            .map((destination) => (
+                                            ), (destination) => `${destination.code} · ${destination.name}`).map((destination) => (
                                               <option key={destination.id} value={destination.id}>
                                                 {destination.code} · {destination.name} · {destination.scope ? specialtyLabels[destination.scope] : "Sin especialidad"}
                                               </option>

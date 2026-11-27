@@ -157,8 +157,6 @@ const MANAGER_NAV: NavItem[] = [
   { label: "Planeación de material", href: "/material-planning", icon: <IconMaterial /> },
   { label: "Reporte por Usuario", href: "/user-reports", icon: <IconQuincena /> },
   { label: "Programación de clases", href: "/class-availability", icon: <IconClassAvailability /> },
-  { label: "Cursos y sesiones", href: "/class-planning", icon: <IconClassSchedule /> },
-  { label: "Grilla de sesiones", href: "/class-grid",     icon: <IconGrid /> },
   { label: "Desviación de horas", href: "/hours-deviation", icon: <IconHistory /> },
   { label: "Reporte", href: "/quincenas", icon: <IconQuincena /> },
   { label: "Historial", href: "/history", icon: <IconHistory /> },

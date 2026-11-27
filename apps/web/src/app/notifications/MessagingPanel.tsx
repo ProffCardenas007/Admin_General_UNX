@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import axios from "axios";
 import { API_URL, authHeaders, getStoredUserId } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
+import { sortByLabel } from "../../lib/sort";
 
 type Colleague = { id: string; fullName: string; role: "manager" | "lead" | "worker" };
 type ProjectOption = { id: string; code: string; name: string };
@@ -274,7 +275,7 @@ export default function MessagingPanel() {
             aria-label="Seleccionar persona para conversar"
           >
             <option value="">Nueva conversación...</option>
-            {colleagues.map((colleague) => (
+            {sortByLabel(colleagues, (colleague) => colleague.fullName).map((colleague) => (
               <option key={colleague.id} value={colleague.id}>
                 {colleague.fullName} · {roleLabels[colleague.role]}
               </option>
@@ -397,7 +398,7 @@ export default function MessagingPanel() {
                     aria-label="Vincular proyecto (opcional)"
                   >
                     <option value="">Sin proyecto vinculado</option>
-                    {projects.map((project) => (
+                    {sortByLabel(projects, (project) => `${project.code} · ${project.name}`).map((project) => (
                       <option key={project.id} value={project.id}>
                         {project.code} · {project.name}
                       </option>
@@ -410,7 +411,7 @@ export default function MessagingPanel() {
                     aria-label="Vincular tarea (opcional)"
                   >
                     <option value="">Sin tarea vinculada</option>
-                    {filteredTasks.map((task) => (
+                    {sortByLabel(filteredTasks, (task) => `${task.code} · ${task.title}`).map((task) => (
                       <option key={task.id} value={task.id}>
                         {task.code} · {task.title}
                       </option>

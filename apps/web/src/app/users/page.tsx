@@ -5,7 +5,9 @@ import axios from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredRole, getStoredToken } from "../../lib/api";
-import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { type LeadSpecialty } from "../../lib/specialties";
+import { useSpecialtyOptions } from "../../lib/useSpecialtyOptions";
+import { sortByLabel } from "../../lib/sort";
 
 type UserRow = {
   id: string;
@@ -114,11 +116,11 @@ export default function UsersPage() {
   const [deletingTeamId, setDeletingTeamId] = useState("");
   const [userDrafts, setUserDrafts] = useState<Record<string, UserDraft>>({});
 
+  const specialtyOptions = useSpecialtyOptions();
+
   const toDraftSpecialties = (user: UserRow) => {
     const normalized = Array.isArray(user.specialties)
-      ? user.specialties.filter((specialty): specialty is LeadSpecialty =>
-          (LEAD_SPECIALTIES as readonly string[]).includes(specialty),
-        )
+      ? user.specialties.filter((specialty): specialty is LeadSpecialty => Boolean(specialty))
       : [];
 
     if (normalized.length > 0) {
@@ -662,9 +664,9 @@ export default function UsersPage() {
             className="ui-control"
           >
             <option value="">Todos los roles</option>
+            <option value="worker">colaborador</option>
             <option value="manager">gerencia</option>
             <option value="lead">lider</option>
-            <option value="worker">colaborador</option>
           </select>
           <select
             name="users-status-filter"
@@ -761,9 +763,8 @@ export default function UsersPage() {
               className="ui-control w-full"
             >
               <option value="">Selecciona un usuario</option>
-              {users
-                .filter((user) => user.role !== "manager")
-                .map((user) => (
+              {sortByLabel(users
+                .filter((user) => user.role !== "manager"), (user) => user.fullName).map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.fullName} ({roleLabels[user.role]})
                   </option>
@@ -984,9 +985,9 @@ export default function UsersPage() {
                             }
                             className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs"
                           >
+                            <option value="worker">{roleLabels.worker}</option>
                             <option value="manager">{roleLabels.manager}</option>
                             <option value="lead">{roleLabels.lead}</option>
-                            <option value="worker">{roleLabels.worker}</option>
                           </select>
                           {(userDrafts[user.id]?.role ?? user.role) === "lead" ? (
                             <div className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs">
@@ -994,7 +995,7 @@ export default function UsersPage() {
                                 Especialidades (max 2)
                               </p>
                               <div className="grid gap-1">
-                                {LEAD_SPECIALTIES.map((specialty) => {
+                                {specialtyOptions.map(({ code: specialty, name }) => {
                                   const selectedSpecialties = userDrafts[user.id]?.specialties ?? toDraftSpecialties(user);
                                   const checked = selectedSpecialties.includes(specialty);
 
@@ -1032,7 +1033,7 @@ export default function UsersPage() {
                                           });
                                         }}
                                       />
-                                      {specialtyLabels[specialty]}
+                                      {name}
                                     </label>
                                   );
                                 })}

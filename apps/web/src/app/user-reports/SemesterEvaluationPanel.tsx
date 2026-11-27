@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { API_URL, authHeaders } from "../../lib/api";
 import EvaluationCardsPanel from "./EvaluationCardsPanel";
 import { buildTeamStats, type Band, type Profile, type Summary } from "./semesterStats";
+import { sortByLabel } from "../../lib/sort";
 
 type ActivityType =
   | "creacion"
@@ -801,7 +802,7 @@ export default function SemesterEvaluationPanel() {
                   </p>
                 </div>
                 <select value={selectedUserId} onChange={(event) => selectUser(event.target.value)} className="ui-control md:max-w-sm">
-                  {report.users.map((user) => (
+                  {sortByLabel(report.users, (user) => user.fullName).map((user) => (
                     <option key={user.userId} value={user.userId}>{user.fullName}</option>
                   ))}
                 </select>

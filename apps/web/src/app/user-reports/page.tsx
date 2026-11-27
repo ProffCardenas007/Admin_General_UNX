@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken } from "../../lib/api";
 import SemesterEvaluationPanel from "./SemesterEvaluationPanel";
+import { sortByLabel } from "../../lib/sort";
 
 type ActivityType =
   | "creacion"
@@ -408,7 +409,7 @@ export default function UserReportsPage() {
                   onChange={(event) => setSelectedUserId(event.target.value)}
                   className="ui-control md:max-w-sm"
                 >
-                  {report.users.map((user) => (
+                  {sortByLabel(report.users, (user) => user.fullName).map((user) => (
                     <option key={user.userId} value={user.userId}>{user.fullName}</option>
                   ))}
                 </select>

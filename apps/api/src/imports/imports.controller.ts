@@ -5,6 +5,7 @@ import {
   Post,
   Req,
   UploadedFile,
+  Body,
   UseInterceptors,
   BadRequestException,
   ForbiddenException,
@@ -72,15 +73,15 @@ export class ImportsController {
   @Post('class-planning')
   @Roles('manager')
   @UseInterceptors(importFileInterceptor(PLANNING_IMPORT_FILE_PATTERN))
-  async uploadClassPlanningExcel(@UploadedFile() file: any) {
+  async uploadClassPlanningExcel(@UploadedFile() file: any, @Body('calendar') calendar?: string) {
     if (!file) {
       throw new BadRequestException('File is required');
     }
 
-    return this.importsService.processClassPlanningUpload({
-      fileName: file.originalname,
-      fileBuffer: file.buffer,
-    });
+    return this.importsService.processClassPlanningUpload(
+      { fileName: file.originalname, fileBuffer: file.buffer },
+      calendar,
+    );
   }
 
   @Get(':importId')

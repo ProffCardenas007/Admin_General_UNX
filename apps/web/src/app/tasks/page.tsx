@@ -6,7 +6,8 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
-import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { useSpecialtyOptions } from "../../lib/useSpecialtyOptions";
 import ActiveTasksPanel from "./ActiveTasksPanel";
 import ConsequenceModal from "./ConsequenceModal";
 import EditTaskModal from "./EditTaskModal";
@@ -81,6 +82,7 @@ export default function TasksPage() {
   const [appliedHistoryFrom, setAppliedHistoryFrom] = useState("");
   const [appliedHistoryTo, setAppliedHistoryTo] = useState("");
 
+  const specialtyOptions = useSpecialtyOptions();
   const [search, setSearch] = useState("");
   const [selectedSpecialty, setSelectedSpecialty] = useState<"" | LeadSpecialty>("");
   const [selectedAcademy, setSelectedAcademy] = useState("");
@@ -1834,7 +1836,7 @@ export default function TasksPage() {
             <TaskFilterBar
               search={search}
               onSearch={setSearch}
-              specialties={LEAD_SPECIALTIES.map((value) => ({ value, label: specialtyLabels[value] }))}
+              specialties={specialtyOptions.map((item) => ({ value: item.code, label: item.name }))}
               specialty={selectedSpecialty}
               onSpecialty={(value) => {
                 setSelectedSpecialty(value as "" | LeadSpecialty);

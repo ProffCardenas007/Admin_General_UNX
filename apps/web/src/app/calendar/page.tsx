@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_URL, authHeaders, getStoredEmail, getStoredRole, getStoredToken, getStoredUserId, clearSession } from "../../lib/api";
 import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { sortByLabel } from "../../lib/sort";
 
 type ProjectRow = {
   id: string;
@@ -632,7 +633,7 @@ export default function CalendarPage() {
                   className="ui-control"
                 >
                   <option value={currentUserId}>Mis actividades</option>
-                  {calendarUserOptions.map((user) => (
+                  {sortByLabel(calendarUserOptions, (user) => user.fullName).map((user) => (
                     <option key={user.id} value={user.id}>
                       {user.fullName} ({roleLabels[user.role]})
                     </option>
@@ -833,7 +834,7 @@ export default function CalendarPage() {
                               className="mt-1 w-full rounded-xl border border-current/20 bg-white/80 px-3 py-2 text-sm text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-70"
                             >
                               <option value="">Sin asignar</option>
-                              {users.map((user) => (
+                              {sortByLabel(users, (user) => user.fullName).map((user) => (
                                 <option key={user.id} value={user.id}>
                                   {user.fullName} ({roleLabels[user.role]})
                                 </option>
@@ -856,10 +857,10 @@ export default function CalendarPage() {
                             disabled={savingTaskId === task.id}
                             className="mt-1 w-full rounded-xl border border-current/20 bg-white/80 px-3 py-2 text-sm text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-70"
                           >
-                            <option value="todo">{taskStatusLabels.todo}</option>
-                            <option value="doing">{taskStatusLabels.doing}</option>
                             <option value="blocked">{taskStatusLabels.blocked}</option>
+                            <option value="doing">{taskStatusLabels.doing}</option>
                             <option value="done">{taskStatusLabels.done}</option>
+                            <option value="todo">{taskStatusLabels.todo}</option>
                           </select>
                           {savingTaskId === task.id ? (
                             <p className="mt-1 text-[11px] font-semibold opacity-90">Guardando cambio...</p>
@@ -1012,7 +1013,7 @@ export default function CalendarPage() {
                       className="mt-1 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       <option value="">Sin asignar</option>
-                      {users.map((user) => (
+                      {sortByLabel(users, (user) => user.fullName).map((user) => (
                         <option key={user.id} value={user.id}>
                           {user.fullName} ({roleLabels[user.role]})
                         </option>
@@ -1036,10 +1037,10 @@ export default function CalendarPage() {
                     disabled={savingTaskId === openedTask.id}
                     className="mt-1 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-70"
                   >
-                    <option value="todo">{taskStatusLabels.todo}</option>
-                    <option value="doing">{taskStatusLabels.doing}</option>
                     <option value="blocked">{taskStatusLabels.blocked}</option>
+                    <option value="doing">{taskStatusLabels.doing}</option>
                     <option value="done">{taskStatusLabels.done}</option>
+                    <option value="todo">{taskStatusLabels.todo}</option>
                   </select>
                 </div>
 

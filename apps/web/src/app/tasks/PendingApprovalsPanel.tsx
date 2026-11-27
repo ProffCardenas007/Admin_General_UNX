@@ -6,6 +6,7 @@ import { API_URL, authHeaders } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import { activityTypeLabels } from "./labels";
 import type { ProjectRow, TaskRow } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 type Props = {
   tasks: TaskRow[];
@@ -113,7 +114,7 @@ export default function PendingApprovalsPanel({ tasks, projects, projectLabel, a
                     className="ui-control mt-1"
                     disabled={busy}
                   >
-                    {activityOrder.map((activity) => (
+                    {sortByLabel(activityOrder, (activity) => activityTypeLabels[activity]).map((activity) => (
                       <option key={activity} value={activity}>
                         {activityTypeLabels[activity]}
                       </option>
@@ -128,7 +129,7 @@ export default function PendingApprovalsPanel({ tasks, projects, projectLabel, a
                     className="ui-control mt-1"
                     disabled={busy}
                   >
-                    {projects.map((project) => (
+                    {sortByLabel(projects, (project) => projectLabel(project.id)).map((project) => (
                       <option key={project.id} value={project.id}>
                         {projectLabel(project.id)}
                       </option>

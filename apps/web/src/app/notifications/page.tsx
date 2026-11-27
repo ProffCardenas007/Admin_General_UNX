@@ -214,8 +214,8 @@ export default function NotificationsPage() {
             className="ui-control"
           >
             <option value="all">Todas</option>
-            <option value="unread">No leidas</option>
             <option value="read">Leidas</option>
+            <option value="unread">No leidas</option>
           </select>
           <p className="text-sm text-[var(--ink-muted)]">Pendientes: {unreadCount}</p>
         </div>

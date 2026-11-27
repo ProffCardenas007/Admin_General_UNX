@@ -3,8 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClassScheduleProfileEntity } from '../database/entities/class-schedule-profile.entity';
 import { UserEntity } from '../database/entities/user.entity';
+import { CALENDAR_PATTERN, currentCalendar } from '../common/calendar';
 import { NotificationsService } from '../notifications/notifications.service';
-import { UpsertTeacherAvailabilityDto } from './dto/upsert-teacher-availability.dto';
+import {
+  TEACHING_OPTIONS,
+  TeachingProfileDto,
+  UpsertTeacherAvailabilityDto,
+} from './dto/upsert-teacher-availability.dto';
 
 type AvailabilityStatus = 'full' | 'confirm' | 'busy';
 type AvailabilityMap = Record<string, AvailabilityStatus>;
@@ -26,47 +31,94 @@ export class TeacherAvailabilityService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  async findMine(userId: string) {
-    return this.findByUserId(userId);
+  async findMine(userId: string, calendar?: string) {
+    return this.findByUserId(userId, this.resolveCalendar(calendar));
   }
 
   async upsertMine(userId: string, dto: UpsertTeacherAvailabilityDto) {
     return this.upsertByUserId(userId, dto);
   }
 
-  async findRegistry() {
-    const profiles = await this.profileRepository.find();
+  async findRegistry(requested?: string) {
+    const calendar = this.resolveCalendar(requested);
+    const [profiles, users] = await Promise.all([
+      this.profileRepository.find(),
+      this.userRepository.find({ select: ['id', 'classSubjects'] }),
+    ]);
+    const subjectsByUser = new Map(users.map((user) => [user.id, user.classSubjects]));
     const registry: Record<
       string,
-      { availability: AvailabilityMap; incidences: IncidenceRow[]; updatedAt: string }
+      {
+        availability: AvailabilityMap;
+        incidences: IncidenceRow[];
+        teaching: TeachingProfileDto;
+        calendar: string;
+        savedCalendars: string[];
+        updatedAt: string;
+      }
     > = {};
 
     profiles.forEach((profile) => {
       registry[profile.userId] = {
-        availability: this.normalizeAvailability(profile.availability),
+        ...this.calendarData(profile, calendar),
         incidences: this.normalizeIncidences(profile.incidences),
-        updatedAt: this.formatStoredDate(profile.updatedAt),
+        teaching: this.buildTeaching(profile.teaching, subjectsByUser.get(profile.userId)),
       };
+    });
+
+    // Quien tiene materias pero aún no guardó disponibilidad también aparece.
+    users.forEach((user) => {
+      if (!registry[user.id] && user.classSubjects?.length) {
+        registry[user.id] = {
+          ...this.calendarData(undefined, calendar),
+          incidences: [],
+          teaching: this.buildTeaching(undefined, user.classSubjects),
+        };
+      }
     });
 
     return registry;
   }
 
   async upsertByUserId(userId: string, dto: UpsertTeacherAvailabilityDto) {
-    await this.ensureUserExists(userId);
+    const user = await this.ensureUserExists(userId);
 
     const currentProfile = await this.profileRepository.findOne({ where: { userId } });
     const previousIncidenceSignature = this.buildIncidenceSignature(currentProfile?.incidences);
 
-    const availability = this.normalizeAvailability(dto.availability ?? currentProfile?.availability);
+    // Solo se toca el calendario indicado, y solo si llega disponibilidad.
+    const calendar = this.resolveCalendar(dto.calendar);
+    const calendars = { ...(currentProfile?.calendars ?? {}) };
+    if (dto.availability) {
+      calendars[calendar] = {
+        availability: this.normalizeAvailability(dto.availability),
+        updatedAt: new Date().toISOString(),
+      };
+    }
     const incidences = this.normalizeIncidences(dto.incidences ?? currentProfile?.incidences);
+
+    let classSubjects = user.classSubjects ?? [];
+    let teaching = currentProfile?.teaching ?? {};
+    if (dto.teaching) {
+      const { subjects, programs, modalities, venues } = dto.teaching;
+      teaching = { programs, modalities, venues };
+      // Se conservan otras materias que la persona tuviera (de Usuarios o de la importación).
+      classSubjects = [
+        ...classSubjects.filter((subject) => !TEACHING_OPTIONS.subjects.includes(subject)),
+        ...subjects,
+      ];
+      await this.userRepository.update(userId, {
+        classSubjects: classSubjects.length ? classSubjects : null,
+      });
+    }
 
     const saved = await this.profileRepository.save(
       this.profileRepository.create({
         id: currentProfile?.id,
         userId,
-        availability,
+        calendars,
         incidences,
+        teaching,
       }),
     );
 
@@ -76,35 +128,74 @@ export class TeacherAvailabilityService {
     }
 
     return {
-      availability: this.normalizeAvailability(saved.availability),
+      ...this.calendarData(saved, calendar),
       incidences: this.normalizeIncidences(saved.incidences),
-      updatedAt: this.formatStoredDate(saved.updatedAt),
+      teaching: this.buildTeaching(saved.teaching, classSubjects),
     };
   }
 
-  private async findByUserId(userId: string) {
-    const profile = await this.profileRepository.findOne({ where: { userId } });
+  private async findByUserId(userId: string, calendar: string) {
+    const [profile, user] = await Promise.all([
+      this.profileRepository.findOne({ where: { userId } }),
+      this.userRepository.findOne({ where: { id: userId }, select: ['id', 'classSubjects'] }),
+    ]);
 
     if (!profile) {
       return {
-        availability: {} as AvailabilityMap,
+        ...this.calendarData(undefined, calendar),
         incidences: [] as IncidenceRow[],
-        updatedAt: '',
+        teaching: this.buildTeaching(undefined, user?.classSubjects),
       };
     }
 
     return {
-      availability: this.normalizeAvailability(profile.availability),
+      ...this.calendarData(profile, calendar),
       incidences: this.normalizeIncidences(profile.incidences),
-      updatedAt: this.formatStoredDate(profile.updatedAt),
+      teaching: this.buildTeaching(profile.teaching, user?.classSubjects),
     };
   }
 
   private async ensureUserExists(userId: string) {
-    const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id'] });
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'classSubjects'],
+    });
     if (!user) {
       throw new NotFoundException('User not found');
     }
+    return user;
+  }
+
+  private resolveCalendar(calendar?: string) {
+    return calendar && CALENDAR_PATTERN.test(calendar) ? calendar : currentCalendar();
+  }
+
+  /** `updatedAt` vacío = esa persona todavía no guarda ese calendario. */
+  private calendarData(
+    profile: Pick<ClassScheduleProfileEntity, 'calendars'> | undefined,
+    calendar: string,
+  ) {
+    const entry = profile?.calendars?.[calendar];
+    return {
+      availability: this.normalizeAvailability(entry?.availability),
+      calendar,
+      savedCalendars: Object.keys(profile?.calendars ?? {}).sort(),
+      updatedAt: entry?.updatedAt ?? '',
+    };
+  }
+
+  private buildTeaching(
+    stored: { programs?: string[]; modalities?: string[]; venues?: string[] } | undefined,
+    classSubjects: string[] | null | undefined,
+  ): TeachingProfileDto {
+    const only = (values: string[] | null | undefined, allowed: string[]) =>
+      allowed.filter((option) => values?.includes(option));
+    return {
+      subjects: only(classSubjects, TEACHING_OPTIONS.subjects),
+      programs: only(stored?.programs, TEACHING_OPTIONS.programs),
+      modalities: only(stored?.modalities, TEACHING_OPTIONS.modalities),
+      venues: only(stored?.venues, TEACHING_OPTIONS.venues),
+    };
   }
 
   private normalizeAvailability(raw: unknown): AvailabilityMap {
@@ -169,15 +260,6 @@ export class TeacherAvailabilityService {
     return incidences
       .map((incidence) => `${incidence.date}|${incidence.startTime}|${incidence.endTime}|${incidence.reason}`)
       .join('||');
-  }
-
-  private formatStoredDate(value: Date | string | null | undefined) {
-    if (!value) {
-      return '';
-    }
-
-    const date = value instanceof Date ? value : new Date(value);
-    return Number.isNaN(date.getTime()) ? '' : date.toISOString();
   }
 
   private async notifyManagersAboutIncidences(userId: string, incidences: IncidenceRow[]) {

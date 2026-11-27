@@ -6,6 +6,7 @@ import { API_URL, authHeaders } from "../../lib/api";
 import { extractErrorMessage } from "../../lib/http";
 import { roleLabels } from "./labels";
 import type { TaskRow, UserRow } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 /** Closes a task as "no completada", optionally handing it to someone else. */
 export default function NotCompletedModal({
@@ -104,9 +105,8 @@ export default function NotCompletedModal({
                   className="mt-2 block w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-normal"
                 >
                   <option value="">No reasignar: cerrar la tarea</option>
-                  {users
-                    .filter((user) => user.id !== task.assigneeId)
-                    .map((user) => (
+                  {sortByLabel(users
+                    .filter((user) => user.id !== task.assigneeId), (user) => user.fullName).map((user) => (
                       <option key={user.id} value={user.id}>
                         {user.fullName} ({roleLabels[user.role] ?? user.role})
                       </option>

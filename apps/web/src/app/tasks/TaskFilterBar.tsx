@@ -1,4 +1,5 @@
 "use client";
+import { sortByLabel } from "../../lib/sort";
 
 type Option = { value: string; label: string };
 
@@ -30,7 +31,7 @@ function FilterSelect({
         className="min-w-0 rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-60"
       >
         <option value="">{disabled && hint ? hint : allLabel}</option>
-        {options.map((option) => (
+        {sortByLabel(options, (option) => option.label).map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

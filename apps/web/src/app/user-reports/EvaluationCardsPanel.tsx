@@ -23,6 +23,7 @@ import {
   type SurveyType,
 } from "./evaluationCards";
 import type { MemberStats, Summary } from "./semesterStats";
+import { sortByLabel } from "../../lib/sort";
 
 export type CardMember = {
   userId: string;
@@ -576,7 +577,7 @@ export default function EvaluationCardsPanel({
                             onChange={(event) => setOverride(name.key, name.raw, event.target.value)}
                             className="ui-control py-1 text-sm"
                           >
-                            {people.map((person) => (
+                            {sortByLabel(people, (person) => person.fullName).map((person) => (
                               <option key={person.userId} value={`user:${person.userId}`}>
                                 {person.fullName}
                               </option>
@@ -625,7 +626,7 @@ export default function EvaluationCardsPanel({
               ←
             </button>
             <select value={activeKey} onChange={(event) => setSelectedKey(event.target.value)} className="ui-control max-w-xs">
-              {cards.map((item) => (
+              {sortByLabel(cards, (item) => item.name).map((item) => (
                 <option key={item.key} value={item.key}>
                   {item.name}
                   {item.surveys.length > 0 ? ` · ${item.surveys.length} encuesta${item.surveys.length > 1 ? "s" : ""}` : ""}

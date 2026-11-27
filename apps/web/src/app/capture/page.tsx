@@ -17,6 +17,7 @@ import {
   specialtyLabels,
   type LeadSpecialty,
 } from "../../lib/specialties";
+import { sortByLabel } from "../../lib/sort";
 
 type ProjectOption = {
   id: string;
@@ -949,7 +950,7 @@ export default function CapturePage() {
                 onChange={(event) => setProjectForm({ ...projectForm, scope: event.target.value })}
               >
                 <option value="">Especialidad del proyecto</option>
-                {specialties.map((item) => (
+                {sortByLabel(specialties, (item) => getSpecialtyLabel(item)).map((item) => (
                   <option key={item} value={item}>
                     {getSpecialtyLabel(item)}
                   </option>
@@ -962,7 +963,7 @@ export default function CapturePage() {
                 onChange={(event) => setProjectForm({ ...projectForm, scope: event.target.value })}
               >
                 <option value="">Especialidad del proyecto</option>
-                {specialtyOptions.map((item) => (
+                {sortByLabel(specialtyOptions, (item) => item.name).map((item) => (
                   <option key={item.code} value={item.code}>
                     {item.name}
                   </option>
@@ -970,7 +971,7 @@ export default function CapturePage() {
               </select>
             )}
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={projectForm.status} onChange={(event) => setProjectForm({ ...projectForm, status: event.target.value })}>
-              {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              {sortByLabel(statusOptions, (option) => option.label).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             <div className="grid gap-3 md:grid-cols-2">
               <input
@@ -1009,7 +1010,7 @@ export default function CapturePage() {
           <div className="mt-5 space-y-3">
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.projectId} onChange={(event) => setTaskForm({ ...taskForm, projectId: event.target.value })}>
               <option value="">Nombre del proyecto</option>
-              {projects.map((project) => (
+              {sortByLabel(projects, (project) => project.name).map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
                 </option>
@@ -1030,7 +1031,7 @@ export default function CapturePage() {
               />
             </div>
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.activityType} onChange={(event) => setTaskForm({ ...taskForm, activityType: event.target.value })}>
-              {activityTypeOptions.map((option) => (
+              {sortByLabel(activityTypeOptions, (option) => option.label).map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -1045,7 +1046,7 @@ export default function CapturePage() {
                   onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}
                 >
                   <option value="">Sin asignar — disponible para tomar</option>
-                  {users.map((user) => (
+                  {sortByLabel(users, (user) => user.fullName).map((user) => (
                     <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
                   ))}
                 </select>
@@ -1080,7 +1081,7 @@ export default function CapturePage() {
                     }
                   >
                     <option value="">Selecciona otra persona</option>
-                    {users.map((user) => (
+                    {sortByLabel(users, (user) => user.fullName).map((user) => (
                       <option key={user.id} value={user.id}>{user.fullName} - {roleOptions.find((role) => role.value === user.role)?.label ?? user.role}</option>
                     ))}
                   </select>
@@ -1114,7 +1115,7 @@ export default function CapturePage() {
               }
             >
               <option value="">Asignar por equipo (opcional)</option>
-              {teams.map((team) => (
+              {sortByLabel(teams, (team) => team.name).map((team) => (
                 <option key={team.id} value={team.id}>
                   {team.name} ({team.memberCount ?? 0})
                 </option>
@@ -1122,7 +1123,7 @@ export default function CapturePage() {
             </select>
             <div className="grid gap-3 md:grid-cols-2">
               <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.status} onChange={(event) => setTaskForm({ ...taskForm, status: event.target.value })}>
-                {taskStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                {sortByLabel(taskStatusOptions, (option) => option.label).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={taskForm.priority} onChange={(event) => setTaskForm({ ...taskForm, priority: event.target.value })}>
                 {priorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -1163,7 +1164,7 @@ export default function CapturePage() {
               onChange={(event) => setTaskChainForm((current) => ({ ...current, projectId: event.target.value }))}
             >
               <option value="">Nombre del proyecto</option>
-              {projects.map((project) => (
+              {sortByLabel(projects, (project) => project.name).map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
                 </option>
@@ -1226,7 +1227,7 @@ export default function CapturePage() {
                       value={step.activityType}
                       onChange={(event) => updateTaskChainStep(step.stepKey, "activityType", event.target.value)}
                     >
-                      {activityTypeOptions.map((option) => (
+                      {sortByLabel(activityTypeOptions, (option) => option.label).map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -1253,7 +1254,7 @@ export default function CapturePage() {
                       onChange={(event) => updateTaskChainStep(step.stepKey, "assigneeId", event.target.value)}
                     >
                       <option value="">Responsable</option>
-                      {users.map((user) => (
+                      {sortByLabel(users, (user) => user.fullName).map((user) => (
                         <option key={user.id} value={user.id}>
                           {user.fullName} - {roleOptions.find((item) => item.value === user.role)?.label ?? user.role}
                         </option>
@@ -1265,7 +1266,7 @@ export default function CapturePage() {
                       onChange={() => undefined}
                       disabled
                     >
-                      {taskStatusOptions.map((option) => (
+                      {sortByLabel(taskStatusOptions, (option) => option.label).map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -1373,7 +1374,7 @@ export default function CapturePage() {
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Nombre completo" value={userForm.fullName} onChange={(event) => setUserForm({ ...userForm, fullName: event.target.value })} />
             <input className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" placeholder="Correo" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} />
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value })}>
-              {roleOptions.map((option) => (
+              {sortByLabel(roleOptions, (option) => option.label).map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -1465,13 +1466,13 @@ export default function CapturePage() {
           <div className="mt-5 space-y-3">
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={updateForm.taskId} onChange={(event) => setUpdateForm({ ...updateForm, taskId: event.target.value })}>
               <option value="">Tarea</option>
-              {tasks.map((task) => (
+              {sortByLabel(tasks, (task) => `${task.code} - ${task.title}`).map((task) => (
                 <option key={task.id} value={task.id}>{task.code} - {task.title}</option>
               ))}
             </select>
             <select className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm" value={updateForm.userId} onChange={(event) => setUpdateForm({ ...updateForm, userId: event.target.value })}>
               <option value="">Usuario</option>
-              {users.map((user) => (
+              {sortByLabel(users, (user) => user.fullName).map((user) => (
                 <option key={user.id} value={user.id}>{user.fullName}</option>
               ))}
             </select>

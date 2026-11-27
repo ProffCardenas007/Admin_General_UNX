@@ -21,8 +21,13 @@ export class ClassScheduleProfileEntity {
   @JoinColumn({ name: 'user_id' })
   user: UserEntity;
 
+  /** Respaldo de antes de separar por calendario; ya no se usa. */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   availability: Record<string, string>;
+
+  /** Disponibilidad semanal por calendario escolar: { "2027A": {...}, "2027B": {...} }. */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  calendars: Record<string, { availability: Record<string, string>; updatedAt: string }>;
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   incidences: Array<{
@@ -32,6 +37,10 @@ export class ClassScheduleProfileEntity {
     endTime: string;
     reason: string;
   }>;
+
+  /** Las materias no van aquí: viven en users.class_subjects. */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  teaching: { programs?: string[]; modalities?: string[]; venues?: string[] };
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

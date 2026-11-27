@@ -14,13 +14,13 @@ import {
   uniqueSorted,
   VENUE_OPTIONS,
   type ItemFilters,
-  type MaterialStatus,
   type Modality,
 } from "./materialMath";
 import ImportPanel from "./ImportPanel";
 import { EmptyState, formatNumber, KpiCard, NumberCell, Segmented, StatusPill, TextCell } from "./parts";
 import type { MaterialGroup, MaterialItem, MaterialPlanningData, Program } from "./types";
 import type { useMaterialPlanning } from "./useMaterialPlanning";
+import { sortByLabel } from "../../lib/sort";
 
 type Actions = Pick<
   ReturnType<typeof useMaterialPlanning>,
@@ -203,7 +203,7 @@ export default function ProjectionTab({ data, program, onProgramChange, filters,
             Curso
             <select value={filters.courseKey} onChange={(event) => set("courseKey", event.target.value)} className={selectClass}>
               <option value="">Todos</option>
-              {courses.map((course) => (
+              {sortByLabel(courses, (course) => course.label).map((course) => (
                 <option key={course.key} value={course.key}>
                   {course.label}
                 </option>
@@ -221,10 +221,12 @@ export default function ProjectionTab({ data, program, onProgramChange, filters,
               className={selectClass}
             >
               <option value="">Todos</option>
-              <option value="faltante">Con faltante</option>
-              {(Object.keys(STATUS_LABELS) as MaterialStatus[]).map((status) => (
+              {sortByLabel<[string, string]>(
+                [["faltante", "Con faltante"], ...Object.entries(STATUS_LABELS)],
+                ([, label]) => label,
+              ).map(([status, label]) => (
                 <option key={status} value={status}>
-                  {STATUS_LABELS[status]}
+                  {label}
                 </option>
               ))}
             </select>

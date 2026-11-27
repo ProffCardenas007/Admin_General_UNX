@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { LEAD_SPECIALTIES, specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { specialtyLabels, type LeadSpecialty } from "../../lib/specialties";
+import { useSpecialtyOptions } from "../../lib/useSpecialtyOptions";
 import {
   buildPortfolioRows,
   computeProjectKpis,
@@ -29,6 +30,7 @@ export default function ProjectsPanel({
 }) {
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatusFilter, setProjectStatusFilter] = useState<"" | ProjectRow["status"]>("");
+  const specialtyOptions = useSpecialtyOptions();
   const [projectSpecialtyFilter, setProjectSpecialtyFilter] = useState<"" | LeadSpecialty>("");
   const [projectRiskFilter, setProjectRiskFilter] = useState<"all" | RiskLevel>("all");
   const [projectsExpanded, setProjectsExpanded] = useState(false);
@@ -110,11 +112,11 @@ export default function ProjectsPanel({
                   className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 >
                   <option value="">Todos los estados</option>
-                  <option value="planned">planificado</option>
                   <option value="active">activo</option>
+                  <option value="cancelled">cancelado</option>
                   <option value="on_hold">en pausa</option>
                   <option value="done">finalizado</option>
-                  <option value="cancelled">cancelado</option>
+                  <option value="planned">planificado</option>
                 </select>
 
                 <select
@@ -124,9 +126,9 @@ export default function ProjectsPanel({
                   className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 >
                   <option value="">Todas las especialidades</option>
-                  {LEAD_SPECIALTIES.map((specialty) => (
-                    <option key={specialty} value={specialty}>
-                      {specialtyLabels[specialty]}
+                  {specialtyOptions.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.name}
                     </option>
                   ))}
                 </select>
@@ -138,9 +140,9 @@ export default function ProjectsPanel({
                   className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm"
                 >
                   <option value="all">Todos los riesgos</option>
-                  <option value="green">estable</option>
-                  <option value="amber">en seguimiento</option>
                   <option value="red">en riesgo</option>
+                  <option value="amber">en seguimiento</option>
+                  <option value="green">estable</option>
                 </select>
               </div>
 

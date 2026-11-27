@@ -15,6 +15,7 @@ import {
   type TeamOption,
   type UserOption,
 } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 /** Choices kept between openings so creating several similar tasks is quick. */
 export type TaskFormDefaults = {
@@ -180,7 +181,7 @@ export default function TaskCreateModal({
                 onChange={(event) => setTaskForm({ ...taskForm, projectId: event.target.value })}
               >
                 <option value="">Nombre del proyecto</option>
-                {projects.map((project) => (
+                {sortByLabel(projects, (project) => project.name).map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
                   </option>
@@ -212,7 +213,7 @@ export default function TaskCreateModal({
                   setTaskForm({ ...taskForm, activityType: event.target.value as TaskRow["activityType"] })
                 }
               >
-                {activityTypeOptions.map((option) => (
+                {sortByLabel(activityTypeOptions, (option) => option.label).map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -243,7 +244,7 @@ export default function TaskCreateModal({
                 onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}
               >
                 <option value="">Sin asignar — disponible para tomar</option>
-                {users.map((user) => (
+                {sortByLabel(users, (user) => user.fullName).map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.fullName} - {roleLabels[user.role] ?? user.role}
                   </option>
@@ -263,7 +264,7 @@ export default function TaskCreateModal({
                 }
               >
                 <option value="">Asignar por equipo (opcional)</option>
-                {teams.map((team) => (
+                {sortByLabel(teams, (team) => team.name).map((team) => (
                   <option key={team.id} value={team.id}>
                     {team.name} ({team.memberCount ?? 0})
                   </option>
@@ -279,7 +280,7 @@ export default function TaskCreateModal({
                     setTaskForm({ ...taskForm, status: event.target.value as TaskRow["status"] })
                   }
                 >
-                  {taskStatusOptions.map((option) => (
+                  {sortByLabel(taskStatusOptions, (option) => option.label).map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

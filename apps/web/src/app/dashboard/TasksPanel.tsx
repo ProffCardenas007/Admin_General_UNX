@@ -12,6 +12,7 @@ import {
   type UserOption,
   type WorkloadRow,
 } from "./types";
+import { sortByLabel } from "../../lib/sort";
 
 export default function TasksPanel({
   tasks,
@@ -111,7 +112,7 @@ export default function TasksPanel({
                   className="ui-control"
                 >
                   <option value="">Todos los proyectos</option>
-                  {taskProjectOptions.map((project) => (
+                  {sortByLabel(taskProjectOptions, (project) => project.name).map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
                     </option>
@@ -133,7 +134,7 @@ export default function TasksPanel({
                   className="ui-control"
                 >
                   <option value="">Todos los usuarios</option>
-                  {taskUserOptions.map((user) => (
+                  {sortByLabel(taskUserOptions, (user) => user.fullName).map((user) => (
                     <option key={user.id} value={user.id}>
                       {user.fullName}
                     </option>
